@@ -12,226 +12,229 @@
 //******************************************************************************
 
 
+//******************************************************************************
+// keyboarddll.cpp : Humanized Keyboard Input with Dwell & Flight Dynamics
+//******************************************************************************
+
 #ifndef VC_EXTRALEAN
-#define VC_EXTRALEAN		// Exclude rarely-used stuff from Windows headers
+#define VC_EXTRALEAN
 #endif
 
-// Modify the following defines if you have to target a platform prior to the ones specified below.
-// Refer to MSDN for the latest info on corresponding values for different platforms.
-#ifndef WINVER				// Allow use of features specific to Windows XP or later.
-#define WINVER 0x0501		// Change this to the appropriate value to target other versions of Windows.
+#ifndef WINVER
+#define WINVER 0x0501
 #endif
 
-#ifndef _WIN32_WINNT		// Allow use of features specific to Windows XP or later.                   
-#define _WIN32_WINNT 0x0501	// Change this to the appropriate value to target other versions of Windows.
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0501
 #endif						
 
-#ifndef _WIN32_WINDOWS		// Allow use of features specific to Windows 98 or later.
-#define _WIN32_WINDOWS 0x0410 // Change this to the appropriate value to target Windows Me or later.
+#ifndef _WIN32_WINDOWS
+#define _WIN32_WINDOWS 0x0410
 #endif
 
-#ifndef _WIN32_IE			// Allow use of features specific to IE 6.0 or later.
-#define _WIN32_IE 0x0600	// Change this to the appropriate value to target other versions of IE.
+#ifndef _WIN32_IE
+#define _WIN32_IE 0x0600
 #endif
 
 #include <windows.h>
 #include <math.h>
 #include <atlstr.h>
+#include <random>
+#include <chrono>
+#include <thread>
+#include <vector>
 #include "keyboarddll.h"
 
-const int Shift   = 1;
-const int Control = 2;
-const int Alt     = 4;
+// --- MOTOR DE ALEATORIEDADE (Mesmo padrão do mouse) ---
+std::mt19937 rng_kbd(std::chrono::steady_clock::now().time_since_epoch().count());
 
-void PlayKeyboardEvent(int vkey, int bscan)
-{
-	// This should hopefully fix the stuck control key problem.
-	keybd_event(VK_CONTROL, 0, (bscan & Control) ? 0 : KEYEVENTF_KEYUP, 0);
-	keybd_event(VK_SHIFT,   0, (bscan & Shift)   ? 0 : KEYEVENTF_KEYUP, 0);
-	keybd_event(VK_MENU,    0, (bscan & Alt)     ? 0 : KEYEVENTF_KEYUP, 0);
-
-	keybd_event(vkey,  bscan,  0, 0);
-	keybd_event(vkey,  bscan,  KEYEVENTF_KEYUP, 0);
-
-	if (bscan & Control)
-		keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0);
-	if (bscan & Shift)
-		keybd_event(VK_SHIFT,   0, KEYEVENTF_KEYUP, 0);
-	if (bscan & Alt)
-		keybd_event(VK_MENU,    0, KEYEVENTF_KEYUP, 0);
+// Helper: Gera um delay humano baseado em distribuição normal
+// mean: média de tempo (ms)
+// stddev: desvio padrão (variância)
+void HumanDelay(double mean, double stddev) {
+    std::normal_distribution<double> dist(mean, stddev);
+    double val = dist(rng_kbd);
+    if (val < 5.0) val = 5.0; // Mínimo físico
+    std::this_thread::sleep_for(std::chrono::milliseconds((int)val));
 }
 
+// Helper: Envia um evento de tecla usando SendInput (API Moderna)
+void SendInputKey(WORD vKey, bool keyUp) {
+    INPUT input = { 0 };
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = vKey;
+    input.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+// Funções de clique auxiliares (mantidas para compatibilidade interna do SendKey)
+const double RandomNormal(const double m, const double s) {
+    std::normal_distribution<double> distribution(m, s);
+    return distribution(rng_kbd);
+}
+
+const double RandomNormalScaled(const double scale, const double m, const double s) {
+    double res = -99;
+    while (res < -3.5 || res > 3.5) res = RandomNormal(m, s);
+    return (res / 3.5 * s + 1) * (scale / 2.0);
+}
+
+const void GetClickPoint(const int x, const int y, const int rx, const int ry, POINT *p) {
+    p->x = x + (int)(RandomNormalScaled(2 * rx, 0, 1) + 0.5) - (rx);
+    p->y = y + (int)(RandomNormalScaled(2 * ry, 0, 1) + 0.5) - (ry);
+}
+
+const POINT RandomizeClickLocation(const RECT rect) {
+    POINT p = { 0 };
+    GetClickPoint(rect.left + (rect.right - rect.left) / 2,
+        rect.top + (rect.bottom - rect.top) / 2,
+        (rect.right - rect.left) / 2,
+        (rect.bottom - rect.top) / 2,
+        &p);
+    return p;
+}
+
+// --- FUNÇÃO DE ENVIO DE STRING HUMANIZADA ---
 KEYBOARDDLL_API int SendString(const HWND hwnd, const RECT rect, const CString s, const bool use_comma)
 {
-	// Send each character of the string via PlayKeyboardEvent
-	char ch_str[100];
-	sprintf_s(ch_str, 100, "%s", s.GetString());
+    // Converte CString para standard string para facilitar
+    CString strCopy = s;
+    int len = strCopy.GetLength();
 
-	int	vkey = 0;
+    for (int i = 0; i < len; i++)
+    {
+        char ch = strCopy[i];
+        
+        // Ajuste de ponto/vírgula conforme solicitado
+        if (use_comma && ch == '.') ch = ',';
 
-	int i = 0, strlength = (int)strlen(ch_str);
-	short KeyScan;
-	for (int i=0; i<strlength; i++)
-	{
-		Sleep(20);
-		if (use_comma && ch_str[i]=='.')
-			ch_str[i] = ',';
-		KeyScan = VkKeyScan(ch_str[i]);
-		PlayKeyboardEvent(LOBYTE(KeyScan), HIBYTE(KeyScan));
-	}
-	Sleep(20);
-	return (int) true;
+        // Obtém o Virtual Key e o estado do Shift/Ctrl/Alt
+        short vkScan = VkKeyScan(ch);
+        WORD vKey = LOBYTE(vkScan);
+        WORD shiftState = HIBYTE(vkScan);
+
+        bool needShift = (shiftState & 1) != 0;
+        bool needCtrl  = (shiftState & 2) != 0;
+        bool needAlt   = (shiftState & 4) != 0;
+
+        // 1. Pressiona Modificadores (se necessário)
+        if (needShift) SendInputKey(VK_SHIFT, false);
+        if (needCtrl)  SendInputKey(VK_CONTROL, false);
+        if (needAlt)   SendInputKey(VK_MENU, false);
+
+        // Pequeno delay "físico" entre apertar shift e a tecla (10-30ms)
+        if (needShift || needCtrl || needAlt) HumanDelay(20, 5);
+
+        // 2. PRESSIONA A TECLA (KeyDown)
+        SendInputKey(vKey, false);
+
+        // --- DWELL TIME (O segredo da humanização) ---
+        // Tempo que o dedo fica segurando a tecla.
+        // Média: 75ms, Desvio: 20ms.
+        HumanDelay(75, 20);
+
+        // 3. SOLTA A TECLA (KeyUp)
+        SendInputKey(vKey, true);
+
+        // 4. Solta Modificadores (se necessário)
+        if (needShift) SendInputKey(VK_SHIFT, true);
+        if (needCtrl)  SendInputKey(VK_CONTROL, true);
+        if (needAlt)   SendInputKey(VK_MENU, true);
+
+        // --- FLIGHT TIME (Tempo de voo) ---
+        // Tempo para mover o dedo até a próxima tecla.
+        // Média: 110ms, Desvio: 30ms.
+        // Se for a última tecla, não precisa esperar tanto.
+        if (i < len - 1) {
+            HumanDelay(110, 30);
+        }
+    }
+    
+    return (int)true;
 }
 
+// --- FUNÇÃO DE ENVIO DE TECLA ÚNICA (ATALHOS) ---
 KEYBOARDDLL_API int SendKey(const HWND hwnd, const RECT rect, const char* vkey)
 {
-	INPUT			input[6];
+    // Lógica original de clicar para focar (Mantida mas suavizada os tempos)
+    // NOTA: O clique aqui usa Teleporte (Absolute). Se possível, use o mousedll para focar antes.
+    if (rect.left != -1 || rect.top != -1)
+    {
+        INPUT input[2] = { 0 };
+        POINT pt = RandomizeClickLocation(rect);
+        double fScreenWidth = ::GetSystemMetrics(SM_CXSCREEN) - 1;
+        double fScreenHeight = ::GetSystemMetrics(SM_CYSCREEN) - 1;
 
-	POINT pt = RandomizeClickLocation(rect);
-	double fScreenWidth = ::GetSystemMetrics( SM_CXSCREEN )-1;
-	double fScreenHeight = ::GetSystemMetrics( SM_CYSCREEN )-1;
+        ClientToScreen(hwnd, &pt);
+        double fx = pt.x * (65535.0f / fScreenWidth);
+        double fy = pt.y * (65535.0f / fScreenHeight);
 
-	// Translate click point to screen/mouse coords
-	ClientToScreen(hwnd, &pt);
-	double fx = pt.x*(65535.0f/fScreenWidth);
-	double fy = pt.y*(65535.0f/fScreenHeight);
+        // Clique Down
+        input[0].type = INPUT_MOUSE;
+        input[0].mi.dx = (LONG)fx;
+        input[0].mi.dy = (LONG)fy;
+        input[0].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN;
+        SendInput(1, &input[0], sizeof(INPUT));
 
-	// Set up the input structure
-	int input_count=0;
+        // Delay humano do clique (segurar o botão do mouse)
+        HumanDelay(60, 15);
 
-	// First click in the rect to select it, if rect is not passed in as {-1, -1, -1, -1}
-	if (rect.left!=-1 || rect.top!=-1 || rect.right!=-1 || rect.bottom!=-1)
-	{
-		ZeroMemory(&input[input_count],sizeof(INPUT));
-		input[input_count].type = INPUT_MOUSE;
-		input[input_count].mi.dx = (LONG) fx;
-		input[input_count].mi.dy = (LONG) fy;
-		input[input_count].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN;
-		input_count++;
-		
-		ZeroMemory(&input[input_count],sizeof(INPUT));
-		input[input_count].type = INPUT_MOUSE;
-		input[input_count].mi.dx = (LONG) fx;
-		input[input_count].mi.dy = (LONG) fy;
-		input[input_count].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP;
-		input_count++;
-	}
+        // Clique Up
+        input[1].type = INPUT_MOUSE;
+        input[1].mi.dx = (LONG)fx;
+        input[1].mi.dy = (LONG)fy;
+        input[1].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP;
+        SendInput(1, &input[1], sizeof(INPUT));
+        
+        // Delay para o Windows processar o foco antes de digitar
+        HumanDelay(100, 20);
+    }
 
-	// Add vkey to the input struct
-	if (vkey[0] == VK_CONTROL || vkey[0] == VK_SHIFT || vkey[0] == VK_MENU) {
-		ZeroMemory(&input[input_count], sizeof(INPUT));
-		input[input_count].type = INPUT_KEYBOARD;
-		input[input_count].ki.wVk = vkey[0];
-		input_count++;
+    // Set focus to target window (Backup logic)
+    SetFocus(hwnd);
+    SetForegroundWindow(hwnd);
+    SetActiveWindow(hwnd);
 
-		ZeroMemory(&input[input_count], sizeof(INPUT));
-		input[input_count].type = INPUT_KEYBOARD;
-		input[input_count].ki.wVk = vkey[1];
-		input_count++;
+    // Identifica se é tecla composta (ex: Ctrl+C)
+    // O OpenHoldem passa vkey[0] como modificador se vkey[1] existir? 
+    // Analisando código antigo: Se for Ctrl/Shift/Alt no vkey[0], ele assume combo com vkey[1].
+    
+    bool isCombo = (vkey[0] == VK_CONTROL || vkey[0] == VK_SHIFT || vkey[0] == VK_MENU);
 
-		ZeroMemory(&input[input_count], sizeof(INPUT));
-		input[input_count].type = INPUT_KEYBOARD;
-		input[input_count].ki.wVk = vkey[1];
-		input[input_count].ki.dwFlags = KEYEVENTF_KEYUP;
-		input_count++;
+    if (isCombo) {
+        // Pressiona Modificador
+        SendInputKey(vkey[0], false);
+        HumanDelay(30, 10);
+        
+        // Pressiona Tecla Principal
+        SendInputKey(vkey[1], false);
+        
+        // Segura ambas (Dwell Time)
+        HumanDelay(80, 20);
+        
+        // Solta Tecla Principal
+        SendInputKey(vkey[1], true);
+        HumanDelay(20, 10);
+        
+        // Solta Modificador
+        SendInputKey(vkey[0], true);
+    }
+    else {
+        // Tecla Simples
+        SendInputKey(vkey[0], false);
+        HumanDelay(75, 20); // Dwell Time
+        SendInputKey(vkey[0], true);
+    }
 
-		ZeroMemory(&input[input_count], sizeof(INPUT));
-		input[input_count].type = INPUT_KEYBOARD;
-		input[input_count].ki.wVk = vkey[0];
-		input[input_count].ki.dwFlags = KEYEVENTF_KEYUP;
-		input_count++;
-	}
-	else {
-
-		ZeroMemory(&input[input_count], sizeof(INPUT));
-		input[input_count].type = INPUT_KEYBOARD;
-		input[input_count].ki.wVk = vkey[0];
-		input_count++;
-
-		ZeroMemory(&input[input_count], sizeof(INPUT));
-		input[input_count].type = INPUT_KEYBOARD;
-		input[input_count].ki.wVk = vkey[0];
-		input[input_count].ki.dwFlags = KEYEVENTF_KEYUP;
-		input_count++;
-	}
-
-	// Set focus to target window
-	SetFocus(hwnd);
-	SetForegroundWindow(hwnd);
-	SetActiveWindow(hwnd);
-
-	// Send input
-	SendInput(input_count, input, sizeof(INPUT));
-  Sleep(20);
-	return (int) true;
+    return (int)true;
 }
 
 KEYBOARDDLL_API void ProcessMessage(const char *message, const void *param)
 {
-	if (message==NULL)  return;
+    if (message == NULL) return;
 }
 
-BOOL APIENTRY DllMain( HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)
 {
-	switch (ul_reason_for_call)
-	{
-	case DLL_PROCESS_ATTACH:
-		//MessageBox(NULL, "kbd", "1", 0);
-	case DLL_THREAD_ATTACH:
-	case DLL_THREAD_DETACH:
-	case DLL_PROCESS_DETACH:
-		break;
-	}
     return true;
-}
-
-const POINT RandomizeClickLocation(const RECT rect) 
-{
-	POINT p = {0};
-
-	// uniform random distribution, yuck!
-	//p.x = ((double) rand() / (double) RAND_MAX) * (rect.right-rect.left) + rect.left;
-	//p.y = ((double) rand() / (double) RAND_MAX) * (rect.bottom-rect.top) + rect.top;
-
-	// normal random distribution - much better!
-	GetClickPoint(rect.left + (rect.right-rect.left)/2, 
-				  rect.top + (rect.bottom-rect.top)/2, 
-				  (rect.right-rect.left)/2, 
-				  (rect.bottom-rect.top)/2, 
-				  &p);
-
-	return p;
-}
-
-const void GetClickPoint(const int x, const int y, const int rx, const int ry, POINT *p) 
-{
-	p->x = x + (int) (RandomNormalScaled(2*rx, 0, 1) + 0.5) - (rx);
-	p->y = y + (int) (RandomNormalScaled(2*ry, 0, 1) + 0.5) - (ry);
-}
-
-// random number - 0 -> scale, with normal distribution
-// ignore results outside 3.5 stds from the mean
-const double RandomNormalScaled(const double scale, const double m, const double s) 
-{
-	double res = -99;
-	while (res < -3.5 || res > 3.5) res = RandomNormal(m, s);
-	return (res / 3.5*s + 1) * (scale / 2.0);
-}
-
-const double RandomNormal(const double m, const double s) 
-{
-	/* mean m, standard deviation s */
-	double x1 = 0., x2 = 0., w = 0., y1 = 0., y2 = 0.;
-
-	do {
-		x1 = 2.0 * ((double) rand()/(double) RAND_MAX) - 1.0;
-		x2 = 2.0 * ((double) rand()/(double) RAND_MAX) - 1.0;
-		w = x1 * x1 + x2 * x2;
-	} while ( w >= 1.0 );
-
-	w = sqrt( (-2.0 * log( w ) ) / w );
-	y1 = x1 * w;
-	y2 = x2 * w;
-
-	return( m + y1 * s );
 }
