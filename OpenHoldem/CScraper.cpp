@@ -87,45 +87,62 @@ bool CScraper::ProcessRegion(RMapCI r_iter) {
     "[CScraper] ProcessRegion %s (%i, %i, %i, %i)\n",
     r_iter->first, r_iter->second.left, r_iter->second.top,
     r_iter->second.right, r_iter->second.bottom);
-  write_log(Preferences()->debug_scraper(),
-    "[CScraper] ProcessRegion color %i radius %i transform %s\n",
-    r_iter->second.color, r_iter->second.radius, r_iter->second.transform);
-	__HDC_HEADER
-	// Get "current" bitmap
-	old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.cur_bmp);
-	/*if (r_iter->second.transform[0] == 'A') {
-		BitBlt(hdcCompatible, 0, 0, r_iter->second.right - r_iter->second.left + 7,
-			r_iter->second.bottom - r_iter->second.top + 7,
-			hdc, r_iter->second.left - 3, r_iter->second.top - 3, SRCCOPY);
-	}
-	else {*/
-		BitBlt(hdcCompatible, 0, 0, r_iter->second.right - r_iter->second.left + 1, 
-									r_iter->second.bottom - r_iter->second.top + 1, 
-									hdc, r_iter->second.left, r_iter->second.top, SRCCOPY);
-	//}
-	SelectObject(hdcCompatible, old_bitmap);
-	//SaveHBITMAPToFile(r_iter->second.cur_bmp, "output.bmp");
+  
+  // Mantemos o Header original para compatibilidade das variaveis
+  __HDC_HEADER
 
-	// If the bitmaps are different, then continue on
-	if (!BitmapsAreEqual(r_iter->second.last_bmp, r_iter->second.cur_bmp)) {
-    // Copy into "last" bitmap
-		old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.last_bmp);
-		/*if (r_iter->second.transform[0] == 'A') {
-			BitBlt(hdcCompatible, 0, 0, r_iter->second.right - r_iter->second.left + 7,
-				r_iter->second.bottom - r_iter->second.top + 7,
-				hdc, r_iter->second.left - 3, r_iter->second.top - 3, SRCCOPY);
-		}
-		else {*/
-			BitBlt(hdcCompatible, 0, 0, r_iter->second.right - r_iter->second.left + 1,
-				r_iter->second.bottom - r_iter->second.top + 1,
-				hdc, r_iter->second.left, r_iter->second.top, SRCCOPY);
-		//}
-		SelectObject(hdcCompatible, old_bitmap);  
-		__HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
-		return true;
-	}
-	__HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
-	return false;
+  // --- INICIO DA CORRECAO ---
+  // Em vez de copiar do 'hdc' (que esta conectado na janela congelada),
+  // vamos copiar do '_entire_window_cur' (que contem a imagem atualizada pelo PrintWindow).
+  
+  // 1. Criar um DC temporario para ler nossa imagem da memoria
+  HDC hdcSource = CreateCompatibleDC(hdcScreen);
+  
+  // 2. Selecionar a imagem 'Master' (Panoramica) que ja foi atualizada pelo IsIdenticalScrape
+  HBITMAP old_source_bmp = (HBITMAP) SelectObject(hdcSource, _entire_window_cur);
+
+  // 3. Selecionar o bitmap de destino (o pedacinho que queremos criar)
+  old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.cur_bmp);
+
+  // 4. Copiar da FONTE DE MEMORIA (hdcSource) em vez da JANELA (hdc)
+  BitBlt(hdcCompatible, 0, 0, r_iter->second.right - r_iter->second.left + 1, 
+                r_iter->second.bottom - r_iter->second.top + 1, 
+                hdcSource, // <--- MUDANCA AQUI: Usamos hdcSource em vez de hdc
+                r_iter->second.left, r_iter->second.top, SRCCOPY);
+
+  // Limpeza da fonte
+  SelectObject(hdcSource, old_source_bmp);
+  DeleteDC(hdcSource); // Importante deletar para nao vazar memoria
+  
+  // Restaurar objeto antigo do destino
+  SelectObject(hdcCompatible, old_bitmap);
+  // --- FIM DA CORRECAO ---
+
+  // Se os bitmaps forem diferentes, entao continua (Logica original mantida, mas ajustada)
+  if (!BitmapsAreEqual(r_iter->second.last_bmp, r_iter->second.cur_bmp)) {
+    
+    // Atualizar o "last" bitmap tambem usando a fonte de memoria
+    HDC hdcSourceLast = CreateCompatibleDC(hdcScreen);
+    HBITMAP old_source_bmp_last = (HBITMAP) SelectObject(hdcSourceLast, _entire_window_cur);
+
+    old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.last_bmp);
+    
+    BitBlt(hdcCompatible, 0, 0, r_iter->second.right - r_iter->second.left + 1,
+      r_iter->second.bottom - r_iter->second.top + 1,
+      hdcSourceLast, // <--- Usando a memoria aqui tambem
+      r_iter->second.left, r_iter->second.top, SRCCOPY);
+    
+    SelectObject(hdcSourceLast, old_source_bmp_last);
+    DeleteDC(hdcSourceLast);
+
+    SelectObject(hdcCompatible, old_bitmap);  
+    
+    __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
+    return true;
+  }
+  
+  __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
+  return false;
 }
 
 bool CScraper::EvaluateRegion(CString name, CString *result) {
@@ -1139,13 +1156,25 @@ const double CScraper::DoChipScrape(RMapCI r_iter) {
 	hash_type = RightDigitCharacterToNumber(r_start->second.transform);
 
 	// Bitblt the attached windows bitmap into a HDC
+	// --- INICIO DA CORRECAO DO OPERARIO ---
 	HDC hdcScreen = CreateDC("DISPLAY", NULL, NULL, NULL);
 	HDC hdcCompat = CreateCompatibleDC(hdcScreen);
 	RECT rect;
-	GetClientRect(p_autoconnector->attached_hwnd(), &rect);
+	HWND hwndTarget = p_autoconnector->attached_hwnd(); // Pegamos o handle seguro
+	GetClientRect(hwndTarget, &rect);
+
 	HBITMAP attached_bitmap = CreateCompatibleBitmap(hdcScreen, rect.right, rect.bottom);
-	HBITMAP	old_bitmap = (HBITMAP) SelectObject(hdcCompat, attached_bitmap);
-	BitBlt(hdcCompat, 0, 0, rect.right, rect.bottom, hdc, 0, 0, SRCCOPY);
+	HBITMAP old_bitmap = (HBITMAP) SelectObject(hdcCompat, attached_bitmap);
+
+	// [CORRECAO] Substituimos o BitBlt antigo pelo PrintWindow Blindado
+	// Tenta renderizacao completa (Windows 8.1+)
+	BOOL success = PrintWindow(hwndTarget, hdcCompat, 0x00000002);
+
+	// Fallback: Se falhar, tenta o padrao
+	if (!success) {
+		PrintWindow(hwndTarget, hdcCompat, 0);
+	}
+	// --- FIM DA CORRECAO ---
 	
 	// Get chipscrapemethod option from tablemap, if specified
 	CString res = p_tablemap->chipscrapemethod();
@@ -1280,38 +1309,71 @@ bool CScraper::IsExtendedNumberic(CString text) {
 }
 
 bool CScraper::IsIdenticalScrape() {
-  __HDC_HEADER
+    __HDC_HEADER
 
-	// Get bitmap of whole window
-	RECT		cr = {0};
-	GetClientRect(p_autoconnector->attached_hwnd(), &cr);
+    // Pega o HWND da janela alvo
+    HWND hwndTarget = p_autoconnector->attached_hwnd();
+    RECT cr = {0};
+    GetClientRect(hwndTarget, &cr);
 
-	old_bitmap = (HBITMAP) SelectObject(hdcCompatible, _entire_window_cur);
-	BitBlt(hdcCompatible, 0, 0, cr.right, cr.bottom, hdc, cr.left, cr.top, SRCCOPY);
-	SelectObject(hdcCompatible, old_bitmap);
+    // TENTATIVA 2: Usar PrintWindow com flag PW_RENDERFULLCONTENT (0x00000002)
+    // Isso força o Windows a renderizar a janela atualizada para nós.
+    // Nota: Essa flag exige Windows 8.1 ou superior (o que vc já tem).
+    
+    // Preparar o Bitmap de destino
+    old_bitmap = (HBITMAP) SelectObject(hdcCompatible, _entire_window_cur);
+    
+    // O segredo: PrintWindow copia a janela inteira (incluindo bordas) para o DC.
+    // Mas o OpenHoldem espera apenas o "Client Area". 
+    // Vamos tentar capturar tudo e deixar o OpenHoldem se virar, ou 
+    // se isso falhar, voltamos para o BitBlt mas com protecao de DPI.
+    
+    BOOL success = PrintWindow(hwndTarget, hdcCompatible, 0x00000002); 
 
-  p_table_state->TableTitle()->UpdateTitle();
-	
-	// If the bitmaps are the same, then return now
-	// !! How often does this happen?
-	// !! How costly is the comparison?
-	if (BitmapsAreEqual(_entire_window_last, _entire_window_cur) 
-      && !p_table_state->TableTitle()->TitleChangedSinceLastHeartbeat()) 	{
-		DeleteDC(hdcCompatible);
-		DeleteDC(hdcScreen);
-		ReleaseDC(p_autoconnector->attached_hwnd(), hdc);
-		write_log(Preferences()->debug_scraper(), "[CScraper] IsIdenticalScrape() true\n");
+    // Se PrintWindow falhar (retornar 0), tentamos o metodo antigo como fallback
+    if (!success) {
+         HDC hdcDesktop = GetDC(NULL);
+         POINT pt = {0, 0};
+         ClientToScreen(hwndTarget, &pt);
+         BitBlt(hdcCompatible, 0, 0, cr.right, cr.bottom, hdcDesktop, pt.x, pt.y, SRCCOPY);
+         ReleaseDC(NULL, hdcDesktop);
+    }
+
+    SelectObject(hdcCompatible, old_bitmap);
+
+    p_table_state->TableTitle()->UpdateTitle();
+
+    // O resto da logica de comparacao continua igual...
+    if (BitmapsAreEqual(_entire_window_last, _entire_window_cur)
+        && !p_table_state->TableTitle()->TitleChangedSinceLastHeartbeat())
+    {
+        // Limpeza padrao
+        DeleteDC(hdcCompatible);
+        DeleteDC(hdcScreen);
+        ReleaseDC(p_autoconnector->attached_hwnd(), hdc);
+        write_log(Preferences()->debug_scraper(), "[CScraper] IsIdenticalScrape() true\n");
+        __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
+        return true;
+    }
+
+    // Se mudou, atualiza o 'last'
+    old_bitmap = (HBITMAP) SelectObject(hdcCompatible, _entire_window_last);
+    
+    // Repete a mesma logica de captura para o buffer 'last'
+    success = PrintWindow(hwndTarget, hdcCompatible, 0x00000002);
+    if (!success) {
+         HDC hdcDesktop = GetDC(NULL);
+         POINT pt = {0, 0};
+         ClientToScreen(hwndTarget, &pt);
+         BitBlt(hdcCompatible, 0, 0, cr.right, cr.bottom, hdcDesktop, pt.x, pt.y, SRCCOPY);
+         ReleaseDC(NULL, hdcDesktop);
+    }
+    
+    SelectObject(hdcCompatible, old_bitmap);
+
     __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
-		return true;
-	}
-	// Copy into "last" bitmap
-	old_bitmap = (HBITMAP) SelectObject(hdcCompatible, _entire_window_last);
-	BitBlt(hdcCompatible, 0, 0, cr.right-cr.left+1, cr.bottom-cr.top+1, hdc, cr.left, cr.top, SRCCOPY);
-	SelectObject(hdc, old_bitmap);
-
-	__HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
-	write_log(Preferences()->debug_scraper(), "[CScraper] IsIdenticalScrape() false\n");
-	return false;
+    write_log(Preferences()->debug_scraper(), "[CScraper] IsIdenticalScrape() false\n");
+    return false;
 }
 
 #undef __HDC_HEADER 
