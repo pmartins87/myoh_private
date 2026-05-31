@@ -1,4 +1,4 @@
-﻿//******************************************************************************
+//******************************************************************************
 //
 // This file is part of the OpenHoldem project
 //    Source code:           https://github.com/OpenHoldem/openholdembot/
@@ -40,16 +40,20 @@ TessBaseAPI* api2 = new TessBaseAPI;
 // Constructor and destructor
 //
 CAutoOcr::CAutoOcr() {
-	// New automatic OCR based on tesseract-ocr
-	// Load Tesseract text recognition network
-	if (api->Init("tessdata", "eng") == -1) {		// OEM_LSTM_ONLY
-		MessageBox(NULL, "Failed to load tessdata files.\nMake sure tessdata folder is present and/or datas are not corrupted.", "AutoOcr error", MB_OK);
-		return;
-	}
-	if (api2->Init("tessdata", "eng") == -1) {		// OEM_LSTM_ONLY
-		MessageBox(NULL, "Failed to load tessdata files.\nMake sure tessdata folder is present and/or datas are not corrupted.", "AutoOcr error", MB_OK);
-		return;
-	}
+    if (api->Init("tessdata", "eng") == -1) {
+        MessageBox(NULL, "Failed to load tessdata files.\nMake sure tessdata folder is present and/or datas are not corrupted.", "AutoOcr error", MB_OK);
+        return;
+    }
+    if (api2->Init("tessdata", "eng") == -1) {
+        MessageBox(NULL, "Failed to load tessdata files.\nMake sure tessdata folder is present and/or datas are not corrupted.", "AutoOcr error", MB_OK);
+        return;
+    }
+
+    api->SetPageSegMode(tesseract::PSM_SINGLE_LINE);
+    api2->SetPageSegMode(tesseract::PSM_SINGLE_LINE);
+
+    api->SetVariable("user_defined_dpi", "300");
+    api2->SetVariable("user_defined_dpi", "300");
 }
 
 CAutoOcr::~CAutoOcr() {
@@ -237,12 +241,20 @@ void CAutoOcr::process_ocr(Mat img_orig, RMapCI region, bool fast, bool second_p
 		else
 			ResultString = trim(api->GetUTF8Text()).c_str();
 	}
+	api->Clear();
+    api2->Clear();
 }
 
 CString CAutoOcr::get_ocr_result(Mat img_orig, RMapCI region, bool fast) {
 	// Return string value from image. "" when OCR failed
 	Mat img_resized, img_resized2;
-	ResultBoxes.clear(); ResultBoxes2.clear();
+
+	ResultBoxes.clear();
+	ResultBoxes2.clear();
+	ResultString = "";
+	ResultString2 = "";
+	bestRect = Rect();
+	bestRect2 = Rect();
 
 	if (region->second.transform == "A0") {
 		img_resized = prepareImage(img_orig, region, true);
