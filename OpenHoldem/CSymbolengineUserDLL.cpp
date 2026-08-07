@@ -163,6 +163,40 @@ EXE_IMPLEMENTS char* GetPlayerName(int chair) {
   return p_table_state->Player(chair)->name().GetBuffer();
 }
 
+// AOF Tracker v24 ------------------------------------------------------------
+// Expose exactly the card objects that CScraper already wrote into CTableState.
+// No second OCR and no card inference is performed in the user DLL.
+EXE_IMPLEMENTS int GetPlayerCardValue(int chair, int card_index) {
+  if (chair < 0 || chair > kLastChair) {
+    return CARD_NOCARD;
+  }
+  if (card_index < 0 || card_index >= kNumberOfCardsPerPlayerHoldEm) {
+    return CARD_NOCARD;
+  }
+  return p_table_state->Player(chair)->hole_cards(card_index)->GetValue();
+}
+
+EXE_IMPLEMENTS int GetPlayerCardRank(int chair, int card_index) {
+  if (chair < 0 || chair > kLastChair) {
+    return kUndefined;
+  }
+  if (card_index < 0 || card_index >= kNumberOfCardsPerPlayerHoldEm) {
+    return kUndefined;
+  }
+  return p_table_state->Player(chair)->hole_cards(card_index)->GetOpenHoldemRank();
+}
+
+EXE_IMPLEMENTS int GetPlayerCardSuit(int chair, int card_index) {
+  if (chair < 0 || chair > kLastChair) {
+    return kUndefined;
+  }
+  if (card_index < 0 || card_index >= kNumberOfCardsPerPlayerHoldEm) {
+    return kUndefined;
+  }
+  return p_table_state->Player(chair)->hole_cards(card_index)->GetSuit();
+}
+// ---------------------------------------------------------------------------
+
 EXE_IMPLEMENTS char* GetTableTitle() {
   return p_table_state->TableTitle()->PreprocessedTitle().GetBuffer();
 }
