@@ -32,6 +32,7 @@ CTableState::~CTableState() {
 
 void CTableState::Reset() {
   _s_limit_info.Reset();
+  _ofc_visual_observation.Reset();
   _ofc_state.Reset();
   for (int i=0; i<kNumberOfCommunityCards; ++i) {
     _common_cards[i].ClearValue();
@@ -101,6 +102,10 @@ int CTableState::NumberOfCommunityCards() {
     }
   }
   return result;
+}
+
+COFCVisualObservation *CTableState::OFCVisualObservation() {
+  return &_ofc_visual_observation;
 }
 
 COFCState *CTableState::OFCState() {
