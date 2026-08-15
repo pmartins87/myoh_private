@@ -1,0 +1,107 @@
+name: DeepOFC R10 placement planner build gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r10-planner-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-planner-behind-r9-guard:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Add planner compilation unit to OpenHoldem project
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+          if ($text -notmatch 'ClCompile Include="COFCActionPlanner\.cpp"') {
+            $needle = '    <ClCompile Include="COFCReconstructor.cpp">'
+            $idx = $text.IndexOf($needle)
+            if ($idx -lt 0) { throw 'Could not find COFCReconstructor.cpp project entry' }
+            $close = $text.IndexOf('    </ClCompile>', $idx)
+            if ($close -lt 0) { throw 'Could not find end of COFCReconstructor.cpp project entry' }
+            $close += '    </ClCompile>'.Length
+            $insert = $eol + '    <ClCompile Include="COFCActionPlanner.cpp" />'
+            $text = $text.Substring(0, $close) + $insert + $text.Substring($close)
+          }
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
+          Select-String -Path $path -Pattern 'COFC(Reconstructor|ActionPlanner)\.cpp'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Assert OpenHoldem link inputs
+        shell: pwsh
+        run: |
+          $required = @('Preferences.lib','globals.lib','pokertracker_query_definitions.lib','Reference User DLL.lib','window_functions.lib','string_functions.lib','debug.lib','GameStateValidation.lib','files.lib')
+          foreach ($name in $required) {
+            if (-not (Test-Path (Join-Path 'Release' $name))) { throw "Missing link input: $name" }
+          }
+
+      - name: Build OpenHoldem Release Win32 with OFC planner
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
+
+      - name: Assert planner remains non-executing and R9 guard remains hard
+        shell: pwsh
+        run: |
+          if (Select-String -Path 'OpenHoldem/COFCActionPlanner.cpp' -Pattern '_dll_mouse_drag_between' -Quiet) {
+            throw 'Planner unexpectedly sends mouse input'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
+            throw 'R9 hard read-only guard missing'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/OpenHoldem.cpp' -Pattern 'MouseDragBetweenRects' -Quiet)) {
+            throw 'Validated drag primitive loader missing'
+          }
+          Write-Host 'Planner compiles, mouse primitive remains uncalled, R9 live no-click guard remains hard.'
+
+      - name: Persist validated planner project entry only after gates pass
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $changed = git diff --name-only -- $path
+          if (-not $changed) { Write-Host 'Planner project entry already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $path
+          git commit -m 'DeepOFC R10: compile fail-closed placement planner'
+          git push origin HEAD:deepofc
