@@ -455,6 +455,13 @@ bool CAutoplayer::DoAllin(void) {
 }
 
 void CAutoplayer::DoAutoplayer(void) {
+  // DeepOFC R9 hard read-only guard. No popup, hopper, formula,
+  // mouse or keyboard action is allowed on a Joker Ultimate table yet.
+  if (p_tablemap->SupportsOFCJokerUltimate()) {
+    write_log(true, "[DeepOFC] R9 hard read-only guard: autoplayer suppressed\n");
+    action_sequence_needs_to_be_finished = false;
+    return;
+  }
 	write_log(Preferences()->debug_autoplayer(), "[AutoPlayer] Starting Autoplayer cadence...\n");
   CheckBringKeyboard();
   write_log(Preferences()->debug_autoplayer(), "[AutoPlayer] Number of visible buttons: %d (%s)\n", 

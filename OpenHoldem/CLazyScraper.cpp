@@ -83,6 +83,18 @@ void CLazyScraper::DoScrape() {
     return;
 	}
   _is_identical_scrape = false;
+  // DeepOFC R9 read-only scrape path: an explicit Joker Ultimate
+  // tablemap must never fall through to Hold'em hole/community/betting semantics.
+  if (p_tablemap->SupportsOFCJokerUltimate()) {
+    // Canonical reconstruction is added separately; until then never leave
+    // an old canonical OFC state live beside a new raw observation.
+    p_table_state->OFCState()->Reset();
+    if (!p_scraper->ScrapeOFCVisualObservation()) {
+      write_log(k_always_log_errors,
+        "[DeepOFC] R9 raw OFC scrape rejected; state remains invalid\n");
+    }
+    return;
+  }
 	p_scraper->ScrapeLimits();
 	if (NeedDealerChair()) { 
 		p_scraper->ScrapeDealer();
