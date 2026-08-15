@@ -19,6 +19,7 @@
 
 #include "Card.h"
 #include "COFCState.h"
+#include "COFCVisualObservation.h"
 #include "CPlayer.h"
 #include "CScrapedMoney.h"
 #include "CSpaceOptimizedGlobalObject.h"
@@ -47,8 +48,9 @@ class CTableState {
   Card *TurnCard();
   Card *RiverCard();
   int  NumberOfCommunityCards();
-  // Dedicated DeepOFC state. This is intentionally separate from legacy
-  // Hold'em hole/community card storage.
+  // DeepOFC keeps raw frame evidence and canonical strategic state separate.
+  // Neither object reuses legacy Hold'em hole/community card semantics.
+  COFCVisualObservation *OFCVisualObservation();
   COFCState *OFCState();
   // For CHandresetDetector
   bool ShowdownCardsVisible();
@@ -64,6 +66,7 @@ class CTableState {
  private:
   CPlayer _players[kNumberOfPlayerEntries];
   Card    _common_cards[kNumberOfCommunityCards];
+  COFCVisualObservation _ofc_visual_observation;
   COFCState _ofc_state;
   CScrapedMoney _pot[kMaxNumberOfPots];
  private:
