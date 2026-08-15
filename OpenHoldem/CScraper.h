@@ -88,6 +88,12 @@ class CScraper : public CSpaceOptimizedGlobalObject {
   // identity wins. `joker_id` receives 0 for non-Joker, 1/2 for JK1/JK2.
   int ScrapeOFCSlot(CString base_name, COFCCard *card,
     bool *is_back, int *joker_id);
+  // Fantasy is a different visual layout/state inside the same Joker Ultimate
+  // variant. It must never reuse the normal row/fan geometry by fallthrough.
+  // This function is reachable only after BOTH active-Fantasy detection and an
+  // explicit tablemap recognizer-authority gate. Until the native pixel
+  // recognizer is certified it remains fail-closed by construction.
+  bool ScrapeOFCFantasyVisualObservation(int player_count, int hero_chair);
  private:
 	// private functions and variables - not available via accessors or mutators
   CString ScrapeUPBalance(int chair, char scrape_u_else_p);
