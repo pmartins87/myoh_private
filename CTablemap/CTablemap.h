@@ -55,7 +55,7 @@ struct STablemapRegion {
 	int				radius;
 	HBITMAP			cur_bmp;
 	HBITMAP			last_bmp;
-	bool			use_default;
+	bool				use_default;
 	int				threshold;
 	bool			use_cropping;
 	int				crop_size;
@@ -190,6 +190,12 @@ public:
 	const CString titletext() { return GetTMSymbol("titletext"); }
 	const CString network() { return GetTMSymbol("network"); }
 	const CString chipscrapemethod() { return GetTMSymbol("chipscrapemethod"); }
+	// DeepOFC uses an explicit tablemap contract. We must never infer OFC from
+	// legacy chair/card counts or from a loose title match because doing so would
+	// activate incompatible state semantics on ordinary Hold'em tables.
+	const bool SupportsOFCJokerUltimate() {
+		return GetTMSymbol("ofc_variant").CompareNoCase("joker_ultimate") == 0;
+	}
 public:
 	const CString filename() { return _filename; }
 	const CString filepath() { return _filepath; }
@@ -239,7 +245,7 @@ private:
 	TPLMap		_tpl$; // indexed on name (as a CString)
 	TMap		_t$[k_max_number_of_font_groups_in_tablemap]; // indexed on hexmash (as a CString)
 	PMap		_p$[k_max_number_of_hash_groups_in_tablemap]; // indexed on "x<<16 | y" (as a uint32_t; x in high 16bits, y in low 16bits)
-	HMap		_h$[k_max_number_of_hash_groups_in_tablemap]; // indexed on hash (as a uint32_t)
+	HMap		_h$[k_max_number_of_hash_groups_in_tablemap]; // indexed on a uint32_t hash of: name+all pixels in RBGA hex format
 	IMap		_i$; // indexed on a uint32_t hash of: name+all pixels in RBGA hex format
 private:
 	// private functions and variables - not available via accessors or mutators
