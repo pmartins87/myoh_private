@@ -16,6 +16,18 @@ static bool DeepOFCRegionExists(const CString &name) {
   return p_tablemap->r$()->find(name) != p_tablemap->r$()->end();
 }
 
+static bool DeepOFCReadRegionRect(const CString &name, RECT *out) {
+  if (out == NULL) return false;
+  SetRectEmpty(out);
+  RMapCI it = p_tablemap->r$()->find(name);
+  if (it == p_tablemap->r$()->end()) return false;
+  out->left = static_cast<LONG>(it->second.left);
+  out->top = static_cast<LONG>(it->second.top);
+  out->right = static_cast<LONG>(it->second.right);
+  out->bottom = static_cast<LONG>(it->second.bottom);
+  return out->right > out->left && out->bottom > out->top;
+}
+
 int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
     bool *is_back, bool *is_joker) {
   if ((card == NULL) || (is_back == NULL) || (is_joker == NULL)) return -1;
@@ -231,7 +243,18 @@ bool CScraper::ScrapeOFCVisualObservation() {
     if (rc < 0) return false;
     if (back) return false;
     if (joker && !DeepOFCAssignFrameLocalJoker(&card, &joker_count)) return false;
-    if (rc > 0) obs->hero_loose_cards[obs->hero_loose_count++] = card;
+    if (rc > 0) {
+      const int loose_index = obs->hero_loose_count;
+      obs->hero_loose_cards[loose_index] = card;
+      COFCVisualCardSource *source = &obs->hero_loose_sources[loose_index];
+      RECT source_rect;
+      if (DeepOFCReadRegionRect(base + "drag", &source_rect)) {
+        source->valid = true;
+        source->card_value = card.value;
+        source->rect = source_rect;
+      }
+      ++obs->hero_loose_count;
+    }
   }
 
   for (int i = 0; i < kOFCMaxDiscards; ++i) {
