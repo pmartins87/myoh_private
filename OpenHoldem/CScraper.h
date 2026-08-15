@@ -18,6 +18,7 @@
 
 #include <stdint.h>
 #include "../CTablemap/CTablemap.h"
+#include "COFCState.h"
 #include "CSpaceOptimizedGlobalObject.h"
 
 #include <iostream>
@@ -66,6 +67,9 @@ class CScraper : public CSpaceOptimizedGlobalObject {
 	void ScrapeAllPlayerCards();
 	void ScrapeColourCodes();
 	void ScrapeMTTRegions();
+  // DeepOFC read-only path. This is deliberately separate from all legacy
+  // Hold'em player/common-card scraping.
+  bool ScrapeOFCVisualObservation();
  private:
 	void ScrapeSeated(int chair);
 	void ScrapeActive(int chair);
@@ -77,6 +81,9 @@ class CScraper : public CSpaceOptimizedGlobalObject {
 	int ScrapeNoCard(CString base_name);
  private:
 	int CardString2CardNumber(CString card);
+  int OFCString2CardNumber(CString card);
+  int ScrapeOFCAreaCards(CString area_name, COFCCard *cards,
+    int max_cards, int *hidden_back_count);
  private:
 	// private functions and variables - not available via accessors or mutators
   CString ScrapeUPBalance(int chair, char scrape_u_else_p);
@@ -113,5 +120,3 @@ class CScraper : public CSpaceOptimizedGlobalObject {
 extern CScraper *p_scraper;
 
 #endif // INC_CSCRAPER_H
-
-
