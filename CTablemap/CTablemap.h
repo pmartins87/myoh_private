@@ -72,7 +72,7 @@ struct STablemapFont {
 	char			ch;
 	int				x_count;
 	unsigned int	x[MAX_SINGLE_CHAR_WIDTH];
-	CString			hexmash;	// mashed up x[MAX_SINGLE_CHAR_WIDTH] for lookup purposes
+	CString				hexmash;	// mashed up x[MAX_SINGLE_CHAR_WIDTH] for lookup purposes
 };
 
 typedef std::pair<CString, STablemapFont> TPair;
@@ -196,6 +196,22 @@ public:
 	const bool SupportsOFCJokerUltimate() {
 		return GetTMSymbol("ofc_variant").CompareNoCase("joker_ultimate") == 0;
 	}
+	// DeepOFC runtime authority gates are intentionally centralized here. These
+	// are not feature-detection heuristics: a value of 1 is an explicit contract
+	// assertion by a validated tablemap package. Code may exist behind a gate
+	// while the production/replay draft keeps that gate at 0.
+	const bool OFCFantasyRecognizerCalibrated() {
+		return GetTMSymbol("ofc_fantasy_recognizer_calibrated", 0) == 1;
+	}
+	const bool OFCFantasy15GeometryMeasured() {
+		return GetTMSymbol("ofc_fantasy15_geometry_measured", 0) == 1;
+	}
+	const bool OFCDragTargetsCalibrated() {
+		return GetTMSymbol("ofc_drag_targets_calibrated", 0) == 1;
+	}
+	const bool OFCExecutorEnabled() {
+		return GetTMSymbol("ofc_executor_enabled", 0) == 1;
+	}
 public:
 	const CString filename() { return _filename; }
 	const CString filepath() { return _filepath; }
@@ -210,7 +226,7 @@ public:
 	const bool	s$_insert(const STablemapSymbol s) { ENT std::pair<SMapI, bool> r = _s$.insert(SPair(s.name, s)); return r.second; }
 	const bool	r$_insert(const STablemapRegion s) { ENT std::pair<RMapI, bool> r = _r$.insert(RPair(s.name, s)); return r.second; }
 	const bool	t$_insert(const int i, const STablemapFont s) { ENT if (i >= 0 && i<k_max_number_of_font_groups_in_tablemap) { std::pair<TMapI, bool> r = _t$[i].insert(TPair(s.hexmash, s)); return r.second; } else return false; }
-	const bool	p$_insert(const int i, const STablemapHashPoint s) { ENT if (i >= 0 && i<k_max_number_of_hash_groups_in_tablemap) { std::pair<PMapI, bool> r = _p$[i].insert(PPair(((s.x & 0xffff) << 16) | (s.y & 0xffff), s)); return r.second; } else return false; }
+	const bool	p$_insert(const int i, const STablemapHashPoint s) { ENT if (i >= 0 && i<k_max_number_of_hash_groups_in_tablemap) { std::map<int, int>::size_type c; std::pair<PMapI, bool> r = _p$[i].insert(PPair(((s.x & 0xffff) << 16) | (s.y & 0xffff), s)); return r.second; } else return false; }
 	const bool	h$_insert(const int i, const STablemapHashValue s) { ENT if (i >= 0 && i<k_max_number_of_hash_groups_in_tablemap) { std::pair<HMapI, bool> r = _h$[i].insert(HPair(s.hash, s)); return r.second; } else return false; }
 	const bool	i$_insert(const STablemapImage s);
 	const bool	tpl$_insert(const STablemapTemplate s) { ENT std::pair<TPLMapI, bool> r = _tpl$.insert(TPLPair(s.name, s)); return r.second; };
@@ -239,16 +255,15 @@ private:
 	bool		_valid;
 	CString	_filename;
 	CString	_filepath;
-	ZMap		_z$; // indexed on name (as a CString)
-	SMap		_s$; // indexed on name (as a CString)
-	RMap		_r$; // indexed on name (as a CString)
-	TPLMap		_tpl$; // indexed on name (as a CString)
-	TMap		_t$[k_max_number_of_font_groups_in_tablemap]; // indexed on hexmash (as a CString)
-	PMap		_p$[k_max_number_of_hash_groups_in_tablemap]; // indexed on "x<<16 | y" (as a uint32_t; x in high 16bits, y in low 16bits)
-	HMap		_h$[k_max_number_of_hash_groups_in_tablemap]; // indexed on a uint32_t hash of: name+all pixels in RBGA hex format
-	IMap		_i$; // indexed on a uint32_t hash of: name+all pixels in RBGA hex format
+	ZMap		_z$; // indexed on name
+	SMap		_s$; // indexed on name
+	RMap		_r$; // indexed on name
+	TPLMap		_tpl$; // indexed on name
+	TMap		_t$[k_max_number_of_font_groups_in_tablemap];
+	PMap		_p$[k_max_number_of_hash_groups_in_tablemap];
+	HMap		_h$[k_max_number_of_hash_groups_in_tablemap];
+	IMap		_i$;
 private:
-	// private functions and variables - not available via accessors or mutators
 	CCritSec m_critsec;
 	int      _nchairs;
 };
