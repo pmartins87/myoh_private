@@ -10,7 +10,7 @@
 // Purpose: Game-state object for the table
 //   (common cards and players)
 //   Actually it should be names CGameSate,
-//   but there already is a symbol engine with that name. 
+//   but there already is a symbol engine with that name.
 //
 //******************************************************************************
 
@@ -18,6 +18,7 @@
 #define INC_CTABLESTATE_H
 
 #include "Card.h"
+#include "COFCState.h"
 #include "CPlayer.h"
 #include "CScrapedMoney.h"
 #include "CSpaceOptimizedGlobalObject.h"
@@ -40,12 +41,15 @@ class CTableState {
  public:
   CPlayer *User();
   CPlayer *Player(int chair);
-  double	Pot(int sidepot_index);
+  double  Pot(int sidepot_index);
  public:
   Card *CommonCards(int common_card_index);
   Card *TurnCard();
   Card *RiverCard();
   int  NumberOfCommunityCards();
+  // Dedicated DeepOFC state. This is intentionally separate from legacy
+  // Hold'em hole/community card storage.
+  COFCState *OFCState();
   // For CHandresetDetector
   bool ShowdownCardsVisible();
   bool AntesVisible();
@@ -60,6 +64,7 @@ class CTableState {
  private:
   CPlayer _players[kNumberOfPlayerEntries];
   Card    _common_cards[kNumberOfCommunityCards];
+  COFCState _ofc_state;
   CScrapedMoney _pot[kMaxNumberOfPots];
  private:
   CTableTitle _table_title;
