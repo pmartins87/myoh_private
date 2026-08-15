@@ -111,12 +111,20 @@ $new = @(
 ) -join $eol
 
 if ($text -notmatch 'Fantasy recognizer authority is OFF') {
-  $pattern = '(?s)  if \(fantasy_active\) \{\s*write_log\(k_always_log_errors,\s*"\[DeepOFC\] Fantasy arrangement detected; normal geometry is forbidden until the 14-17-card Fantasy pixel path is certified\\n"\);\s*return false;\s*\}'
-  $updated = [regex]::Replace($text, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $new }, 1)
-  if ($updated -eq $text) {
-    throw 'Could not structurally replace old Fantasy fail-closed routing block'
-  }
-  $text = $updated
+  $methodAnchor = 'bool CScraper::ScrapeOFCVisualObservation() {'
+  $methodStart = $text.IndexOf($methodAnchor)
+  if ($methodStart -lt 0) { throw 'Could not locate ScrapeOFCVisualObservation for route replacement' }
+
+  $startAnchor = '  if (fantasy_active) {'
+  $start = $text.IndexOf($startAnchor, $methodStart)
+  if ($start -lt 0) { throw 'Could not locate Fantasy routing block inside ScrapeOFCVisualObservation' }
+
+  $nextAnchor = '  for (int p = 0; p < player_count; ++p) {'
+  $finish = $text.IndexOf($nextAnchor, $start)
+  if ($finish -lt 0) { throw 'Could not locate first normal player loop after Fantasy routing block' }
+  if ($finish -le $start) { throw 'Invalid Fantasy routing block bounds' }
+
+  $text = $text.Substring(0, $start) + $new + $eol + $eol + $text.Substring($finish)
 }
 
 [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
