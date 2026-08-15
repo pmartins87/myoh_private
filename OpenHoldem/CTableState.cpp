@@ -10,7 +10,7 @@
 // Purpose: Game-state object for the table
 //   (common cards and players)
 //   Actually it should be names CGameSate,
-//   but there already is a symbol engine with that name. 
+//   but there already is a symbol engine with that name.
 //
 //******************************************************************************
 
@@ -32,6 +32,7 @@ CTableState::~CTableState() {
 
 void CTableState::Reset() {
   _s_limit_info.Reset();
+  _ofc_state.Reset();
   for (int i=0; i<kNumberOfCommunityCards; ++i) {
     _common_cards[i].ClearValue();
   }
@@ -102,6 +103,10 @@ int CTableState::NumberOfCommunityCards() {
   return result;
 }
 
+COFCState *CTableState::OFCState() {
+  return &_ofc_state;
+}
+
 bool CTableState::ShowdownCardsVisible() {
   for (int i = 0; i < kMaxNumberOfPlayers; ++i) {
     if (&_players[i] == User()) {
@@ -134,4 +139,3 @@ bool CTableState::AntesVisible() {
 CTableTitle *CTableState::TableTitle() {
   return &_table_title;
 }
-
