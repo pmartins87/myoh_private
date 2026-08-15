@@ -30,6 +30,12 @@ MOUSEDLL_API int MouseClick(const HWND hwnd, const RECT rect, const MouseButton 
 typedef int(*mouse_clickdrag_t)(const HWND hwnd, const RECT rect, bool is_horizontal_drag);
 MOUSEDLL_API int MouseClickDrag(const HWND hwnd, const RECT rect, bool is_horizontal_drag);
 
+// DeepOFC R10: arbitrary card-source -> row-target drag. Both rectangles are
+// client coordinates. The caller remains responsible for semantic validation
+// of the resulting table state before issuing another action.
+typedef int(*mouse_dragbetween_t)(const HWND hwnd, const RECT source_rect, const RECT target_rect, const int duration_ms);
+MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect, const RECT target_rect, const int duration_ms);
+
 typedef void (*mouse_process_message_t)(const char *message, const void *param);
 MOUSEDLL_API void ProcessMessage(const char *message, const void *param);
 
