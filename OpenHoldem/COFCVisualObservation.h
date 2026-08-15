@@ -53,7 +53,14 @@ struct COFCVisualCardSource {
   void Reset() {
     valid = false;
     card_value = kOFCCardNoCard;
-    SetRectEmpty(&rect);
+    // Assign fields directly instead of calling SetRectEmpty(). The native
+    // COFCReconstructor self-test intentionally links as a tiny standalone
+    // console executable without User32; reset semantics do not need a WinAPI
+    // dependency merely to zero a POD rectangle.
+    rect.left = 0;
+    rect.top = 0;
+    rect.right = 0;
+    rect.bottom = 0;
   }
 };
 
