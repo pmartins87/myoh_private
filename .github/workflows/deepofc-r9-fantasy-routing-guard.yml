@@ -1,0 +1,139 @@
+name: DeepOFC R9 Fantasy routing guard
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-fantasy-routing-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-persist-fantasy-preroute:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Insert fail-closed Fantasy pre-routing guard
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/COFCScraper.cpp'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          if ($text -match 'Fantasy arrangement detected; normal geometry is forbidden') {
+            Write-Host 'Fantasy pre-routing guard already present.'
+            exit 0
+          }
+          $needle = '  obs->hero_chair = hero_chair;'
+          $idx = $text.IndexOf($needle)
+          if ($idx -lt 0) { throw 'Could not locate OFC Hero-chair initialization' }
+          $insertAt = $idx + $needle.Length
+          $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+          $insert = @(
+            '',
+            '',
+            '  // Route Fantasy BEFORE touching normal Hero row/incoming geometry.',
+            '  // Supplied replay evidence proves active Fantasy shifts/compresses the',
+            '  // Hero board and uses a curved 14..17-card fan. Reusing normal slots',
+            '  // could manufacture a plausible but false canonical normal-play state.',
+            '  bool fantasy_active = false;',
+            '  if (!DeepOFCReadMandatoryBoolean(this,',
+            '        "ofc_fantasy_active", &fantasy_active)) return false;',
+            '  if (fantasy_active) {',
+            '    write_log(k_always_log_errors,',
+            '      "[DeepOFC] Fantasy arrangement detected; normal geometry is forbidden until the 14-17-card Fantasy pixel path is certified\n");',
+            '    return false;',
+            '  }'
+          ) -join $eol
+          $text = $text.Substring(0, $insertAt) + $insert + $text.Substring($insertAt)
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
+
+      - name: Assert routing order is structurally safe
+        shell: pwsh
+        run: |
+          $text = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $detector = $text.IndexOf('"ofc_fantasy_active"')
+          $normalLoop = $text.IndexOf('for (int p = 0; p < player_count; ++p)')
+          $normalIncoming = $text.IndexOf('ofc_hero_in%d')
+          if ($detector -lt 0) { throw 'Fantasy-active detector missing' }
+          if ($normalLoop -lt 0 -or $normalIncoming -lt 0) { throw 'Normal scrape landmarks missing' }
+          if ($detector -gt $normalLoop -or $detector -gt $normalIncoming) {
+            throw 'Fantasy detector is evaluated too late; normal geometry could be touched first'
+          }
+          if (-not ($text.Contains('if (fantasy_active) {') -and
+                    $text.Contains('normal geometry is forbidden until the 14-17-card Fantasy pixel path is certified'))) {
+            throw 'Fantasy fail-closed branch missing'
+          }
+          Write-Host 'PASS: Fantasy is routed before all normal Hero geometry.'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Assert OpenHoldem link inputs
+        shell: pwsh
+        run: |
+          $required = @('Preferences.lib','globals.lib','pokertracker_query_definitions.lib','Reference User DLL.lib','window_functions.lib','string_functions.lib','debug.lib','GameStateValidation.lib','files.lib')
+          foreach ($name in $required) {
+            if (-not (Test-Path (Join-Path 'Release' $name))) { throw "Missing link input: $name" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
+
+      - name: Assert all live action guards remain hard
+        shell: pwsh
+        run: |
+          if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
+            throw 'R9 hard read-only guard missing'
+          }
+          if (Select-String -Path 'OpenHoldem/COFCScraper.cpp' -Pattern '_dll_mouse_' -Quiet) {
+            throw 'Scraper unexpectedly contains mouse execution path'
+          }
+          Write-Host 'PASS: Fantasy routing is read-only and the live no-click guard remains hard.'
+
+      - name: Persist only after full build PASS
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/COFCScraper.cpp'
+          $changed = git diff --name-only -- $path
+          if (-not $changed) { Write-Host 'Fantasy pre-routing guard already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $path
+          git commit -m 'DeepOFC R9: fail closed before normal scrape when Fantasy is active'
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase Fantasy routing patch onto current deepofc' }
+          git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated Fantasy routing patch' }
