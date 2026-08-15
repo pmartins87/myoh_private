@@ -35,16 +35,16 @@ jobs:
         shell: pwsh
         run: |
           $env:PYTHONPATH = (Resolve-Path '_deepofc_reference').Path
-          python - <<'PY'
+          @'
           import json
           from pathlib import Path
           import sys
-          sys.path.insert(0, str(Path('_deepofc_reference').resolve()))
+          root = Path('_deepofc_reference').resolve()
+          sys.path.insert(0, str(root))
           from tools.build_joker_hu_tablemap import build
           from deepofc.tablemap_verify import parse_tablemap, validate_hu_replay_tablemap
           from tests.test_tablemap import _source_tm
 
-          root = Path('_deepofc_reference')
           geometry = json.loads((root / 'tablemaps/joker_ultimate_hu_450x830_geometry_v1.json').read_text())
           calibration = json.loads((root / 'tablemaps/joker_ultimate_hu_450x830_calibration_v1.json').read_text())
           fantasy15 = json.loads((root / 'tablemaps/joker_ultimate_hu_fantasy15_450x830_geometry_v1.json').read_text())
@@ -61,7 +61,8 @@ jobs:
           for i in range(15):
               assert f'ofc_fantasy15_src{i:02d}' in audit.regions
           print('PASS: authoritative replay draft has measured Fantasy15 geometry but zero recognition/action authority')
-          PY
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "DeepOFC tablemap authority probe failed: $LASTEXITCODE" }
 
       - name: Apply isolated Fantasy recognizer router
         shell: pwsh
