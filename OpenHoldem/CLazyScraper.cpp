@@ -99,7 +99,11 @@ void CLazyScraper::DoScrape() {
     // Backwards transition to round 0 is an unambiguous new normal hand.
     // Fantasy gets a deliberately separate reconstruction path later.
     const COFCState *previous = previous_state.valid ? &previous_state : NULL;
-    if (raw->round_index == 0 && previous_state.valid && previous_state.round_index > 0) {
+    if (raw->round_index == 0 && previous_state.valid &&
+        (previous_state.round_index > 0 ||
+         (previous_state.hero_chair >= 0 &&
+          previous_state.hero_chair < previous_state.player_count &&
+          previous_state.players[previous_state.hero_chair].fantasy))) {
       previous = NULL;
     }
 

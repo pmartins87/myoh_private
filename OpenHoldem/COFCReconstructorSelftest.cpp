@@ -78,7 +78,7 @@ bool LoadReference(const string &path, vector<ReplayFrame> *frames, string *erro
   }
 
   string line;
-  if (!getline(in, line) || line != "DEEPOFC_OPENHOLDEM_REPLAY_REFERENCE|1") {
+  if (!getline(in, line) || (line != "DEEPOFC_OPENHOLDEM_REPLAY_REFERENCE|1" && line != "DEEPOFC_OPENHOLDEM_REPLAY_REFERENCE|2")) {
     *error = "bad replay reference header";
     return false;
   }
