@@ -171,6 +171,19 @@ bool CScraper::ScrapeOFCVisualObservation() {
   obs->player_count = player_count;
   obs->hero_chair = hero_chair;
 
+  // Route Fantasy BEFORE touching normal Hero row/incoming geometry.
+  // Supplied replay evidence proves active Fantasy shifts/compresses the
+  // Hero board and uses a curved 14..17-card fan. Reusing normal slots
+  // could manufacture a plausible but false canonical normal-play state.
+  bool fantasy_active = false;
+  if (!DeepOFCReadMandatoryBoolean(this,
+        "ofc_fantasy_active", &fantasy_active)) return false;
+  if (fantasy_active) {
+    write_log(k_always_log_errors,
+      "[DeepOFC] Fantasy arrangement detected; normal geometry is forbidden until the 14-17-card Fantasy pixel path is certified\n");
+    return false;
+  }
+
   int visible_joker_count = 0;
 
   for (int p = 0; p < player_count; ++p) {
