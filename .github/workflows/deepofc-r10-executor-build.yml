@@ -1,0 +1,125 @@
+name: DeepOFC R10 transactional executor build gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r10-executor-build.yml'
+      - 'OpenHoldem/COFCActionExecutor.cpp'
+      - 'OpenHoldem/COFCActionExecutor.h'
+      - 'OpenHoldem/CCasinoInterface.h'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-transaction-layer-with-live-path-disconnected:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Apply guarded casino drag wrapper
+        shell: pwsh
+        run: .github/scripts/deepofc_r10_casino_drag_integrate.ps1
+
+      - name: Add executor compilation unit to OpenHoldem project
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+          if ($text -notmatch 'ClCompile Include="COFCActionExecutor\.cpp"') {
+            $needle = '    <ClCompile Include="COFCActionPlanner.cpp" />'
+            if (-not $text.Contains($needle)) { throw 'Could not find COFCActionPlanner.cpp project entry' }
+            $text = $text.Replace($needle, $needle + $eol + '    <ClCompile Include="COFCActionExecutor.cpp" />')
+          }
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
+          Select-String -Path $path -Pattern 'COFCAction(Planner|Executor)\.cpp'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Assert OpenHoldem link inputs
+        shell: pwsh
+        run: |
+          $required = @('Preferences.lib','globals.lib','pokertracker_query_definitions.lib','Reference User DLL.lib','window_functions.lib','string_functions.lib','debug.lib','GameStateValidation.lib','files.lib')
+          foreach ($name in $required) {
+            if (-not (Test-Path (Join-Path 'Release' $name))) { throw "Missing link input: $name" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
+
+      - name: Assert transactional safety and live disconnection
+        shell: pwsh
+        run: |
+          $executor = 'OpenHoldem/COFCActionExecutor.cpp'
+          if (-not (Select-String -Path $executor -Pattern 'ofc_executor_enabled' -Quiet)) {
+            throw 'Executor explicit runtime-enable gate missing'
+          }
+          if (-not (Select-String -Path $executor -Pattern 'awaiting_verification_' -Quiet)) {
+            throw 'Executor mandatory verification phase missing'
+          }
+          if (-not (Select-String -Path $executor -Pattern 'VerifyPendingTransition' -Quiet)) {
+            throw 'Executor post-drag canonical verification missing'
+          }
+          if (-not (Select-String -Path $executor -Pattern 'DragRectToRect' -Quiet)) {
+            throw 'Executor is not connected to guarded casino drag wrapper'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/CCasinoInterface.cpp' -Pattern 'TableLostFocus\(\)' -Quiet)) {
+            throw 'Casino drag focus safety check missing'
+          }
+          if (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'COFCActionExecutor|BeginPlacement' -Quiet) {
+            throw 'Transactional executor was wired into live CAutoplayer before R9/R10 gates'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
+            throw 'R9 hard read-only guard missing'
+          }
+          Write-Host 'Executor compiles and is transactionally guarded, but remains disconnected from live CAutoplayer.'
+
+      - name: Persist validated wrapper/project entry only after PASS
+        shell: pwsh
+        run: |
+          $paths = @('OpenHoldem/CCasinoInterface.cpp','OpenHoldem/OpenHoldem.vcxproj')
+          $changed = git diff --name-only -- $paths
+          if (-not $changed) { Write-Host 'Executor integration already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $paths
+          git commit -m 'DeepOFC R10: persist transactional drag executor infrastructure'
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase validated executor integration onto current deepofc' }
+          git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated executor integration' }
