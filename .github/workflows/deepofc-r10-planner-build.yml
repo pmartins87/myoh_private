@@ -5,6 +5,9 @@ on:
     branches: [deepofc]
     paths:
       - '.github/workflows/deepofc-r10-planner-build.yml'
+      - 'OpenHoldem/COFCActionPlanner.cpp'
+      - 'OpenHoldem/COFCActionPlanner.h'
+      - 'OpenHoldem/OpenHoldem.vcxproj'
   workflow_dispatch:
 
 permissions:
@@ -80,11 +83,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
           if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
 
-      - name: Assert planner remains non-executing and R9 guard remains hard
+      - name: Assert planner stays fail-closed and non-executing
         shell: pwsh
         run: |
           if (Select-String -Path 'OpenHoldem/COFCActionPlanner.cpp' -Pattern '_dll_mouse_drag_between' -Quiet) {
             throw 'Planner unexpectedly sends mouse input'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/COFCActionPlanner.cpp' -Pattern 'ofc_drag_targets_calibrated' -Quiet)) {
+            throw 'Planner explicit drag-target calibration guard missing'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/COFCActionPlanner.cpp' -Pattern 'value == "1"' -Quiet)) {
+            throw 'Planner does not require exact calibration value 1'
           }
           if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
             throw 'R9 hard read-only guard missing'
@@ -92,7 +101,7 @@ jobs:
           if (-not (Select-String -Path 'OpenHoldem/OpenHoldem.cpp' -Pattern 'MouseDragBetweenRects' -Quiet)) {
             throw 'Validated drag primitive loader missing'
           }
-          Write-Host 'Planner compiles, mouse primitive remains uncalled, R9 live no-click guard remains hard.'
+          Write-Host 'Planner compiles, requires certified targets, sends no mouse input, and R9 live no-click guard remains hard.'
 
       - name: Persist validated planner project entry only after gates pass
         shell: pwsh
