@@ -1,0 +1,126 @@
+name: DeepOFC R9 Fantasy recognizer router
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-fantasy-router.yml'
+      - '.github/scripts/deepofc_r9_route_fantasy_recognizer.ps1'
+      - 'CTablemap/CTablemap.h'
+      - 'OpenHoldem/CScraper.h'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  route-and-build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout OpenHoldem deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Checkout authoritative DeepOFC
+        uses: actions/checkout@v4
+        with:
+          repository: pmartins87/DeepOFC
+          ref: main
+          path: _deepofc_reference
+          persist-credentials: false
+
+      - name: Prove authoritative replay draft keeps Fantasy runtime authority OFF
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Resolve-Path '_deepofc_reference').Path
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, str(Path('_deepofc_reference').resolve()))
+          from tools.build_joker_hu_tablemap import build
+          from deepofc.tablemap_verify import parse_tablemap, validate_hu_replay_tablemap
+          from tests.test_tablemap import _source_tm
+
+          root = Path('_deepofc_reference')
+          geometry = json.loads((root / 'tablemaps/joker_ultimate_hu_450x830_geometry_v1.json').read_text())
+          calibration = json.loads((root / 'tablemaps/joker_ultimate_hu_450x830_calibration_v1.json').read_text())
+          fantasy15 = json.loads((root / 'tablemaps/joker_ultimate_hu_fantasy15_450x830_geometry_v1.json').read_text())
+          text = build(_source_tm(), geometry, calibration, fantasy15)
+          errors = validate_hu_replay_tablemap(text)
+          if errors:
+              raise SystemExit('; '.join(errors))
+          audit = parse_tablemap(text)
+          assert audit.symbols['ofc_variant'] == 'joker_ultimate'
+          assert audit.symbols['ofc_fantasy15_geometry_measured'] == '1'
+          assert audit.symbols['ofc_fantasy_recognizer_calibrated'] == '0'
+          assert audit.symbols['ofc_drag_targets_calibrated'] == '0'
+          assert audit.symbols['ofc_executor_enabled'] == '0'
+          for i in range(15):
+              assert f'ofc_fantasy15_src{i:02d}' in audit.regions
+          print('PASS: authoritative replay draft has measured Fantasy15 geometry but zero recognition/action authority')
+          PY
+
+      - name: Apply isolated Fantasy recognizer router
+        shell: pwsh
+        run: .github/scripts/deepofc_r9_route_fantasy_recognizer.ps1
+
+      - name: Assert dual authority and no-click invariants in source
+        shell: pwsh
+        run: |
+          $cpp = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $tm = Get-Content -Raw 'CTablemap/CTablemap.h'
+          $auto = Get-Content -Raw 'OpenHoldem/CAutoplayer.cpp'
+          if ($cpp -notmatch '#define DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED 0') { throw 'native Fantasy capability is not hard-off' }
+          if ($cpp -notmatch 'OFCFantasyRecognizerCalibrated\(\)') { throw 'tablemap Fantasy recognizer gate missing from scraper' }
+          if ($cpp -notmatch 'ScrapeOFCFantasyVisualObservation\(player_count, hero_chair\)') { throw 'isolated Fantasy router missing' }
+          if ($cpp -notmatch 'normal geometry is forbidden and Fantasy recognizer authority is OFF') { throw 'fail-closed Fantasy route missing' }
+          if ($tm -notmatch 'ofc_fantasy_recognizer_calibrated') { throw 'central tablemap recognizer gate missing' }
+          if ($tm -notmatch 'ofc_drag_targets_calibrated') { throw 'central drag gate missing' }
+          if ($tm -notmatch 'ofc_executor_enabled') { throw 'central executor gate missing' }
+          if ($auto -notmatch 'DeepOFC R9 hard read-only guard') { throw 'hard R9 no-click guard missing' }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+
+      - name: Persist router only after all gates pass
+        shell: pwsh
+        run: |
+          $paths = @('OpenHoldem/COFCScraper.cpp')
+          $changed = git diff --name-only -- $paths
+          if (-not $changed) { Write-Host 'Router already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $paths
+          git commit -m 'DeepOFC R9: persist fail-closed Fantasy recognizer router'
+          git push origin HEAD:deepofc
