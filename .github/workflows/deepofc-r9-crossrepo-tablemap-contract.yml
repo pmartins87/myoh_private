@@ -37,21 +37,30 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Generate replay draft and compare persistent Joker interface
+      - name: Generate real-input replay draft and compare runtime interface
         shell: bash
         run: |
           cd deepofc
           python - <<'PY'
+          import json
           from pathlib import Path
           from tools.build_joker_hu_tablemap import build
           from deepofc.tablemap_verify import parse_tablemap, validate_hu_replay_tablemap
-          from tests.test_tablemap import _source_tm, _geometry, _calibration
+          from tests.test_tablemap import _source_tm
 
-          text = build(_source_tm(), _geometry(), _calibration())
+          geometry = json.loads(Path('tablemaps/joker_ultimate_hu_450x830_geometry_v1.json').read_text(encoding='utf-8'))
+          calibration = json.loads(Path('tablemaps/joker_ultimate_hu_450x830_calibration_v1.json').read_text(encoding='utf-8'))
+          text = build(_source_tm(), geometry, calibration)
           errors = validate_hu_replay_tablemap(text)
           if errors:
-              raise SystemExit('DeepOFC generated tablemap failed its own verifier: ' + '; '.join(errors))
+              raise SystemExit('DeepOFC real-input generated tablemap failed its verifier: ' + '; '.join(errors))
           audit = parse_tablemap(text)
+
+          if 'ofc_fantasy_active' not in audit.regions:
+              raise SystemExit('generated tablemap lacks mandatory Fantasy pre-routing detector')
+          fantasy = calibration.get('fantasy_active') or {}
+          if fantasy.get('point') != [225, 760] or str(fantasy.get('rgb', '')).lower() != '874c00':
+              raise SystemExit(f'unexpected replay Fantasy detector calibration: {fantasy!r}')
 
           sample_bases = (
               'ofc_p0_top0',
@@ -75,14 +84,22 @@ jobs:
               'int *joker_id',
               'kOFCCardJoker1',
               'kOFCCardJoker2',
+              '"ofc_fantasy_active"',
+              'Fantasy arrangement detected; normal geometry is forbidden',
           )
           missing = [token for token in required_cpp if token not in cpp and token not in header]
           if missing:
-              raise SystemExit('C++ scraper persistent-Joker contract missing: ' + ', '.join(missing))
+              raise SystemExit('C++ OFC contract missing: ' + ', '.join(missing))
           if 'bool *is_joker' in cpp or 'bool *is_joker' in header:
               raise SystemExit('legacy frame-local is_joker scraper contract returned')
 
-          print('PASS: DeepOFC builder/verifier and OpenHoldem scraper agree on joker1/joker2')
+          detector = cpp.index('"ofc_fantasy_active"')
+          normal_rows = cpp.index('for (int p = 0; p < player_count; ++p)')
+          normal_incoming = cpp.index('ofc_hero_in%d')
+          if detector > normal_rows or detector > normal_incoming:
+              raise SystemExit('Fantasy routing detector occurs after normal geometry')
+
+          print('PASS: real DeepOFC inputs and OpenHoldem scraper agree on Fantasy pre-routing + joker1/joker2')
           PY
 
       - name: Assert replay draft remains non-actionable
@@ -91,4 +108,8 @@ jobs:
           grep -q '"ofc_drag_targets_calibrated": "0"' deepofc/tools/build_joker_hu_tablemap.py
           grep -q '"ofc_executor_enabled": "0"' deepofc/tools/build_joker_hu_tablemap.py
           grep -q 'DeepOFC R9 hard read-only guard' oh/OpenHoldem/CAutoplayer.cpp
+          if grep -q '_dll_mouse_' oh/OpenHoldem/COFCScraper.cpp; then
+            echo 'ERROR: scraper contains mouse execution path'
+            exit 1
+          fi
           echo 'PASS: cross-repo contract remains read-only'
