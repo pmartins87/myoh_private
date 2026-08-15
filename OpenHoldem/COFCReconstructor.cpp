@@ -7,7 +7,9 @@
 //
 //******************************************************************************
 
+#ifndef DEEPOFC_RECONSTRUCTOR_STANDALONE
 #include "StdAfx.h"
+#endif
 #include "COFCReconstructor.h"
 
 #include <algorithm>
@@ -250,7 +252,8 @@ void SwapJokersInObservation(COFCVisualObservation *observation) {
 
 bool ObservationContainsHeroCardAnywhere(const COFCVisualObservation &obs, int value) {
   const COFCPlayerBoard &visual = obs.players[obs.hero_chair].visual_board;
-  if (KnownBoardSet(visual).find(value) != KnownBoardSet(visual).end()) return true;
+  set<int> visual_cards = KnownBoardSet(visual);
+  if (visual_cards.find(value) != visual_cards.end()) return true;
   for (int i = 0; i < obs.hero_loose_count; ++i) {
     if (obs.hero_loose_cards[i].IsKnownPhysicalCard() && obs.hero_loose_cards[i].value == value) return true;
   }

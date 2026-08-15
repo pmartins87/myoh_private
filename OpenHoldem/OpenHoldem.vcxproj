@@ -398,6 +398,9 @@
     <ClCompile Include="CLazyScraper.cpp" />
     <ClCompile Include="CScraper.cpp" />
     <ClCompile Include="COFCScraper.cpp" />
+    <ClCompile Include="COFCReconstructor.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="CardFunctions.cpp" />
     <ClCompile Include="CStringHashtableTemplate.cpp" />
     <ClCompile Include="CStringMatch.cpp" />

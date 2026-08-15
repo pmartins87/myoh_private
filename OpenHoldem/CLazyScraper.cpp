@@ -19,6 +19,7 @@
 #include "CEngineContainer.h"
 #include "CHandresetDetector.h"
 
+#include "COFCReconstructor.h"
 #include "CScraper.h"
 #include "CSymbolEngineActiveDealtPlaying.h"
 #include "CSymbolEngineHistory.h"
@@ -83,16 +84,39 @@ void CLazyScraper::DoScrape() {
     return;
 	}
   _is_identical_scrape = false;
-  // DeepOFC R9 read-only scrape path: an explicit Joker Ultimate
-  // tablemap must never fall through to Hold'em hole/community/betting semantics.
+  // DeepOFC R9 canonical reconstruction path. Joker Ultimate never falls
+  // through to legacy Hold'em hole/community/betting semantics.
   if (p_tablemap->SupportsOFCJokerUltimate()) {
-    // Canonical reconstruction is added separately; until then never leave
-    // an old canonical OFC state live beside a new raw observation.
-    p_table_state->OFCState()->Reset();
+    COFCState previous_state = *p_table_state->OFCState();
     if (!p_scraper->ScrapeOFCVisualObservation()) {
+      p_table_state->OFCState()->Reset();
       write_log(k_always_log_errors,
-        "[DeepOFC] R9 raw OFC scrape rejected; state remains invalid\n");
+        "[DeepOFC] R9 raw OFC scrape rejected; canonical state invalid\n");
+      return;
     }
+
+    const COFCVisualObservation *raw = p_table_state->OFCVisualObservation();
+    // Backwards transition to round 0 is an unambiguous new normal hand.
+    // Fantasy gets a deliberately separate reconstruction path later.
+    const COFCState *previous = previous_state.valid ? &previous_state : NULL;
+    if (raw->round_index == 0 && previous_state.valid && previous_state.round_index > 0) {
+      previous = NULL;
+    }
+
+    COFCState rebuilt;
+    std::string reconstruction_error;
+    if (!COFCReconstructor::Reconstruct(
+          *raw, previous, &rebuilt, &reconstruction_error)) {
+      p_table_state->OFCState()->Reset();
+      write_log(k_always_log_errors,
+        "[DeepOFC] canonical reconstruction rejected: %s\n",
+        reconstruction_error.c_str());
+      return;
+    }
+
+    *p_table_state->OFCState() = rebuilt;
+    std::string snapshot = COFCReconstructor::DiagnosticSnapshot(rebuilt);
+    write_log(true, "[DeepOFC SNAPSHOT v1] %s\n", snapshot.c_str());
     return;
   }
 	p_scraper->ScrapeLimits();
