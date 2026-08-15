@@ -12,8 +12,8 @@ permissions:
 
 jobs:
   build-and-persist-project-entry:
-    # windows-2022 is intentional: the OpenHoldem project targets v143 and
-    # GitHub's image includes the VC ATL/MFC component required by this tree.
+    # windows-2022 is intentional: the OpenHoldem tree targets v143 and this
+    # image contains the ATL/MFC component required by the native projects.
     runs-on: windows-2022
     steps:
       - name: Checkout deepofc
@@ -49,12 +49,55 @@ jobs:
           if (-not $vs) { throw 'VC ATL/MFC component not found on runner' }
           Write-Host "ATL/MFC Visual Studio installation: $vs"
 
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            Write-Host "=== BUILD $project ==="
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+          Write-Host '=== ROOT RELEASE LIBRARIES ==='
+          Get-ChildItem -Path (Join-Path $root 'Release') -Filter '*.lib' | Sort-Object Name | ForEach-Object { Write-Host $_.Name }
+
+      - name: Assert OpenHoldem link inputs
+        shell: pwsh
+        run: |
+          $required = @(
+            'Preferences.lib',
+            'globals.lib',
+            'pokertracker_query_definitions.lib',
+            'Reference User DLL.lib',
+            'window_functions.lib',
+            'string_functions.lib',
+            'debug.lib',
+            'GameStateValidation.lib',
+            'files.lib'
+          )
+          foreach ($name in $required) {
+            $path = Join-Path 'Release' $name
+            if (-not (Test-Path $path)) { throw "Missing required OpenHoldem link input: $path" }
+            Write-Host "FOUND $path"
+          }
+
       - name: Build OpenHoldem Release Win32
         shell: pwsh
         run: |
-          # Build the actual OpenHoldem project and its project references, not
-          # unrelated legacy C# utilities in the full solution that target .NET 4.5.
-          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 /p:BuildProjectReferences=true /v:minimal
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
 
       - name: Persist project entry only after successful build
         shell: pwsh
