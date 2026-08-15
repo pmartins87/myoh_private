@@ -74,6 +74,7 @@ struct COFCPlayerState {
   bool fantasy;
   bool sitting_out;
   int hidden_discard_count;
+  int hidden_incoming_count;
   COFCPlayerBoard board;
 
   void Reset() {
@@ -82,6 +83,7 @@ struct COFCPlayerState {
     fantasy = false;
     sitting_out = false;
     hidden_discard_count = 0;
+    hidden_incoming_count = 0;
     board.Reset();
   }
 };
