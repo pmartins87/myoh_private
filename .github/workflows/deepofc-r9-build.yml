@@ -1,0 +1,58 @@
+name: DeepOFC R9 Windows build gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-persist-project-entry:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Inject COFCScraper compilation unit for the build gate
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          if ($text -notmatch 'ClCompile Include="COFCScraper\.cpp"') {
+            $needle = '    <ClCompile Include="CScraper.cpp" />'
+            if (-not $text.Contains($needle)) {
+              throw "Could not find CScraper.cpp project entry"
+            }
+            $replacement = $needle + "`r`n" + '    <ClCompile Include="COFCScraper.cpp" />'
+            $text = $text.Replace($needle, $replacement)
+            [System.IO.File]::WriteAllText((Resolve-Path $path), $text, (New-Object System.Text.UTF8Encoding($false)))
+          }
+          Select-String -Path $path -Pattern 'COFCScraper.cpp'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release Win32
+        shell: pwsh
+        run: |
+          msbuild OpenHoldem.sln /m /t:Build /p:Configuration=Release /p:Platform=Win32 /v:minimal
+
+      - name: Persist project entry only after successful build
+        shell: pwsh
+        run: |
+          if (git diff --quiet -- OpenHoldem/OpenHoldem.vcxproj) {
+            Write-Host 'Project entry already persisted; nothing to commit.'
+            exit 0
+          }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add OpenHoldem/OpenHoldem.vcxproj
+          git commit -m 'DeepOFC R9: compile COFCScraper in OpenHoldem project'
+          git push origin HEAD:deepofc
