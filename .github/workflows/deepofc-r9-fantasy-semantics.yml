@@ -1,0 +1,100 @@
+name: DeepOFC R9 Fantasy semantic gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-fantasy-semantics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fantasy-cross-language-and-build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout OpenHoldem deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Apply Fantasy semantic patch
+        shell: pwsh
+        run: .github/scripts/deepofc_r9_fantasy_semantics.ps1
+
+      - name: Checkout authoritative DeepOFC reference
+        uses: actions/checkout@v4
+        with:
+          repository: pmartins87/DeepOFC
+          ref: main
+          path: _deepofc_reference
+          persist-credentials: false
+
+      - name: Export normal plus real Fantasy52-53 reference
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Resolve-Path '_deepofc_reference').Path
+          python _deepofc_reference/tools/export_openholdem_replay_reference.py --out _deepofc_reference/openholdem_replay_reference_v2.txt
+          Select-String -Path _deepofc_reference/openholdem_replay_reference_v2.txt -Pattern 'fantasy_frame000052|fantasy_frame000053'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run native cross-language reconstructor gate
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          if (-not $vs) { throw 'Visual Studio installation not found' }
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCReconstructorSelftest.cpp /Fe:COFCReconstructorSelftest.exe && COFCReconstructorSelftest.exe _deepofc_reference\openholdem_replay_reference_v2.txt'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Native Fantasy cross-language gate failed: $LASTEXITCODE" }
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+
+      - name: Assert runtime remains fail-closed and no-click
+        shell: pwsh
+        run: |
+          if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) { throw 'R9 hard no-click guard missing' }
+          if (-not (Select-String -Path 'OpenHoldem/COFCScraper.cpp' -Pattern 'Fantasy arrangement detected; normal geometry is forbidden' -Quiet)) { throw 'Fantasy pixel path unexpectedly activated before recognizer certification' }
+          if (Select-String -Path 'OpenHoldem/COFCReconstructor.cpp' -Pattern 'NormalizeJokerOccurrenceLabels\(&observation' -Quiet) { throw 'Obsolete Joker occurrence normalization still called' }
+
+      - name: Persist only after all gates pass
+        shell: pwsh
+        run: |
+          $paths = @('OpenHoldem/COFCReconstructor.cpp','OpenHoldem/COFCReconstructorSelftest.cpp')
+          $changed = git diff --name-only -- $paths
+          if (-not $changed) { Write-Host 'Native Fantasy semantics already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $paths
+          git commit -m 'DeepOFC R9: persist real Fantasy semantic reconstruction'
+          git push origin HEAD:deepofc
