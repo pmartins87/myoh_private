@@ -5,6 +5,8 @@ on:
     branches: [deepofc]
     paths:
       - '.github/workflows/deepofc-r9-fantasy-semantics.yml'
+      - '.github/scripts/deepofc_r9_fantasy_semantics.ps1'
+      - 'OpenHoldem/COFCVisualObservation.h'
   workflow_dispatch:
 
 permissions:
