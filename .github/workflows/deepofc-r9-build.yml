@@ -12,8 +12,6 @@ permissions:
 
 jobs:
   build-and-persist-project-entry:
-    # windows-2022 is intentional: the OpenHoldem tree targets v143 and this
-    # image contains the ATL/MFC component required by the native projects.
     runs-on: windows-2022
     steps:
       - name: Checkout deepofc
@@ -22,88 +20,98 @@ jobs:
           ref: deepofc
           fetch-depth: 0
 
-      - name: Ensure COFCScraper compilation unit is in the project
+      - name: Ensure DeepOFC compilation units are in the project
         shell: pwsh
         run: |
           $path = 'OpenHoldem/OpenHoldem.vcxproj'
           $text = Get-Content -Raw -Encoding UTF8 $path
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+
           if ($text -notmatch 'ClCompile Include="COFCScraper\.cpp"') {
             $needle = '    <ClCompile Include="CScraper.cpp" />'
-            if (-not $text.Contains($needle)) {
-              throw "Could not find CScraper.cpp project entry"
-            }
-            $replacement = $needle + "`r`n" + '    <ClCompile Include="COFCScraper.cpp" />'
-            $text = $text.Replace($needle, $replacement)
-            [System.IO.File]::WriteAllText((Resolve-Path $path), $text, (New-Object System.Text.UTF8Encoding($false)))
+            if (-not $text.Contains($needle)) { throw 'Could not find CScraper.cpp project entry' }
+            $text = $text.Replace($needle, $needle + "`r`n" + '    <ClCompile Include="COFCScraper.cpp" />')
           }
-          Select-String -Path $path -Pattern 'COFCScraper.cpp'
+          if ($text -notmatch 'ClCompile Include="COFCReconstructor\.cpp"') {
+            $needle = '    <ClCompile Include="COFCScraper.cpp" />'
+            if (-not $text.Contains($needle)) { throw 'Could not find COFCScraper.cpp project entry' }
+            $text = $text.Replace($needle, $needle + "`r`n" + '    <ClCompile Include="COFCReconstructor.cpp" />')
+          }
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
+          Select-String -Path $path -Pattern 'COFC(Scraper|Reconstructor)\.cpp'
 
-      - name: Inject R9 isolated heartbeat and hard read-only guard
+      - name: Apply canonical reconstruction integration
         shell: pwsh
         run: |
           $utf8 = New-Object System.Text.UTF8Encoding($false)
 
+          # Fix a temporary-set iterator expression before the first compile.
+          $reconPath = 'OpenHoldem/COFCReconstructor.cpp'
+          $recon = Get-Content -Raw -Encoding UTF8 $reconPath
+          $old = '  if (KnownBoardSet(visual).find(value) != KnownBoardSet(visual).end()) return true;'
+          $new = "  set<int> visual_cards = KnownBoardSet(visual);`r`n  if (visual_cards.find(value) != visual_cards.end()) return true;"
+          if ($recon.Contains($old)) {
+            $recon = $recon.Replace($old, $new)
+            [System.IO.File]::WriteAllText((Resolve-Path $reconPath), $recon, $utf8)
+          }
+
           $lazyPath = 'OpenHoldem/CLazyScraper.cpp'
           $lazy = Get-Content -Raw -Encoding UTF8 $lazyPath
-          if ($lazy -notmatch 'DeepOFC R9 read-only scrape path') {
-            $needle = "  _is_identical_scrape = false;`r`n`t p_scraper->ScrapeLimits();".Replace("`t ","`t")
-            if (-not $lazy.Contains($needle)) {
-              $needle = "  _is_identical_scrape = false;`n`t p_scraper->ScrapeLimits();".Replace("`t ","`t")
-            }
-            if (-not $lazy.Contains($needle)) {
-              $needle = "  _is_identical_scrape = false;`r`n`t p_scraper->ScrapeLimits();".Replace(" p_scraper","p_scraper")
-            }
-            if (-not $lazy.Contains($needle)) {
-              $needle = "  _is_identical_scrape = false;`n`t p_scraper->ScrapeLimits();".Replace(" p_scraper","p_scraper")
-            }
-            if (-not $lazy.Contains($needle)) {
-              throw 'Could not find CLazyScraper insertion point'
-            }
-            $eol = if ($lazy.Contains("`r`n")) { "`r`n" } else { "`n" }
-            $replacement = @(
-              '  _is_identical_scrape = false;',
-              '  // DeepOFC R9 read-only scrape path: an explicit Joker Ultimate',
-              '  // tablemap must never fall through to Hold''em hole/community/betting semantics.',
+          $eol = if ($lazy.Contains("`r`n")) { "`r`n" } else { "`n" }
+
+          if ($lazy -notmatch '#include "COFCReconstructor\.h"') {
+            $needle = '#include "CScraper.h"' + $eol
+            if (-not $lazy.Contains($needle)) { throw 'Could not find CScraper include' }
+            $lazy = $lazy.Replace($needle, '#include "COFCReconstructor.h"' + $eol + $needle)
+          }
+
+          if ($lazy -notmatch 'DeepOFC R9 canonical reconstruction path') {
+            $pattern = '(?s)  // DeepOFC R9 read-only scrape path:.*?  if \(p_tablemap->SupportsOFCJokerUltimate\(\)\) \{.*?\r?\n  \}\r?\n\tp_scraper->ScrapeLimits\(\);'
+            $replacementLines = @(
+              '  // DeepOFC R9 canonical reconstruction path. Joker Ultimate never falls',
+              '  // through to legacy Hold''em hole/community/betting semantics.',
               '  if (p_tablemap->SupportsOFCJokerUltimate()) {',
-              '    // Canonical reconstruction is added separately; until then never leave',
-              '    // an old canonical OFC state live beside a new raw observation.',
-              '    p_table_state->OFCState()->Reset();',
+              '    COFCState previous_state = *p_table_state->OFCState();',
               '    if (!p_scraper->ScrapeOFCVisualObservation()) {',
+              '      p_table_state->OFCState()->Reset();',
               '      write_log(k_always_log_errors,',
-              '        "[DeepOFC] R9 raw OFC scrape rejected; state remains invalid\n");',
+              '        "[DeepOFC] R9 raw OFC scrape rejected; canonical state invalid\n");',
+              '      return;',
               '    }',
+              '',
+              '    const COFCVisualObservation *raw = p_table_state->OFCVisualObservation();',
+              '    // A backwards transition to round 0 is an unambiguous new normal hand.',
+              '    // Do not carry the prior hand''s canonical state into it.',
+              '    const COFCState *previous = previous_state.valid ? &previous_state : NULL;',
+              '    if (raw->round_index == 0 && previous_state.valid && previous_state.round_index > 0) {',
+              '      previous = NULL;',
+              '    }',
+              '',
+              '    COFCState rebuilt;',
+              '    std::string reconstruction_error;',
+              '    if (!COFCReconstructor::Reconstruct(',
+              '          *raw, previous, &rebuilt, &reconstruction_error)) {',
+              '      p_table_state->OFCState()->Reset();',
+              '      write_log(k_always_log_errors,',
+              '        "[DeepOFC] canonical reconstruction rejected: %s\n",',
+              '        reconstruction_error.c_str());',
+              '      return;',
+              '    }',
+              '',
+              '    *p_table_state->OFCState() = rebuilt;',
+              '    std::string snapshot = COFCReconstructor::DiagnosticSnapshot(rebuilt);',
+              '    write_log(true, "[DeepOFC SNAPSHOT v1] %s\n", snapshot.c_str());',
               '    return;',
               '  }',
               "`tp_scraper->ScrapeLimits();"
-            ) -join $eol
-            $lazy = $lazy.Replace($needle, $replacement)
-            [System.IO.File]::WriteAllText((Resolve-Path $lazyPath), $lazy, $utf8)
+            )
+            $replacement = $replacementLines -join $eol
+            $newLazy = [regex]::Replace($lazy, $pattern, $replacement, 1)
+            if ($newLazy -eq $lazy) { throw 'Could not replace existing DeepOFC heartbeat block' }
+            $lazy = $newLazy
           }
-          Select-String -Path $lazyPath -Pattern 'DeepOFC R9 read-only scrape path'
-
-          $autoPath = 'OpenHoldem/CAutoplayer.cpp'
-          $auto = Get-Content -Raw -Encoding UTF8 $autoPath
-          if ($auto -notmatch 'DeepOFC R9 hard read-only guard') {
-            $eol = if ($auto.Contains("`r`n")) { "`r`n" } else { "`n" }
-            $needle = 'void CAutoplayer::DoAutoplayer(void) {' + $eol
-            if (-not $auto.Contains($needle)) {
-              throw 'Could not find CAutoplayer::DoAutoplayer insertion point'
-            }
-            $replacement = @(
-              'void CAutoplayer::DoAutoplayer(void) {',
-              '  // DeepOFC R9 hard read-only guard. No popup, hopper, formula,',
-              '  // mouse or keyboard action is allowed on a Joker Ultimate table yet.',
-              '  if (p_tablemap->SupportsOFCJokerUltimate()) {',
-              '    write_log(true, "[DeepOFC] R9 hard read-only guard: autoplayer suppressed\n");',
-              '    action_sequence_needs_to_be_finished = false;',
-              '    return;',
-              '  }'
-            ) -join $eol
-            $replacement += $eol
-            $auto = $auto.Replace($needle, $replacement)
-            [System.IO.File]::WriteAllText((Resolve-Path $autoPath), $auto, $utf8)
-          }
-          Select-String -Path $autoPath -Pattern 'DeepOFC R9 hard read-only guard'
+          [System.IO.File]::WriteAllText((Resolve-Path $lazyPath), $lazy, $utf8)
+          Select-String -Path $lazyPath -Pattern 'DeepOFC R9 canonical reconstruction path|DeepOFC SNAPSHOT v1'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -149,7 +157,6 @@ jobs:
           foreach ($name in $required) {
             $path = Join-Path 'Release' $name
             if (-not (Test-Path $path)) { throw "Missing required OpenHoldem link input: $path" }
-            Write-Host "FOUND $path"
           }
 
       - name: Build OpenHoldem Release Win32
@@ -158,17 +165,27 @@ jobs:
           $root = (Resolve-Path '.').Path + '\'
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
 
-      - name: Persist validated R9 integration only after successful build
+      - name: Assert hard R9 read-only guard survived integration
         shell: pwsh
         run: |
-          $paths = @('OpenHoldem/OpenHoldem.vcxproj','OpenHoldem/CLazyScraper.cpp','OpenHoldem/CAutoplayer.cpp')
+          Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'R9 autoplayer guard missing' }
+
+      - name: Persist validated canonical integration only after successful build
+        shell: pwsh
+        run: |
+          $paths = @(
+            'OpenHoldem/OpenHoldem.vcxproj',
+            'OpenHoldem/COFCReconstructor.cpp',
+            'OpenHoldem/CLazyScraper.cpp'
+          )
           $changed = git diff --name-only -- $paths
           if (-not $changed) {
-            Write-Host 'Validated R9 integration is already persisted; nothing to commit.'
+            Write-Host 'Validated canonical integration already persisted.'
             exit 0
           }
           git config user.name 'DeepOFC Build Gate'
           git config user.email 'actions@users.noreply.github.com'
           git add -- $paths
-          git commit -m 'DeepOFC R9: isolate OFC heartbeat behind read-only guard'
+          git commit -m 'DeepOFC R9: wire stateful canonical reconstruction'
           git push origin HEAD:deepofc
