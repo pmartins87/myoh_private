@@ -1,0 +1,128 @@
+name: DeepOFC R9 build diagnostic
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Reproduce canonical integration
+        shell: pwsh
+        run: |
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $proj = 'OpenHoldem/OpenHoldem.vcxproj'
+          $p = Get-Content -Raw -Encoding UTF8 $proj
+          if ($p -notmatch 'ClCompile Include="COFCReconstructor\.cpp"') {
+            $needle = '    <ClCompile Include="COFCScraper.cpp" />'
+            if (-not $p.Contains($needle)) { throw 'COFCScraper project entry missing' }
+            $p = $p.Replace($needle, $needle + "`r`n" + '    <ClCompile Include="COFCReconstructor.cpp" />')
+          }
+          [IO.File]::WriteAllText((Resolve-Path $proj), $p, $utf8)
+
+          $reconPath = 'OpenHoldem/COFCReconstructor.cpp'
+          $r = Get-Content -Raw -Encoding UTF8 $reconPath
+          $eol = if ($r.Contains("`r`n")) { "`r`n" } else { "`n" }
+          if ($r -notmatch 'DEEPOFC_RECONSTRUCTOR_STANDALONE') {
+            $needle = '#include "StdAfx.h"' + $eol + '#include "COFCReconstructor.h"'
+            $replacement = @('#ifndef DEEPOFC_RECONSTRUCTOR_STANDALONE','#include "StdAfx.h"','#endif','#include "COFCReconstructor.h"') -join $eol
+            if (-not $r.Contains($needle)) { throw 'reconstructor preamble not found' }
+            $r = $r.Replace($needle,$replacement)
+          }
+          $old = '  if (KnownBoardSet(visual).find(value) != KnownBoardSet(visual).end()) return true;'
+          $new = '  set<int> visual_cards = KnownBoardSet(visual);' + $eol + '  if (visual_cards.find(value) != visual_cards.end()) return true;'
+          if ($r.Contains($old)) { $r = $r.Replace($old,$new) }
+          [IO.File]::WriteAllText((Resolve-Path $reconPath),$r,$utf8)
+
+          $lazyPath='OpenHoldem/CLazyScraper.cpp'
+          $l=Get-Content -Raw -Encoding UTF8 $lazyPath
+          $eol=if($l.Contains("`r`n")){"`r`n"}else{"`n"}
+          if($l -notmatch '#include "COFCReconstructor\.h"'){
+            $needle='#include "CScraper.h"'+$eol
+            if(-not $l.Contains($needle)){throw 'CScraper include missing'}
+            $l=$l.Replace($needle,'#include "COFCReconstructor.h"'+$eol+$needle)
+          }
+          if($l -notmatch 'DeepOFC R9 canonical reconstruction path'){
+            $pattern='(?s)  // DeepOFC R9 read-only scrape path:.*?  if \(p_tablemap->SupportsOFCJokerUltimate\(\)\) \{.*?\r?\n  \}\r?\n\tp_scraper->ScrapeLimits\(\);'
+            $lines=@(
+              '  // DeepOFC R9 canonical reconstruction path.',
+              '  if (p_tablemap->SupportsOFCJokerUltimate()) {',
+              '    COFCState previous_state = *p_table_state->OFCState();',
+              '    if (!p_scraper->ScrapeOFCVisualObservation()) {',
+              '      p_table_state->OFCState()->Reset();',
+              '      return;',
+              '    }',
+              '    const COFCVisualObservation *raw = p_table_state->OFCVisualObservation();',
+              '    const COFCState *previous = previous_state.valid ? &previous_state : NULL;',
+              '    if (raw->round_index == 0 && previous_state.valid && previous_state.round_index > 0) previous = NULL;',
+              '    COFCState rebuilt;',
+              '    std::string reconstruction_error;',
+              '    if (!COFCReconstructor::Reconstruct(*raw, previous, &rebuilt, &reconstruction_error)) {',
+              '      p_table_state->OFCState()->Reset();',
+              '      write_log(k_always_log_errors, "[DeepOFC] canonical reconstruction rejected: %s\n", reconstruction_error.c_str());',
+              '      return;',
+              '    }',
+              '    *p_table_state->OFCState() = rebuilt;',
+              '    std::string snapshot = COFCReconstructor::DiagnosticSnapshot(rebuilt);',
+              '    write_log(true, "[DeepOFC SNAPSHOT v1] %s\n", snapshot.c_str());',
+              '    return;',
+              '  }',
+              "`tp_scraper->ScrapeLimits();"
+            )
+            $nl=$lines -join $eol
+            $newL=[regex]::Replace($l,$pattern,$nl,1)
+            if($newL -eq $l){throw 'heartbeat replacement failed'}
+            $l=$newL
+          }
+          [IO.File]::WriteAllText((Resolve-Path $lazyPath),$l,$utf8)
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build dependencies
+        shell: pwsh
+        run: |
+          $root=(Resolve-Path '.').Path+'\'
+          $common=@('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects=@('DLLs/Files_DLL/Files.vcxproj','DLLs/WindowFunctions_DLL/window_functions.vcxproj','DLLs/StringFunctions_DLL/string_functions.vcxproj','DLLs/Debug_DLL/Debug.vcxproj','DLLs/Preferences_DLL/Preferences.vcxproj','DLLs/Globals_DLL/globals.vcxproj','DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj','DLLs/User_DLL/user.vcxproj','PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj')
+          foreach($project in $projects){ & msbuild $project @common; if($LASTEXITCODE -ne 0){throw "dependency failed $project"} }
+
+      - name: Build OpenHoldem and capture diagnostic
+        id: ohbuild
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $root=(Resolve-Path '.').Path+'\'
+          & msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:normal 2>&1 | Tee-Object -FilePath deepofc_r9_full_build.log
+          $code=$LASTEXITCODE
+          "exit_code=$code" >> $env:GITHUB_OUTPUT
+          exit 0
+
+      - name: Persist filtered diagnostic
+        if: always()
+        shell: pwsh
+        run: |
+          $code='${{ steps.ohbuild.outputs.exit_code }}'
+          $lines=Get-Content deepofc_r9_full_build.log
+          $hits=$lines | Where-Object { $_ -match '(?i)(error [A-Z]+[0-9]+|fatal error|unresolved external|LNK[0-9]+|Build FAILED|error MSB|COFC|CLazyScraper)' }
+          @("DeepOFC R9 diagnostic","exit_code=$code","generated=$(Get-Date -Format o)","") + $hits | Set-Content -Encoding UTF8 deepofc_r9_last_build_diagnostic.txt
+          Get-Content deepofc_r9_last_build_diagnostic.txt
+          git config user.name 'DeepOFC Diagnostic Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add deepofc_r9_last_build_diagnostic.txt
+          if(-not (git diff --cached --quiet)){
+            git commit -m 'DeepOFC R9: record full-build diagnostic'
+            git push origin HEAD:deepofc
+          }
+          if($code -ne '0'){ throw "OpenHoldem build failed with exit code $code" }
