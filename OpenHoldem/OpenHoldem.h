@@ -48,6 +48,7 @@ class COpenHoldemApp : public CWinApp {
 	mouse_process_message_t	_dll_mouse_process_message;
 	mouse_click_t           _dll_mouse_click;
 	mouse_clickdrag_t       _dll_mouse_click_drag;
+	mouse_dragbetween_t     _dll_mouse_drag_between;
 	keyboard_process_message_t _dll_keyboard_process_message;
 	keyboard_sendstring_t   _dll_keyboard_sendstring;
 	keyboard_sendkey_t      _dll_keyboard_sendkey;
