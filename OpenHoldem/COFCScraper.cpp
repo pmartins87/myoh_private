@@ -13,95 +13,93 @@
 #include "CScraper.h"
 
 #include <set>
-#include <vector>
 
-#include "CAutoOcr.h"
 #include "CTableState.h"
 
 using namespace std;
 
-int CScraper::OFCString2CardNumber(CString card) {
-  CString normalized = card;
-  normalized.Trim();
-  CString upper = normalized;
-  upper.MakeUpper();
-
-  if ((upper == "JK1") || (upper == "JOKER1") || (upper == "JOKER_1")) {
-    return kOFCCardJoker1;
-  }
-  if ((upper == "JK2") || (upper == "JOKER2") || (upper == "JOKER_2")) {
-    return kOFCCardJoker2;
-  }
-  if ((upper == "CARDBACK") || (upper == "BACK") || (upper == "CB")) {
-    return kOFCCardBack;
-  }
-  if ((upper == "NOCARD") || (upper == "NO_CARD") || (upper == "FALSE")
-      || upper.IsEmpty()) {
-    return kOFCCardNoCard;
-  }
-
-  int legacy_card = CardString2CardNumber(normalized);
-  if ((legacy_card >= 0) && (legacy_card <= 51)) {
-    return legacy_card;
-  }
-  return kOFCCardUnknown;
+static bool DeepOFCRegionExists(const CString &name) {
+  return p_tablemap->r$()->find(name) != p_tablemap->r$()->end();
 }
 
-int CScraper::ScrapeOFCAreaCards(CString area_name, COFCCard *cards,
-    int max_cards, int *hidden_back_count) {
-  if (hidden_back_count != NULL) {
-    *hidden_back_count = 0;
+int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
+    bool *is_back, bool *is_joker) {
+  if (card == NULL || is_back == NULL || is_joker == NULL) {
+    return -1;
   }
-  if ((cards != NULL) && (max_cards > 0)) {
-    for (int i = 0; i < max_cards; ++i) {
-      cards[i].Clear();
-    }
-  }
+  card->Clear();
+  *is_back = false;
+  *is_joker = false;
 
-  RMapCI r_iter = p_tablemap->r$()->find(area_name);
-  if (r_iter == p_tablemap->r$()->end()) {
+  const CString occupied_region = base_name + "occupied";
+  const CString back_region = base_name + "back";
+  const CString joker_region = base_name + "joker";
+  const CString rank_region = base_name + "rank";
+  const CString suit_region = base_name + "suit";
+
+  // Explicit occupancy is mandatory. This is the fail-closed guard that
+  // prevents a rank/suit OCR miss from being silently treated as an empty slot.
+  if (!DeepOFCRegionExists(occupied_region)) {
     write_log(k_always_log_errors,
-      "[DeepOFC] Missing mandatory area: %s\n", area_name.GetString());
+      "[DeepOFC] Missing mandatory slot occupancy region: %s\n",
+      occupied_region.GetString());
     return -1;
   }
 
-  int r_width = r_iter->second.right - r_iter->second.left;
-  int r_height = r_iter->second.bottom - r_iter->second.top;
-  if ((r_width <= 0) || (r_height <= 0)) {
+  bool occupied = false;
+  EvaluateTrueFalseRegion(&occupied, occupied_region);
+  if (!occupied) {
+    return 0;
+  }
+
+  if (!DeepOFCRegionExists(back_region)
+      || !DeepOFCRegionExists(joker_region)
+      || !DeepOFCRegionExists(rank_region)
+      || !DeepOFCRegionExists(suit_region)) {
     write_log(k_always_log_errors,
-      "[DeepOFC] Invalid area geometry: %s\n", area_name.GetString());
+      "[DeepOFC] Occupied slot lacks back/joker/rank/suit contract: %s\n",
+      base_name.GetString());
     return -1;
   }
 
-  vector<CString> detected = p_auto_ocr->GetDetectTemplatesResult(r_iter->second.name);
-  int face_count = 0;
-  for (vector<CString>::const_iterator it = detected.begin(); it != detected.end(); ++it) {
-    int value = OFCString2CardNumber(*it);
-    if (value == kOFCCardBack) {
-      if (hidden_back_count != NULL) {
-        ++(*hidden_back_count);
-      }
-      continue;
-    }
-    if (value == kOFCCardNoCard) {
-      continue;
-    }
-    if (value == kOFCCardUnknown) {
-      write_log(k_always_log_errors,
-        "[DeepOFC] Unknown detector label [%s] in %s\n",
-        it->GetString(), area_name.GetString());
-      return -2;
-    }
-    if ((cards == NULL) || (face_count >= max_cards)) {
-      write_log(k_always_log_errors,
-        "[DeepOFC] Too many/unsupported face cards in %s\n",
-        area_name.GetString());
-      return -3;
-    }
-    cards[face_count].value = value;
-    ++face_count;
+  bool back = false;
+  bool joker = false;
+  EvaluateTrueFalseRegion(&back, back_region);
+  EvaluateTrueFalseRegion(&joker, joker_region);
+  if (back && joker) {
+    write_log(k_always_log_errors,
+      "[DeepOFC] Slot classified as both cardback and Joker: %s\n",
+      base_name.GetString());
+    return -2;
   }
-  return face_count;
+  if (back) {
+    *is_back = true;
+    return 0;
+  }
+  if (joker) {
+    *is_joker = true;
+    return 1;
+  }
+
+  int legacy_card = ScrapeCardByRankAndSuit(base_name);
+  if ((legacy_card >= 0) && (legacy_card <= 51)) {
+    card->value = legacy_card;
+    return 1;
+  }
+
+  write_log(k_always_log_errors,
+    "[DeepOFC] Occupied slot has no unambiguous standard/Joker face: %s\n",
+    base_name.GetString());
+  return -3;
+}
+
+static bool DeepOFCAssignFrameLocalJoker(COFCCard *card, int *joker_count) {
+  if (*joker_count >= 2) {
+    return false;
+  }
+  card->value = kOFCCardJoker1 + *joker_count;
+  ++(*joker_count);
+  return true;
 }
 
 static bool DeepOFCRegisterKnownCard(int value, set<int> *seen) {
@@ -144,6 +142,18 @@ static bool DeepOFCObservationHasUniqueKnownCards(
   return true;
 }
 
+static bool DeepOFCReadMandatoryBoolean(CScraper *scraper,
+    const CString &region, bool *value) {
+  if (!DeepOFCRegionExists(region)) {
+    write_log(k_always_log_errors,
+      "[DeepOFC] Missing mandatory boolean region: %s\n", region.GetString());
+    return false;
+  }
+  *value = false;
+  scraper->EvaluateTrueFalseRegion(value, region);
+  return true;
+}
+
 bool CScraper::ScrapeOFCVisualObservation() {
   if (!p_tablemap->SupportsOFCJokerUltimate()) {
     return false;
@@ -163,69 +173,126 @@ bool CScraper::ScrapeOFCVisualObservation() {
   observation->player_count = player_count;
   observation->hero_chair = hero_chair;
 
+  // KKPoker's two Jokers may render identically. Scrape assigns frame-local
+  // deterministic JK1/JK2 labels in scan order. Strategic state must treat the
+  // two physical Jokers as exchangeable under a permutation of these labels.
+  int joker_count = 0;
+
   for (int p = 0; p < player_count; ++p) {
     COFCVisualPlayerObservation *player = &observation->players[p];
     player->occupied = true;
     player->source_chair = p;
 
-    CString area;
-    int backs_top = 0;
-    int backs_middle = 0;
-    int backs_bottom = 0;
+    CString base;
+    for (int i = 0; i < kOFCTopCards; ++i) {
+      base.Format("ofc_p%d_top%d", p, i);
+      bool back = false;
+      bool joker = false;
+      int result = ScrapeOFCSlot(base, &player->visual_board.top[i], &back, &joker);
+      if (result < 0) return false;
+      if (back) ++player->hidden_incoming_count;
+      if (joker && !DeepOFCAssignFrameLocalJoker(&player->visual_board.top[i], &joker_count)) return false;
+    }
+    for (int i = 0; i < kOFCMiddleCards; ++i) {
+      base.Format("ofc_p%d_middle%d", p, i);
+      bool back = false;
+      bool joker = false;
+      int result = ScrapeOFCSlot(base, &player->visual_board.middle[i], &back, &joker);
+      if (result < 0) return false;
+      if (back) ++player->hidden_incoming_count;
+      if (joker && !DeepOFCAssignFrameLocalJoker(&player->visual_board.middle[i], &joker_count)) return false;
+    }
+    for (int i = 0; i < kOFCBottomCards; ++i) {
+      base.Format("ofc_p%d_bottom%d", p, i);
+      bool back = false;
+      bool joker = false;
+      int result = ScrapeOFCSlot(base, &player->visual_board.bottom[i], &back, &joker);
+      if (result < 0) return false;
+      if (back) ++player->hidden_incoming_count;
+      if (joker && !DeepOFCAssignFrameLocalJoker(&player->visual_board.bottom[i], &joker_count)) return false;
+    }
 
-    area.Format("area_ofc_p%d_top", p);
-    if (ScrapeOFCAreaCards(area, player->visual_board.top,
-          kOFCTopCards, &backs_top) < 0) return false;
-    area.Format("area_ofc_p%d_middle", p);
-    if (ScrapeOFCAreaCards(area, player->visual_board.middle,
-          kOFCMiddleCards, &backs_middle) < 0) return false;
-    area.Format("area_ofc_p%d_bottom", p);
-    if (ScrapeOFCAreaCards(area, player->visual_board.bottom,
-          kOFCBottomCards, &backs_bottom) < 0) return false;
-
-    player->hidden_incoming_count = backs_top + backs_middle + backs_bottom;
-
-    if (p != hero_chair) {
-      int discard_backs = 0;
-      area.Format("area_ofc_p%d_discards", p);
-      if (ScrapeOFCAreaCards(area, NULL, 0, &discard_backs) < 0) return false;
-      player->hidden_discard_count = discard_backs;
-    } else {
-      // Hero must never have hidden backs in row areas in normal play.
+    if (p == hero_chair) {
       if (player->hidden_incoming_count != 0) {
         write_log(k_always_log_errors,
-          "[DeepOFC] Unexpected hidden Hero cardback in visual board\n");
+          "[DeepOFC] Unexpected hidden Hero cardback in row slots\n");
+        return false;
+      }
+      continue;
+    }
+
+    // Current rule contract exposes opponent discard count, not identities.
+    // A face-up discard in these slots is therefore a deliberate unsupported
+    // state until R1 probe D1 changes the information model.
+    for (int i = 0; i < kOFCMaxDiscards; ++i) {
+      base.Format("ofc_p%d_discard%d", p, i);
+      COFCCard discard_face;
+      bool back = false;
+      bool joker = false;
+      int result = ScrapeOFCSlot(base, &discard_face, &back, &joker);
+      if (result < 0) return false;
+      if (back) {
+        ++player->hidden_discard_count;
+      } else if (result > 0) {
+        write_log(k_always_log_errors,
+          "[DeepOFC] Opponent discard identity became visible but R1 D1 is unresolved: p=%d slot=%d\n",
+          p, i);
         return false;
       }
     }
   }
 
-  int hero_loose_backs = 0;
-  if (ScrapeOFCAreaCards("area_ofc_hero_incoming",
-        observation->hero_loose_cards, kOFCMaxIncomingCards,
-        &hero_loose_backs) < 0) return false;
-  if (hero_loose_backs != 0) {
-    write_log(k_always_log_errors,
-      "[DeepOFC] Hero incoming area contains hidden cardbacks\n");
-    return false;
-  }
-  for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
-    if (observation->hero_loose_cards[i].IsKnownPhysicalCard()) {
+  // Normal-play Hero loose cards: first three source slots are mandatory for
+  // the supplied 450x830 evidence. Slots 3/4 are optional until first-round
+  // loose-card geometry is captured; absence is safe because card accounting
+  // will fail if such cards are actually needed/visible there.
+  for (int i = 0; i < 5; ++i) {
+    CString base;
+    base.Format("ofc_hero_in%d", i);
+    CString occupied = base + "occupied";
+    if (!DeepOFCRegionExists(occupied)) {
+      if (i < 3) {
+        write_log(k_always_log_errors,
+          "[DeepOFC] Missing mandatory Hero incoming slot: %s\n", base.GetString());
+        return false;
+      }
+      continue;
+    }
+    COFCCard card;
+    bool back = false;
+    bool joker = false;
+    int result = ScrapeOFCSlot(base, &card, &back, &joker);
+    if (result < 0) return false;
+    if (back) {
+      write_log(k_always_log_errors,
+        "[DeepOFC] Hero incoming slot classified as hidden cardback\n");
+      return false;
+    }
+    if (joker && !DeepOFCAssignFrameLocalJoker(&card, &joker_count)) return false;
+    if (result > 0) {
+      if (observation->hero_loose_count >= kOFCMaxIncomingCards) return false;
+      observation->hero_loose_cards[observation->hero_loose_count] = card;
       ++observation->hero_loose_count;
     }
   }
 
-  int hero_discard_backs = 0;
-  if (ScrapeOFCAreaCards("area_ofc_hero_discards",
-        observation->hero_discard_tracker, kOFCMaxDiscards,
-        &hero_discard_backs) < 0) return false;
-  if (hero_discard_backs != 0) {
-    write_log(k_always_log_errors,
-      "[DeepOFC] Hero discard tracker unexpectedly contains cardbacks\n");
-    return false;
-  }
   for (int i = 0; i < kOFCMaxDiscards; ++i) {
-    if (observation->hero_discard_tracker[i].IsKnownPhysicalCard()) {
+    CString base;
+    base.Format("ofc_hero_discard%d", i);
+    COFCCard card;
+    bool back = false;
+    bool joker = false;
+    int result = ScrapeOFCSlot(base, &card, &back, &joker);
+    if (result < 0) return false;
+    if (back) {
+      write_log(k_always_log_errors,
+        "[DeepOFC] Hero discard tracker contains hidden cardback\n");
+      return false;
+    }
+    if (joker && !DeepOFCAssignFrameLocalJoker(&card, &joker_count)) return false;
+    if (result > 0) {
+      if (observation->hero_discard_tracker_count >= kOFCMaxDiscards) return false;
+      observation->hero_discard_tracker[observation->hero_discard_tracker_count] = card;
       ++observation->hero_discard_tracker_count;
     }
   }
@@ -236,7 +303,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
     CString region;
     bool dealer = false;
     region.Format("ofc_p%d_dealer", p);
-    EvaluateTrueFalseRegion(&dealer, region);
+    if (!DeepOFCReadMandatoryBoolean(this, region, &dealer)) return false;
     if (dealer) {
       observation->dealer_chair = p;
       ++dealer_count;
@@ -244,7 +311,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
 
     bool acting = false;
     region.Format("ofc_p%d_turn", p);
-    EvaluateTrueFalseRegion(&acting, region);
+    if (!DeepOFCReadMandatoryBoolean(this, region, &acting)) return false;
     if (acting) {
       observation->acting_chair = p;
       ++actor_count;
@@ -257,8 +324,8 @@ bool CScraper::ScrapeOFCVisualObservation() {
     return false;
   }
 
-  observation->confirm_visible = false;
-  EvaluateTrueFalseRegion(&observation->confirm_visible, "ofc_confirm_visible");
+  if (!DeepOFCReadMandatoryBoolean(this,
+        "ofc_confirm_visible", &observation->confirm_visible)) return false;
 
   const COFCPlayerBoard &hero_visual = observation->players[hero_chair].visual_board;
   const int total_dealt = hero_visual.CountKnownCards()
@@ -285,7 +352,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
 
   observation->valid = true;
   write_log(true,
-    "[DeepOFC] raw observation valid players=%d hero=%d dealer=%d actor=%d round=%d confirm_visible=%d loose=%d discards=%d\n",
+    "[DeepOFC] raw observation valid players=%d hero=%d dealer=%d actor=%d round=%d confirm_visible=%d loose=%d discards=%d jokers=%d\n",
     observation->player_count,
     observation->hero_chair,
     observation->dealer_chair,
@@ -293,6 +360,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
     observation->round_index,
     observation->confirm_visible ? 1 : 0,
     observation->hero_loose_count,
-    observation->hero_discard_tracker_count);
+    observation->hero_discard_tracker_count,
+    joker_count);
   return true;
 }
