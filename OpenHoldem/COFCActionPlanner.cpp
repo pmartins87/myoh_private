@@ -32,6 +32,15 @@ const char *DropRegionName(EOFCRow row) {
   }
 }
 
+bool DragTargetsExplicitlyCalibrated() {
+  if (p_tablemap == NULL) return false;
+  SMapCI it = p_tablemap->s$()->find(CString("ofc_drag_targets_calibrated"));
+  if (it == p_tablemap->s$()->end()) return false;
+  CString value = it->second.text;
+  value.Trim();
+  return value == "1";
+}
+
 }  // namespace
 
 bool COFCActionPlanner::IsUsableRect(const RECT &rect) {
@@ -70,6 +79,14 @@ bool COFCActionPlanner::ResolveDropTarget(
   if (!p_tablemap->SupportsOFCJokerUltimate()) {
     return Fail(error, "tablemap is not explicitly Joker Ultimate");
   }
+  // Region existence alone is never enough to authorize physical movement.
+  // Replay drafts and guessed geometry must carry this symbol as 0. Only a
+  // deliberately calibrated runtime tablemap may set it to 1.
+  if (!DragTargetsExplicitlyCalibrated()) {
+    return Fail(error,
+      "OFC drag targets are not explicitly calibrated (s$ofc_drag_targets_calibrated != 1)");
+  }
+
   const char *name = DropRegionName(row);
   if (name == NULL) return Fail(error, "invalid OFC destination row");
 
