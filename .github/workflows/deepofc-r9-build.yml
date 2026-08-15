@@ -45,15 +45,31 @@ jobs:
         run: |
           $utf8 = New-Object System.Text.UTF8Encoding($false)
 
-          # Fix a temporary-set iterator expression before the first compile.
           $reconPath = 'OpenHoldem/COFCReconstructor.cpp'
           $recon = Get-Content -Raw -Encoding UTF8 $reconPath
+          $reconEol = if ($recon.Contains("`r`n")) { "`r`n" } else { "`n" }
+
+          # The native replay self-test compiles this pure-state unit without the
+          # legacy MFC precompiled header; the OpenHoldem project keeps StdAfx.
+          if ($recon -notmatch 'DEEPOFC_RECONSTRUCTOR_STANDALONE') {
+            $needle = '#include "StdAfx.h"' + $reconEol + '#include "COFCReconstructor.h"'
+            if (-not $recon.Contains($needle)) { throw 'Could not find reconstructor include preamble' }
+            $replacement = @(
+              '#ifndef DEEPOFC_RECONSTRUCTOR_STANDALONE',
+              '#include "StdAfx.h"',
+              '#endif',
+              '#include "COFCReconstructor.h"'
+            ) -join $reconEol
+            $recon = $recon.Replace($needle, $replacement)
+          }
+
+          # Fix a temporary-set iterator expression from the initial draft.
           $old = '  if (KnownBoardSet(visual).find(value) != KnownBoardSet(visual).end()) return true;'
-          $new = "  set<int> visual_cards = KnownBoardSet(visual);`r`n  if (visual_cards.find(value) != visual_cards.end()) return true;"
+          $new = '  set<int> visual_cards = KnownBoardSet(visual);' + $reconEol + '  if (visual_cards.find(value) != visual_cards.end()) return true;'
           if ($recon.Contains($old)) {
             $recon = $recon.Replace($old, $new)
-            [System.IO.File]::WriteAllText((Resolve-Path $reconPath), $recon, $utf8)
           }
+          [System.IO.File]::WriteAllText((Resolve-Path $reconPath), $recon, $utf8)
 
           $lazyPath = 'OpenHoldem/CLazyScraper.cpp'
           $lazy = Get-Content -Raw -Encoding UTF8 $lazyPath
@@ -113,6 +129,21 @@ jobs:
           [System.IO.File]::WriteAllText((Resolve-Path $lazyPath), $lazy, $utf8)
           Select-String -Path $lazyPath -Pattern 'DeepOFC R9 canonical reconstruction path|DeepOFC SNAPSHOT v1'
 
+      - name: Checkout independent DeepOFC reference
+        uses: actions/checkout@v4
+        with:
+          repository: pmartins87/DeepOFC
+          ref: main
+          path: _deepofc_reference
+          persist-credentials: false
+
+      - name: Export independent seven-frame replay reference
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Resolve-Path '_deepofc_reference').Path
+          python _deepofc_reference/tools/export_openholdem_replay_reference.py --out _deepofc_reference/openholdem_replay_reference_v1.txt
+          Get-Content _deepofc_reference/openholdem_replay_reference_v1.txt -TotalCount 5
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
@@ -123,6 +154,16 @@ jobs:
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.ATLMFC -property installationPath
           if (-not $vs) { throw 'VC ATL/MFC component not found on runner' }
           Write-Host "ATL/MFC Visual Studio installation: $vs"
+
+      - name: Compile and run native cross-language canonical replay gate
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          if (-not $vs) { throw 'Visual Studio installation not found' }
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCReconstructorSelftest.cpp /Fe:COFCReconstructorSelftest.exe && COFCReconstructorSelftest.exe _deepofc_reference\openholdem_replay_reference_v1.txt'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Native canonical replay gate failed with exit code $LASTEXITCODE" }
 
       - name: Build native dependency chain
         shell: pwsh
@@ -168,10 +209,10 @@ jobs:
       - name: Assert hard R9 read-only guard survived integration
         shell: pwsh
         run: |
-          Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw 'R9 autoplayer guard missing' }
+          $guard = Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet
+          if (-not $guard) { throw 'R9 autoplayer guard missing' }
 
-      - name: Persist validated canonical integration only after successful build
+      - name: Persist validated canonical integration only after successful gates
         shell: pwsh
         run: |
           $paths = @(
@@ -187,5 +228,5 @@ jobs:
           git config user.name 'DeepOFC Build Gate'
           git config user.email 'actions@users.noreply.github.com'
           git add -- $paths
-          git commit -m 'DeepOFC R9: wire stateful canonical reconstruction'
+          git commit -m 'DeepOFC R9: wire and replay-validate canonical reconstruction'
           git push origin HEAD:deepofc
