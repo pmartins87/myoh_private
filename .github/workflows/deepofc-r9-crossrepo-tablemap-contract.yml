@@ -58,6 +58,8 @@ jobs:
 
           if 'ofc_fantasy_active' not in audit.regions:
               raise SystemExit('generated tablemap lacks mandatory Fantasy pre-routing detector')
+          if audit.symbols.get('ofc_fantasy_recognizer_calibrated') != '0':
+              raise SystemExit('Fantasy routing unexpectedly authorizes the uncertified 14..17-card recognizer')
           fantasy = calibration.get('fantasy_active') or {}
           if fantasy.get('point') != [225, 760] or str(fantasy.get('rgb', '')).lower() != '874c00':
               raise SystemExit(f'unexpected replay Fantasy detector calibration: {fantasy!r}')
@@ -99,12 +101,13 @@ jobs:
           if detector > normal_rows or detector > normal_incoming:
               raise SystemExit('Fantasy routing detector occurs after normal geometry')
 
-          print('PASS: real DeepOFC inputs and OpenHoldem scraper agree on Fantasy pre-routing + joker1/joker2')
+          print('PASS: real DeepOFC inputs and OpenHoldem scraper agree on Fantasy pre-routing + recognizer-off + joker1/joker2')
           PY
 
       - name: Assert replay draft remains non-actionable
         shell: bash
         run: |
+          grep -q '"ofc_fantasy_recognizer_calibrated": "0"' deepofc/tools/build_joker_hu_tablemap.py
           grep -q '"ofc_drag_targets_calibrated": "0"' deepofc/tools/build_joker_hu_tablemap.py
           grep -q '"ofc_executor_enabled": "0"' deepofc/tools/build_joker_hu_tablemap.py
           grep -q 'DeepOFC R9 hard read-only guard' oh/OpenHoldem/CAutoplayer.cpp
@@ -112,4 +115,4 @@ jobs:
             echo 'ERROR: scraper contains mouse execution path'
             exit 1
           fi
-          echo 'PASS: cross-repo contract remains read-only'
+          echo 'PASS: cross-repo contract remains read-only and Fantasy recognition authority stays off'
