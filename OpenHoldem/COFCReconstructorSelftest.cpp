@@ -234,9 +234,8 @@ bool RunNegativeAndJokerTests(const vector<ReplayFrame> &frames) {
     return false;
   }
 
-  // Joker occurrence labels are visual occurrences, not persistent identities.
-  // If the raw scanner flips JK1<->JK2 between same-round frames, the canonical
-  // state must preserve the previous occurrence identity when evidence supports it.
+  // JK1/JK2 are persistent physical visual identities. A same-round raw
+  // identity flip must be rejected rather than silently normalized.
   COFCVisualObservation joker_raw;
   joker_raw.Reset();
   joker_raw.valid = true;
@@ -259,27 +258,15 @@ bool RunNegativeAndJokerTests(const vector<ReplayFrame> &frames) {
   COFCState joker_first;
   error.clear();
   if (!COFCReconstructor::Reconstruct(joker_raw, NULL, &joker_first, &error)) {
-    cerr << "JOKER TEST SETUP FAIL: " << error << endl;
+    cerr << "PERSISTENT JOKER TEST SETUP FAIL: " << error << endl;
     return false;
   }
   COFCVisualObservation flipped = joker_raw;
   flipped.hero_loose_cards[0].value = kOFCCardJoker2;
   COFCState joker_second;
   error.clear();
-  if (!COFCReconstructor::Reconstruct(flipped, &joker_first, &joker_second, &error)) {
-    cerr << "JOKER LABEL NORMALIZATION FAIL: " << error << endl;
-    return false;
-  }
-  bool preserved = false;
-  for (int i = 0; i < joker_second.hero_incoming_count; ++i) {
-    if (joker_second.hero_incoming[i].value == kOFCCardJoker1) preserved = true;
-    if (joker_second.hero_incoming[i].value == kOFCCardJoker2) {
-      cerr << "JOKER LABEL NORMALIZATION FAIL: JK2 leaked into canonical same-round identity" << endl;
-      return false;
-    }
-  }
-  if (!preserved) {
-    cerr << "JOKER LABEL NORMALIZATION FAIL: JK1 not preserved" << endl;
+  if (COFCReconstructor::Reconstruct(flipped, &joker_first, &joker_second, &error)) {
+    cerr << "PERSISTENT JOKER TEST FAIL: same-round JK1->JK2 drift was accepted" << endl;
     return false;
   }
 

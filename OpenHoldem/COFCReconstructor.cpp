@@ -448,32 +448,20 @@ bool ReconstructFantasyDecision(
       && previous->hero_chair < previous->player_count
       && previous->players[previous->hero_chair].fantasy
       && previous->round_index == -1) {
-    same_fantasy_decision = true;
-    if (previous->player_count != observation.player_count
-        || previous->hero_chair != observation.hero_chair
-        || previous->dealer_chair != observation.dealer_chair) {
-      return Fail(out, error, "Fantasy hand metadata changed during arrangement");
-    }
     set<int> old_incoming = CardArraySet(
       previous->hero_incoming, previous->hero_incoming_count);
-    if (old_incoming != current_incoming) {
-      return Fail(out, error,
-        "Hero Fantasy incoming identities changed during the same arrangement");
-    }
-    for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
-      if (!previous->pending[i].active) continue;
-      int old_index = previous->pending[i].incoming_index;
-      if (old_index < 0 || old_index >= previous->hero_incoming_count) {
-        return Fail(out, error, "previous Fantasy pending index is invalid");
+    if (old_incoming == current_incoming) {
+      same_fantasy_decision = true;
+      if (previous->player_count != observation.player_count
+          || previous->hero_chair != observation.hero_chair
+          || previous->dealer_chair != observation.dealer_chair) {
+        return Fail(out, error, "Fantasy hand metadata changed during arrangement");
       }
-      int value = previous->hero_incoming[old_index].value;
-      if (!ContainsInRow(hero_visual, previous->pending[i].row, value)) {
-        return Fail(out, error,
-          "previous Fantasy tentative placement moved/disappeared before Confirm");
-      }
+      // Do NOT require previous pending cards to stay in the same row.
+      // KKPoker Fantasy is a pre-Confirm arrangement and the player may
+      // move/rearrange cards freely until the final 13-card board is committed.
     }
   }
-
   out->schema_version = kOFCStateSchemaVersion;
   out->player_count = observation.player_count;
   out->hero_chair = observation.hero_chair;
@@ -541,6 +529,18 @@ bool ReconstructFantasyDecision(
     out->pending[i].row = pending[i].second;
   }
 
+  if (out->hero_can_confirm) {
+    if (pending.size() != 13) {
+      return Fail(out, error,
+        "actionable Fantasy Confirm requires exactly 13 tentative placements");
+    }
+    const int unused = out->hero_incoming_count - static_cast<int>(pending.size());
+    if (unused < 1 || unused > 4) {
+      return Fail(out, error,
+        "actionable Fantasy Confirm requires exactly 1..4 unused loose cards");
+    }
+  }
+
   if (!ValidateCanonicalKnownCardUniqueness(*out, &validation_error)) {
     return Fail(out, error, validation_error);
   }
@@ -564,7 +564,7 @@ bool COFCReconstructor::Reconstruct(
   }
 
   COFCVisualObservation observation = input_observation;
-  NormalizeJokerOccurrenceLabels(&observation, previous);
+  // JK1/JK2 are persistent visual identities; never swap occurrence labels.
 
   if ((observation.player_count != 2 && observation.player_count != 3)
       || observation.hero_chair < 0
