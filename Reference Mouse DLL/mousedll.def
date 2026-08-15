@@ -1,5 +1,6 @@
 LIBRARY	mouse
 EXPORTS
-   ProcessMessage    @1
-   MouseClick        @2
-   MouseClickDrag    @3 
+   ProcessMessage          @1
+   MouseClick              @2
+   MouseClickDrag          @3
+   MouseDragBetweenRects   @4
