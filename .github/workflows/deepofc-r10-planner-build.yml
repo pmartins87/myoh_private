@@ -7,6 +7,10 @@ on:
       - '.github/workflows/deepofc-r10-planner-build.yml'
       - 'OpenHoldem/COFCActionPlanner.cpp'
       - 'OpenHoldem/COFCActionPlanner.h'
+      - 'OpenHoldem/COFCVisualObservation.h'
+      - 'OpenHoldem/COFCScraper.cpp'
+      - 'OpenHoldem/COFCReconstructor.cpp'
+      - 'OpenHoldem/CLazyScraper.cpp'
       - 'OpenHoldem/OpenHoldem.vcxproj'
   workflow_dispatch:
 
@@ -95,13 +99,19 @@ jobs:
           if (-not (Select-String -Path 'OpenHoldem/COFCActionPlanner.cpp' -Pattern 'value == "1"' -Quiet)) {
             throw 'Planner does not require exact calibration value 1'
           }
+          if (-not (Select-String -Path 'OpenHoldem/COFCActionPlanner.cpp' -Pattern 'BuildPlacementStepFromObservation' -Quiet)) {
+            throw 'Planner fresh-observation source binding missing'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/COFCScraper.cpp' -Pattern 'hero_loose_sources' -Quiet)) {
+            throw 'Scraper ephemeral loose-card source geometry missing'
+          }
           if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
             throw 'R9 hard read-only guard missing'
           }
           if (-not (Select-String -Path 'OpenHoldem/OpenHoldem.cpp' -Pattern 'MouseDragBetweenRects' -Quiet)) {
             throw 'Validated drag primitive loader missing'
           }
-          Write-Host 'Planner compiles, requires certified targets, sends no mouse input, and R9 live no-click guard remains hard.'
+          Write-Host 'Combined scraper/reconstructor/planner builds; sources are fresh-observation-bound; planner sends no mouse input; R9 live no-click guard remains hard.'
 
       - name: Persist validated planner project entry only after gates pass
         shell: pwsh
@@ -113,4 +123,7 @@ jobs:
           git config user.email 'actions@users.noreply.github.com'
           git add -- $path
           git commit -m 'DeepOFC R10: compile fail-closed placement planner'
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase validated planner integration onto current deepofc' }
           git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated planner integration' }
