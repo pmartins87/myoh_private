@@ -16,6 +16,7 @@
 #include <string>
 
 #include "COFCState.h"
+#include "COFCVisualObservation.h"
 
 struct COFCUIPlacementStep {
   int card_value;
@@ -31,9 +32,21 @@ struct COFCUIPlacementStep {
 
 class COFCActionPlanner {
  public:
-  // Build one UI drag step for a known Hero incoming physical card. The source
-  // rectangle must come from the current scrape/layout resolver; row target is
-  // resolved from the explicit tablemap regions ofc_drop_top/middle/bottom.
+  // Preferred R10 entry point: resolve the current physical source rectangle
+  // directly from the same fresh raw observation that produced `state`.
+  // Fantasy can later populate the identical ephemeral source contract after
+  // each fan reflow; no strategic "slot identity" is introduced.
+  static bool BuildPlacementStepFromObservation(
+      const COFCState &state,
+      const COFCVisualObservation &observation,
+      int card_value,
+      EOFCRow row,
+      COFCUIPlacementStep *out,
+      std::string *error);
+
+  // Lower-level overload retained for unit/sandbox planners that already own a
+  // current source rectangle. Production execution should prefer the raw-
+  // observation entry point so stale geometry cannot be passed accidentally.
   static bool BuildPlacementStep(
       const COFCState &state,
       int card_value,
@@ -53,6 +66,11 @@ class COFCActionPlanner {
       std::string *error);
 
  private:
+  static bool ResolveLooseSource(
+      const COFCVisualObservation &observation,
+      int card_value,
+      RECT *out,
+      std::string *error);
   static bool ResolveDropTarget(EOFCRow row, RECT *out, std::string *error);
   static int FindIncomingIndex(const COFCState &state, int card_value);
   static bool PendingContains(const COFCState &state, int incoming_index, EOFCRow row);
