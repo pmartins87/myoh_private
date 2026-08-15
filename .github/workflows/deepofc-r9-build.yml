@@ -22,7 +22,7 @@ jobs:
           ref: deepofc
           fetch-depth: 0
 
-      - name: Inject COFCScraper compilation unit for the build gate
+      - name: Ensure COFCScraper compilation unit is in the project
         shell: pwsh
         run: |
           $path = 'OpenHoldem/OpenHoldem.vcxproj'
@@ -37,6 +37,73 @@ jobs:
             [System.IO.File]::WriteAllText((Resolve-Path $path), $text, (New-Object System.Text.UTF8Encoding($false)))
           }
           Select-String -Path $path -Pattern 'COFCScraper.cpp'
+
+      - name: Inject R9 isolated heartbeat and hard read-only guard
+        shell: pwsh
+        run: |
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+
+          $lazyPath = 'OpenHoldem/CLazyScraper.cpp'
+          $lazy = Get-Content -Raw -Encoding UTF8 $lazyPath
+          if ($lazy -notmatch 'DeepOFC R9 read-only scrape path') {
+            $needle = "  _is_identical_scrape = false;`r`n`t p_scraper->ScrapeLimits();".Replace("`t ","`t")
+            if (-not $lazy.Contains($needle)) {
+              $needle = "  _is_identical_scrape = false;`n`t p_scraper->ScrapeLimits();".Replace("`t ","`t")
+            }
+            if (-not $lazy.Contains($needle)) {
+              $needle = "  _is_identical_scrape = false;`r`n`t p_scraper->ScrapeLimits();".Replace(" p_scraper","p_scraper")
+            }
+            if (-not $lazy.Contains($needle)) {
+              $needle = "  _is_identical_scrape = false;`n`t p_scraper->ScrapeLimits();".Replace(" p_scraper","p_scraper")
+            }
+            if (-not $lazy.Contains($needle)) {
+              throw 'Could not find CLazyScraper insertion point'
+            }
+            $eol = if ($lazy.Contains("`r`n")) { "`r`n" } else { "`n" }
+            $replacement = @(
+              '  _is_identical_scrape = false;',
+              '  // DeepOFC R9 read-only scrape path: an explicit Joker Ultimate',
+              '  // tablemap must never fall through to Hold''em hole/community/betting semantics.',
+              '  if (p_tablemap->SupportsOFCJokerUltimate()) {',
+              '    // Canonical reconstruction is added separately; until then never leave',
+              '    // an old canonical OFC state live beside a new raw observation.',
+              '    p_table_state->OFCState()->Reset();',
+              '    if (!p_scraper->ScrapeOFCVisualObservation()) {',
+              '      write_log(k_always_log_errors,',
+              '        "[DeepOFC] R9 raw OFC scrape rejected; state remains invalid\n");',
+              '    }',
+              '    return;',
+              '  }',
+              "`tp_scraper->ScrapeLimits();"
+            ) -join $eol
+            $lazy = $lazy.Replace($needle, $replacement)
+            [System.IO.File]::WriteAllText((Resolve-Path $lazyPath), $lazy, $utf8)
+          }
+          Select-String -Path $lazyPath -Pattern 'DeepOFC R9 read-only scrape path'
+
+          $autoPath = 'OpenHoldem/CAutoplayer.cpp'
+          $auto = Get-Content -Raw -Encoding UTF8 $autoPath
+          if ($auto -notmatch 'DeepOFC R9 hard read-only guard') {
+            $eol = if ($auto.Contains("`r`n")) { "`r`n" } else { "`n" }
+            $needle = 'void CAutoplayer::DoAutoplayer(void) {' + $eol
+            if (-not $auto.Contains($needle)) {
+              throw 'Could not find CAutoplayer::DoAutoplayer insertion point'
+            }
+            $replacement = @(
+              'void CAutoplayer::DoAutoplayer(void) {',
+              '  // DeepOFC R9 hard read-only guard. No popup, hopper, formula,',
+              '  // mouse or keyboard action is allowed on a Joker Ultimate table yet.',
+              '  if (p_tablemap->SupportsOFCJokerUltimate()) {',
+              '    write_log(true, "[DeepOFC] R9 hard read-only guard: autoplayer suppressed\n");',
+              '    action_sequence_needs_to_be_finished = false;',
+              '    return;',
+              '  }'
+            ) -join $eol
+            $replacement += $eol
+            $auto = $auto.Replace($needle, $replacement)
+            [System.IO.File]::WriteAllText((Resolve-Path $autoPath), $auto, $utf8)
+          }
+          Select-String -Path $autoPath -Pattern 'DeepOFC R9 hard read-only guard'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -70,22 +137,14 @@ jobs:
             & msbuild $project @common
             if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
           }
-          Write-Host '=== ROOT RELEASE LIBRARIES ==='
-          Get-ChildItem -Path (Join-Path $root 'Release') -Filter '*.lib' | Sort-Object Name | ForEach-Object { Write-Host $_.Name }
 
       - name: Assert OpenHoldem link inputs
         shell: pwsh
         run: |
           $required = @(
-            'Preferences.lib',
-            'globals.lib',
-            'pokertracker_query_definitions.lib',
-            'Reference User DLL.lib',
-            'window_functions.lib',
-            'string_functions.lib',
-            'debug.lib',
-            'GameStateValidation.lib',
-            'files.lib'
+            'Preferences.lib','globals.lib','pokertracker_query_definitions.lib',
+            'Reference User DLL.lib','window_functions.lib','string_functions.lib',
+            'debug.lib','GameStateValidation.lib','files.lib'
           )
           foreach ($name in $required) {
             $path = Join-Path 'Release' $name
@@ -99,15 +158,17 @@ jobs:
           $root = (Resolve-Path '.').Path + '\'
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
 
-      - name: Persist project entry only after successful build
+      - name: Persist validated R9 integration only after successful build
         shell: pwsh
         run: |
-          if (git diff --quiet -- OpenHoldem/OpenHoldem.vcxproj) {
-            Write-Host 'Project entry already persisted; nothing to commit.'
+          $paths = @('OpenHoldem/OpenHoldem.vcxproj','OpenHoldem/CLazyScraper.cpp','OpenHoldem/CAutoplayer.cpp')
+          $changed = git diff --name-only -- $paths
+          if (-not $changed) {
+            Write-Host 'Validated R9 integration is already persisted; nothing to commit.'
             exit 0
           }
           git config user.name 'DeepOFC Build Gate'
           git config user.email 'actions@users.noreply.github.com'
-          git add OpenHoldem/OpenHoldem.vcxproj
-          git commit -m 'DeepOFC R9: compile COFCScraper in OpenHoldem project'
+          git add -- $paths
+          git commit -m 'DeepOFC R9: isolate OFC heartbeat behind read-only guard'
           git push origin HEAD:deepofc
