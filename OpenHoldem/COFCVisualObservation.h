@@ -12,6 +12,8 @@
 #ifndef INC_COFCVISUALOBSERVATION_H
 #define INC_COFCVISUALOBSERVATION_H
 
+#include <windows.h>
+
 #include "COFCState.h"
 
 struct COFCVisualPlayerObservation {
@@ -30,7 +32,28 @@ struct COFCVisualPlayerObservation {
     sitting_out = false;
     hidden_incoming_count = 0;
     hidden_discard_count = 0;
+    board_source_geometry_known = false;
     visual_board.Reset();
+  }
+
+  // Reserved for future per-row source geometry if R10 needs to manipulate a
+  // tentatively placed card. Strategic state never depends on this UI detail.
+  bool board_source_geometry_known;
+};
+
+// Ephemeral UI geometry for one currently loose Hero physical card. This is
+// deliberately raw-observation metadata, not canonical solver state. Fantasy
+// fan cards may reflow after every drag, so source rectangles must be rebuilt
+// from each fresh scrape rather than persisted as card "slots".
+struct COFCVisualCardSource {
+  bool valid;
+  int card_value;
+  RECT rect;
+
+  void Reset() {
+    valid = false;
+    card_value = kOFCCardNoCard;
+    SetRectEmpty(&rect);
   }
 };
 
@@ -55,6 +78,7 @@ class COFCVisualObservation {
     }
     for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
       hero_loose_cards[i].Clear();
+      hero_loose_sources[i].Reset();
     }
     for (int i = 0; i < kOFCMaxDiscards; ++i) {
       hero_discard_tracker[i].Clear();
@@ -76,6 +100,7 @@ class COFCVisualObservation {
 
   COFCVisualPlayerObservation players[kOFCMaxPlayers];
   COFCCard hero_loose_cards[kOFCMaxIncomingCards];
+  COFCVisualCardSource hero_loose_sources[kOFCMaxIncomingCards];
   int hero_loose_count;
   COFCCard hero_discard_tracker[kOFCMaxDiscards];
   int hero_discard_tracker_count;
