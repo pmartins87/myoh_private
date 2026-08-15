@@ -43,6 +43,7 @@ jobs:
           cd deepofc
           python - <<'PY'
           import json
+          import re
           from pathlib import Path
           from tools.build_joker_hu_tablemap import build
           from deepofc.tablemap_verify import parse_tablemap, validate_hu_replay_tablemap
@@ -50,7 +51,8 @@ jobs:
 
           geometry = json.loads(Path('tablemaps/joker_ultimate_hu_450x830_geometry_v1.json').read_text(encoding='utf-8'))
           calibration = json.loads(Path('tablemaps/joker_ultimate_hu_450x830_calibration_v1.json').read_text(encoding='utf-8'))
-          text = build(_source_tm(), geometry, calibration)
+          fantasy15 = json.loads(Path('tablemaps/joker_ultimate_hu_fantasy15_450x830_geometry_v1.json').read_text(encoding='utf-8'))
+          text = build(_source_tm(), geometry, calibration, fantasy15)
           errors = validate_hu_replay_tablemap(text)
           if errors:
               raise SystemExit('DeepOFC real-input generated tablemap failed its verifier: ' + '; '.join(errors))
@@ -58,11 +60,50 @@ jobs:
 
           if 'ofc_fantasy_active' not in audit.regions:
               raise SystemExit('generated tablemap lacks mandatory Fantasy pre-routing detector')
+          if audit.symbols.get('ofc_fantasy15_geometry_measured') != '1':
+              raise SystemExit('generated tablemap did not record measured Fantasy15 geometry')
           if audit.symbols.get('ofc_fantasy_recognizer_calibrated') != '0':
-              raise SystemExit('Fantasy routing unexpectedly authorizes the uncertified 14..17-card recognizer')
+              raise SystemExit('Fantasy15 geometry unexpectedly authorizes the uncertified 14..17-card recognizer')
+          if audit.symbols.get('ofc_drag_targets_calibrated') != '0' or audit.symbols.get('ofc_executor_enabled') != '0':
+              raise SystemExit('measured Fantasy15 geometry unexpectedly enabled physical action authority')
+
           fantasy = calibration.get('fantasy_active') or {}
           if fantasy.get('point') != [225, 760] or str(fantasy.get('rgb', '')).lower() != '874c00':
               raise SystemExit(f'unexpected replay Fantasy detector calibration: {fantasy!r}')
+
+          expected_geometry_regions = {
+              *(f'ofc_fantasy15_src{i:02d}' for i in range(15)),
+              *(f'ofc_fantasy15_arrange_top{i}' for i in range(3)),
+              *(f'ofc_fantasy15_arrange_middle{i}' for i in range(5)),
+              *(f'ofc_fantasy15_arrange_bottom{i}' for i in range(5)),
+              'ofc_fantasy15_unused_span',
+          }
+          missing_geometry = sorted(expected_geometry_regions - set(audit.regions))
+          if missing_geometry:
+              raise SystemExit('measured Fantasy15 geometry missing from generated draft: ' + ', '.join(missing_geometry))
+
+          region_lines = {
+              line.split()[0][2:]: line
+              for line in text.splitlines()
+              if line.startswith('r$ofc_fantasy15_')
+          }
+          for name in expected_geometry_regions:
+              line = region_lines.get(name)
+              if line is None:
+                  raise SystemExit(f'cannot inspect generated geometry region {name}')
+              # Generated syntax places transform after name, rect, color, radius.
+              tokens = line.split()
+              if len(tokens) < 8 or tokens[7] != 'N':
+                  raise SystemExit(f'{name} is no longer geometry-only N-transform: {line}')
+
+          first_tokens = region_lines['ofc_fantasy15_src00'].split()
+          last_tokens = region_lines['ofc_fantasy15_src14'].split()
+          first_rect = [int(x) for x in first_tokens[1:5]]
+          last_rect = [int(x) for x in last_tokens[1:5]]
+          if first_rect != fantasy15['fan_slots_left_to_right'][0]['identity_patch']:
+              raise SystemExit('Fantasy15 src00 rectangle drifted from measured evidence')
+          if last_rect != fantasy15['fan_slots_left_to_right'][14]['identity_patch']:
+              raise SystemExit('Fantasy15 src14 rectangle drifted from measured evidence')
 
           sample_bases = (
               'ofc_p0_top0',
@@ -101,7 +142,7 @@ jobs:
           if detector > normal_rows or detector > normal_incoming:
               raise SystemExit('Fantasy routing detector occurs after normal geometry')
 
-          print('PASS: real DeepOFC inputs and OpenHoldem scraper agree on Fantasy pre-routing + recognizer-off + joker1/joker2')
+          print('PASS: DeepOFC/OH agree on Fantasy routing, measured Fantasy15 geometry, recognizer-off authority and joker1/joker2')
           PY
 
       - name: Assert replay draft remains non-actionable
