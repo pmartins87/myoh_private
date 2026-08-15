@@ -71,6 +71,36 @@ bool COFCActionPlanner::PendingContains(
   return false;
 }
 
+bool COFCActionPlanner::ResolveLooseSource(
+    const COFCVisualObservation &observation,
+    int card_value,
+    RECT *out,
+    string *error) {
+  if (out == NULL) return Fail(error, "source-rectangle output is null");
+  SetRectEmpty(out);
+  if (!observation.valid) return Fail(error, "raw OFC observation is invalid");
+
+  int found = -1;
+  for (int i = 0; i < observation.hero_loose_count; ++i) {
+    if (!observation.hero_loose_cards[i].IsKnownPhysicalCard()) continue;
+    if (observation.hero_loose_cards[i].value != card_value) continue;
+    if (found >= 0) {
+      return Fail(error, "requested physical card has duplicate raw loose-card sources");
+    }
+    found = i;
+  }
+  if (found < 0) {
+    return Fail(error, "requested physical card is not currently loose in the raw observation");
+  }
+
+  const COFCVisualCardSource &source = observation.hero_loose_sources[found];
+  if (!source.valid || source.card_value != card_value || !IsUsableRect(source.rect)) {
+    return Fail(error, "current physical card has no validated click-safe source rectangle");
+  }
+  *out = source.rect;
+  return true;
+}
+
 bool COFCActionPlanner::ResolveDropTarget(
     EOFCRow row, RECT *out, string *error) {
   if (out == NULL) return Fail(error, "drop-target output is null");
@@ -109,6 +139,28 @@ bool COFCActionPlanner::ResolveDropTarget(
   }
   *out = rect;
   return true;
+}
+
+bool COFCActionPlanner::BuildPlacementStepFromObservation(
+    const COFCState &state,
+    const COFCVisualObservation &observation,
+    int card_value,
+    EOFCRow row,
+    COFCUIPlacementStep *out,
+    string *error) {
+  if (!observation.valid) return Fail(error, "raw OFC observation is invalid");
+  if (!state.valid) return Fail(error, "canonical OFC state is invalid");
+  if (observation.player_count != state.player_count
+      || observation.hero_chair != state.hero_chair
+      || observation.dealer_chair != state.dealer_chair
+      || observation.acting_chair != state.acting_chair
+      || observation.round_index != state.round_index) {
+    return Fail(error, "raw/canonical metadata mismatch; source geometry may be stale");
+  }
+
+  RECT source;
+  if (!ResolveLooseSource(observation, card_value, &source, error)) return false;
+  return BuildPlacementStep(state, card_value, row, source, out, error);
 }
 
 bool COFCActionPlanner::BuildPlacementStep(
