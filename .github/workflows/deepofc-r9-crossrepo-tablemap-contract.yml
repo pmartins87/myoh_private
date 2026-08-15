@@ -1,0 +1,94 @@
+name: DeepOFC R9 cross-repo tablemap contract
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-crossrepo-tablemap-contract.yml'
+      - 'OpenHoldem/COFCScraper.cpp'
+      - 'OpenHoldem/CScraper.h'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-python-tablemap-cpp-scraper-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout OpenHoldem deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          path: oh
+
+      - name: Checkout authoritative DeepOFC
+        uses: actions/checkout@v4
+        with:
+          repository: pmartins87/DeepOFC
+          ref: main
+          path: deepofc
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate replay draft and compare persistent Joker interface
+        shell: bash
+        run: |
+          cd deepofc
+          python - <<'PY'
+          from pathlib import Path
+          from tools.build_joker_hu_tablemap import build
+          from deepofc.tablemap_verify import parse_tablemap, validate_hu_replay_tablemap
+          from tests.test_tablemap import _source_tm, _geometry, _calibration
+
+          text = build(_source_tm(), _geometry(), _calibration())
+          errors = validate_hu_replay_tablemap(text)
+          if errors:
+              raise SystemExit('DeepOFC generated tablemap failed its own verifier: ' + '; '.join(errors))
+          audit = parse_tablemap(text)
+
+          sample_bases = (
+              'ofc_p0_top0',
+              'ofc_p1_bottom4',
+              'ofc_p0_discard0',
+              'ofc_hero_discard3',
+              'ofc_hero_in2',
+          )
+          for base in sample_bases:
+              for suffix in ('joker1', 'joker2'):
+                  if base + suffix not in audit.regions:
+                      raise SystemExit(f'missing generated persistent Joker region: {base + suffix}')
+              if base + 'joker' in audit.regions:
+                  raise SystemExit(f'legacy single-Joker region survived: {base + "joker"}')
+
+          cpp = Path('../oh/OpenHoldem/COFCScraper.cpp').read_text(encoding='utf-8', errors='replace')
+          header = Path('../oh/OpenHoldem/CScraper.h').read_text(encoding='utf-8', errors='replace')
+          required_cpp = (
+              'base_name + "joker1"',
+              'base_name + "joker2"',
+              'int *joker_id',
+              'kOFCCardJoker1',
+              'kOFCCardJoker2',
+          )
+          missing = [token for token in required_cpp if token not in cpp and token not in header]
+          if missing:
+              raise SystemExit('C++ scraper persistent-Joker contract missing: ' + ', '.join(missing))
+          if 'bool *is_joker' in cpp or 'bool *is_joker' in header:
+              raise SystemExit('legacy frame-local is_joker scraper contract returned')
+
+          print('PASS: DeepOFC builder/verifier and OpenHoldem scraper agree on joker1/joker2')
+          PY
+
+      - name: Assert replay draft remains non-actionable
+        shell: bash
+        run: |
+          grep -q '"ofc_drag_targets_calibrated": "0"' deepofc/tools/build_joker_hu_tablemap.py
+          grep -q '"ofc_executor_enabled": "0"' deepofc/tools/build_joker_hu_tablemap.py
+          grep -q 'DeepOFC R9 hard read-only guard' oh/OpenHoldem/CAutoplayer.cpp
+          echo 'PASS: cross-repo contract remains read-only'
