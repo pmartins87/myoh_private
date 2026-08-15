@@ -81,9 +81,10 @@ class CScraper : public CSpaceOptimizedGlobalObject {
 	int ScrapeNoCard(CString base_name);
  private:
 	int CardString2CardNumber(CString card);
-  // DeepOFC slot contract: each visual card slot has mandatory `occupied`,
-  // optional `back`/`joker`, plus standard `rank`/`suit` children.
-  // Returns 1 for occupied face/Joker, 0 for empty/back, negative on ambiguity.
+  // DeepOFC slot contract: each visual slot has mandatory `empty`, optional
+  // back/Joker classification, plus standard rank/suit children. `empty=true`
+  // means no physical card. If empty=false and no valid face/back/Joker can be
+  // recognized, the scraper fails closed instead of pretending the slot empty.
   int ScrapeOFCSlot(CString base_name, COFCCard *card,
     bool *is_back, bool *is_joker);
  private:
