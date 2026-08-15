@@ -81,9 +81,11 @@ class CScraper : public CSpaceOptimizedGlobalObject {
 	int ScrapeNoCard(CString base_name);
  private:
 	int CardString2CardNumber(CString card);
-  int OFCString2CardNumber(CString card);
-  int ScrapeOFCAreaCards(CString area_name, COFCCard *cards,
-    int max_cards, int *hidden_back_count);
+  // DeepOFC slot contract: each visual card slot has mandatory `occupied`,
+  // optional `back`/`joker`, plus standard `rank`/`suit` children.
+  // Returns 1 for occupied face/Joker, 0 for empty/back, negative on ambiguity.
+  int ScrapeOFCSlot(CString base_name, COFCCard *card,
+    bool *is_back, bool *is_joker);
  private:
 	// private functions and variables - not available via accessors or mutators
   CString ScrapeUPBalance(int chair, char scrape_u_else_p);
