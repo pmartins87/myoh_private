@@ -29,15 +29,16 @@ static bool DeepOFCReadRegionRect(const CString &name, RECT *out) {
 }
 
 int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
-    bool *is_back, bool *is_joker) {
-  if ((card == NULL) || (is_back == NULL) || (is_joker == NULL)) return -1;
+    bool *is_back, int *joker_id) {
+  if ((card == NULL) || (is_back == NULL) || (joker_id == NULL)) return -1;
   card->Clear();
   *is_back = false;
-  *is_joker = false;
+  *joker_id = 0;
 
   const CString empty_region = base_name + "empty";
   const CString back_region = base_name + "back";
-  const CString joker_region = base_name + "joker";
+  const CString joker1_region = base_name + "joker1";
+  const CString joker2_region = base_name + "joker2";
   const CString rank_region = base_name + "rank";
   const CString suit_region = base_name + "suit";
 
@@ -55,22 +56,25 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
   if (empty) return 0;
 
   if (!DeepOFCRegionExists(back_region)
-      || !DeepOFCRegionExists(joker_region)
+      || !DeepOFCRegionExists(joker1_region)
+      || !DeepOFCRegionExists(joker2_region)
       || !DeepOFCRegionExists(rank_region)
       || !DeepOFCRegionExists(suit_region)) {
     write_log(k_always_log_errors,
-      "[DeepOFC] Non-empty slot lacks back/joker/rank/suit contract: %s\n",
+      "[DeepOFC] Non-empty slot lacks back/joker1/joker2/rank/suit contract: %s\n",
       base_name.GetString());
     return -1;
   }
 
   bool back = false;
-  bool joker = false;
+  bool joker1 = false;
+  bool joker2 = false;
   EvaluateTrueFalseRegion(&back, back_region);
-  EvaluateTrueFalseRegion(&joker, joker_region);
-  if (back && joker) {
+  EvaluateTrueFalseRegion(&joker1, joker1_region);
+  EvaluateTrueFalseRegion(&joker2, joker2_region);
+  if ((joker1 && joker2) || (back && (joker1 || joker2))) {
     write_log(k_always_log_errors,
-      "[DeepOFC] Slot classified as both cardback and Joker: %s\n",
+      "[DeepOFC] Ambiguous back/Joker identity classification: %s\n",
       base_name.GetString());
     return -2;
   }
@@ -78,8 +82,20 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
     *is_back = true;
     return 0;
   }
-  if (joker) {
-    *is_joker = true;
+
+  // The supplied Fantasy replay proves persistent visual identity: JK1 is the
+  // orange/red pineapple Joker and JK2 is the gray/black pineapple Joker. On a
+  // confirmed board KKPoker may additionally show nominal rank/suit glyphs on
+  // a gold card; the color-coded Joker marker still identifies the physical
+  // card and therefore takes precedence over rank/suit parsing.
+  if (joker1) {
+    *joker_id = 1;
+    card->value = kOFCCardJoker1;
+    return 1;
+  }
+  if (joker2) {
+    *joker_id = 2;
+    card->value = kOFCCardJoker2;
     return 1;
   }
 
@@ -90,16 +106,9 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
   }
 
   write_log(k_always_log_errors,
-    "[DeepOFC] Non-empty slot has no unambiguous standard/Joker face: %s\n",
+    "[DeepOFC] Non-empty slot has no unambiguous standard/persistent-Joker face: %s\n",
     base_name.GetString());
   return -3;
-}
-
-static bool DeepOFCAssignFrameLocalJoker(COFCCard *card, int *joker_count) {
-  if (*joker_count >= 2) return false;
-  card->value = kOFCCardJoker1 + *joker_count;
-  ++(*joker_count);
-  return true;
 }
 
 static bool DeepOFCRegisterKnownCard(int value, set<int> *seen) {
@@ -162,9 +171,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
   obs->player_count = player_count;
   obs->hero_chair = hero_chair;
 
-  // Joker artwork may not expose persistent physical identity. JK1/JK2 are
-  // deterministic frame-local occurrence labels assigned in scan order.
-  int joker_count = 0;
+  int visible_joker_count = 0;
 
   for (int p = 0; p < player_count; ++p) {
     COFCVisualPlayerObservation *player = &obs->players[p];
@@ -174,27 +181,27 @@ bool CScraper::ScrapeOFCVisualObservation() {
 
     for (int i = 0; i < kOFCTopCards; ++i) {
       base.Format("ofc_p%d_top%d", p, i);
-      bool back = false, joker = false;
-      int rc = ScrapeOFCSlot(base, &player->visual_board.top[i], &back, &joker);
+      bool back = false; int joker_id = 0;
+      int rc = ScrapeOFCSlot(base, &player->visual_board.top[i], &back, &joker_id);
       if (rc < 0) return false;
       if (back) ++player->hidden_incoming_count;
-      if (joker && !DeepOFCAssignFrameLocalJoker(&player->visual_board.top[i], &joker_count)) return false;
+      if (joker_id != 0) ++visible_joker_count;
     }
     for (int i = 0; i < kOFCMiddleCards; ++i) {
       base.Format("ofc_p%d_middle%d", p, i);
-      bool back = false, joker = false;
-      int rc = ScrapeOFCSlot(base, &player->visual_board.middle[i], &back, &joker);
+      bool back = false; int joker_id = 0;
+      int rc = ScrapeOFCSlot(base, &player->visual_board.middle[i], &back, &joker_id);
       if (rc < 0) return false;
       if (back) ++player->hidden_incoming_count;
-      if (joker && !DeepOFCAssignFrameLocalJoker(&player->visual_board.middle[i], &joker_count)) return false;
+      if (joker_id != 0) ++visible_joker_count;
     }
     for (int i = 0; i < kOFCBottomCards; ++i) {
       base.Format("ofc_p%d_bottom%d", p, i);
-      bool back = false, joker = false;
-      int rc = ScrapeOFCSlot(base, &player->visual_board.bottom[i], &back, &joker);
+      bool back = false; int joker_id = 0;
+      int rc = ScrapeOFCSlot(base, &player->visual_board.bottom[i], &back, &joker_id);
       if (rc < 0) return false;
       if (back) ++player->hidden_incoming_count;
-      if (joker && !DeepOFCAssignFrameLocalJoker(&player->visual_board.bottom[i], &joker_count)) return false;
+      if (joker_id != 0) ++visible_joker_count;
     }
 
     if (p == hero_chair) {
@@ -209,8 +216,8 @@ bool CScraper::ScrapeOFCVisualObservation() {
     for (int i = 0; i < kOFCMaxDiscards; ++i) {
       base.Format("ofc_p%d_discard%d", p, i);
       COFCCard discard_face;
-      bool back = false, joker = false;
-      int rc = ScrapeOFCSlot(base, &discard_face, &back, &joker);
+      bool back = false; int joker_id = 0;
+      int rc = ScrapeOFCSlot(base, &discard_face, &back, &joker_id);
       if (rc < 0) return false;
       if (back) {
         ++player->hidden_discard_count;
@@ -238,11 +245,11 @@ bool CScraper::ScrapeOFCVisualObservation() {
       continue;
     }
     COFCCard card;
-    bool back = false, joker = false;
-    int rc = ScrapeOFCSlot(base, &card, &back, &joker);
+    bool back = false; int joker_id = 0;
+    int rc = ScrapeOFCSlot(base, &card, &back, &joker_id);
     if (rc < 0) return false;
     if (back) return false;
-    if (joker && !DeepOFCAssignFrameLocalJoker(&card, &joker_count)) return false;
+    if (joker_id != 0) ++visible_joker_count;
     if (rc > 0) {
       const int loose_index = obs->hero_loose_count;
       obs->hero_loose_cards[loose_index] = card;
@@ -261,11 +268,11 @@ bool CScraper::ScrapeOFCVisualObservation() {
     CString base;
     base.Format("ofc_hero_discard%d", i);
     COFCCard card;
-    bool back = false, joker = false;
-    int rc = ScrapeOFCSlot(base, &card, &back, &joker);
+    bool back = false; int joker_id = 0;
+    int rc = ScrapeOFCSlot(base, &card, &back, &joker_id);
     if (rc < 0) return false;
     if (back) return false;
-    if (joker && !DeepOFCAssignFrameLocalJoker(&card, &joker_count)) return false;
+    if (joker_id != 0) ++visible_joker_count;
     if (rc > 0) obs->hero_discard_tracker[obs->hero_discard_tracker_count++] = card;
   }
 
@@ -315,9 +322,9 @@ bool CScraper::ScrapeOFCVisualObservation() {
 
   obs->valid = true;
   write_log(true,
-    "[DeepOFC] raw valid players=%d hero=%d dealer=%d actor=%d round=%d confirm=%d loose=%d discards=%d jokers=%d\n",
+    "[DeepOFC] raw valid players=%d hero=%d dealer=%d actor=%d round=%d confirm=%d loose=%d discards=%d visible_jokers=%d\n",
     obs->player_count, obs->hero_chair, obs->dealer_chair,
     obs->acting_chair, obs->round_index, obs->confirm_visible ? 1 : 0,
-    obs->hero_loose_count, obs->hero_discard_tracker_count, joker_count);
+    obs->hero_loose_count, obs->hero_discard_tracker_count, visible_joker_count);
   return true;
 }
