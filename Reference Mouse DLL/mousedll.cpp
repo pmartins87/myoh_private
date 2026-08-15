@@ -118,6 +118,49 @@ void MoveMouseHuman(POINT start, POINT end, int duration_ms) {
     }
 }
 
+static bool IsUsableRect(const RECT &rect) {
+    return rect.right > rect.left && rect.bottom > rect.top;
+}
+
+// OFC cards can overlap other cards. Keep the randomized source/target point
+// away from rectangle edges so a drag never intentionally starts on a border.
+static POINT RandomizeInteriorLocation(const RECT &rect) {
+    RECT inner = rect;
+    const int width = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+    const int margin_x = width >= 10 ? width / 5 : 0;
+    const int margin_y = height >= 10 ? height / 5 : 0;
+    if (rect.left + margin_x < rect.right - margin_x) {
+        inner.left += margin_x;
+        inner.right -= margin_x;
+    }
+    if (rect.top + margin_y < rect.bottom - margin_y) {
+        inner.top += margin_y;
+        inner.bottom -= margin_y;
+    }
+    return RandomizeClickLocation(inner);
+}
+
+// Once LEFTDOWN has been issued a card drag must be atomic. In particular we
+// intentionally do not use MoveMouseHuman's "wait for user movement" branch,
+// because pausing while a card is held could leave KKPoker in an unsafe drag
+// state. Human/kill-switch arbitration belongs above this physical primitive.
+static void MoveMouseHeldButton(POINT start, POINT end, int duration_ms) {
+    int steps = fluidityFactor;
+    if (steps < 8) steps = 8;
+    if (duration_ms <= 0) duration_ms = 350;
+    if (duration_ms < 80) duration_ms = 80;
+    if (duration_ms > 1500) duration_ms = 1500;
+    const int delay = duration_ms / steps;
+    for (int i = 1; i <= steps; ++i) {
+        const double t = EaseInOutQuad((double)i / (double)steps);
+        const int x = (int)(start.x + (end.x - start.x) * t);
+        const int y = (int)(start.y + (end.y - start.y) * t);
+        SetCursorPos(x, y);
+        if (delay > 0) Sleep(delay);
+    }
+}
+
 MOUSEDLL_API int MouseClick(const HWND hwnd, const RECT rect, const MouseButton button, const int clicks)
 {
     INPUT input[100] = {0};
@@ -266,6 +309,74 @@ MOUSEDLL_API int MouseClickDrag(const HWND hwnd, const RECT rect, bool is_horizo
     SendInput(1, &input[2], sizeof(INPUT));
 
     return (int)true;
+}
+
+MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
+                                       const RECT target_rect, const int duration_ms) {
+    if (hwnd == NULL || !IsUsableRect(source_rect) || !IsUsableRect(target_rect)) {
+        return (int)false;
+    }
+
+    POINT start = RandomizeInteriorLocation(source_rect);
+    POINT end = RandomizeInteriorLocation(target_rect);
+    if (!ClientToScreen(hwnd, &start) || !ClientToScreen(hwnd, &end)) {
+        return (int)false;
+    }
+
+    const double screen_width = ::GetSystemMetrics(SM_CXSCREEN) - 1;
+    const double screen_height = ::GetSystemMetrics(SM_CYSCREEN) - 1;
+    if (screen_width <= 0 || screen_height <= 0) {
+        return (int)false;
+    }
+
+    POINT current;
+    if (!GetCursorPos(&current)) {
+        return (int)false;
+    }
+    MoveMouseHuman(current, start, 200 + rand() % 100);
+
+    SetFocus(hwnd);
+    SetForegroundWindow(hwnd);
+    SetActiveWindow(hwnd);
+
+    const LONG start_x = (LONG)(start.x * (65535.0 / screen_width));
+    const LONG start_y = (LONG)(start.y * (65535.0 / screen_height));
+    const LONG end_x = (LONG)(end.x * (65535.0 / screen_width));
+    const LONG end_y = (LONG)(end.y * (65535.0 / screen_height));
+
+    INPUT down;
+    ZeroMemory(&down, sizeof(INPUT));
+    down.type = INPUT_MOUSE;
+    down.mi.dx = start_x;
+    down.mi.dy = start_y;
+    down.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN;
+    if (SendInput(1, &down, sizeof(INPUT)) != 1) {
+        return (int)false;
+    }
+
+    Sleep(25);
+    MoveMouseHeldButton(start, end, duration_ms);
+
+    INPUT move;
+    ZeroMemory(&move, sizeof(INPUT));
+    move.type = INPUT_MOUSE;
+    move.mi.dx = end_x;
+    move.mi.dy = end_y;
+    move.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+    const bool move_ok = (SendInput(1, &move, sizeof(INPUT)) == 1);
+
+    // Always attempt LEFTUP once LEFTDOWN has succeeded, even when the final
+    // move event failed, so this low-level primitive does not intentionally
+    // leave the mouse button held.
+    INPUT up;
+    ZeroMemory(&up, sizeof(INPUT));
+    up.type = INPUT_MOUSE;
+    up.mi.dx = end_x;
+    up.mi.dy = end_y;
+    up.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP;
+    const bool up_ok = (SendInput(1, &up, sizeof(INPUT)) == 1);
+
+    return (int)(move_ok && up_ok);
 }
 
 MOUSEDLL_API void ProcessMessage(const char *message, const void *param)
