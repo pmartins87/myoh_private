@@ -20,7 +20,7 @@ if ($text -notmatch 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED') {
   $text = $text.Replace($anchor, $insert + $eol)
 }
 
-if ($text -notmatch 'ScrapeOFCFantasyVisualObservation\(') {
+if ($text -notmatch 'bool CScraper::ScrapeOFCFantasyVisualObservation\(') {
   $anchor = 'bool CScraper::ScrapeOFCVisualObservation() {'
   $pos = $text.IndexOf($anchor)
   if ($pos -lt 0) { throw 'Could not locate ScrapeOFCVisualObservation' }
@@ -33,19 +33,19 @@ if ($text -notmatch 'ScrapeOFCFantasyVisualObservation\(') {
     '  // cannot activate an uncertified native recognizer.',
     '  if (!p_tablemap->OFCFantasyRecognizerCalibrated()) {',
     '    write_log(k_always_log_errors,',
-    '      "[DeepOFC] Fantasy recognizer route called without tablemap authority\\n");',
+    '      "[DeepOFC] Fantasy recognizer route called without tablemap authority\n");',
     '    return false;',
     '  }',
     '  if (!p_tablemap->OFCFantasy15GeometryMeasured()) {',
     '    write_log(k_always_log_errors,',
-    '      "[DeepOFC] Fantasy recognizer authority present but measured Fantasy15 geometry is absent\\n");',
+    '      "[DeepOFC] Fantasy recognizer authority present but measured Fantasy15 geometry is absent\n");',
     '    return false;',
     '  }',
     '  if (player_count != 2 || hero_chair != 1) {',
     '    // Current measured 450x830 Fantasy geometry is HU/hero-chair-1 only.',
     '    // Never extrapolate it to 3-player or another chair mapping.',
     '    write_log(k_always_log_errors,',
-    '      "[DeepOFC] Current Fantasy15 geometry only certifies HU hero_chair=1\\n");',
+    '      "[DeepOFC] Current Fantasy15 geometry only certifies HU hero_chair=1\n");',
     '    return false;',
     '  }',
     '',
@@ -56,7 +56,7 @@ if ($text -notmatch 'ScrapeOFCFantasyVisualObservation\(') {
     '    region.Format("ofc_fantasy15_src%02d", i);',
     '    if (!DeepOFCRegionExists(region)) {',
     '      write_log(k_always_log_errors,',
-    '        "[DeepOFC] Missing measured Fantasy15 source region: %s\\n",',
+    '        "[DeepOFC] Missing measured Fantasy15 source region: %s\n",',
     '        region.GetString());',
     '      return false;',
     '    }',
@@ -68,7 +68,7 @@ if ($text -notmatch 'ScrapeOFCFantasyVisualObservation\(') {
     '      region.Format("ofc_fantasy15_arrange_%s%d", row_names[row], i);',
     '      if (!DeepOFCRegionExists(region)) {',
     '        write_log(k_always_log_errors,',
-    '          "[DeepOFC] Missing measured Fantasy15 arrangement region: %s\\n",',
+    '          "[DeepOFC] Missing measured Fantasy15 arrangement region: %s\n",',
     '          region.GetString());',
     '        return false;',
     '      }',
@@ -76,7 +76,7 @@ if ($text -notmatch 'ScrapeOFCFantasyVisualObservation\(') {
     '  }',
     '  if (!DeepOFCRegionExists("ofc_fantasy15_unused_span")) {',
     '    write_log(k_always_log_errors,',
-    '      "[DeepOFC] Missing measured Fantasy15 unused-card span\\n");',
+    '      "[DeepOFC] Missing measured Fantasy15 unused-card span\n");',
     '    return false;',
     '  }',
     '',
@@ -88,7 +88,7 @@ if ($text -notmatch 'ScrapeOFCFantasyVisualObservation\(') {
     '  return false;',
     '#else',
     '  write_log(k_always_log_errors,',
-    '    "[DeepOFC] Fantasy tablemap authority requested, but this OH build has no certified native Fantasy15 pixel recognizer\\n");',
+    '    "[DeepOFC] Fantasy tablemap authority requested, but this OH build has no certified native Fantasy15 pixel recognizer\n");',
     '  return false;',
     '#endif',
     '}',
@@ -97,19 +97,11 @@ if ($text -notmatch 'ScrapeOFCFantasyVisualObservation\(') {
   $text = $text.Substring(0, $pos) + $method + $text.Substring($pos)
 }
 
-$old = @(
-  '  if (fantasy_active) {',
-  '    write_log(k_always_log_errors,',
-  '      "[DeepOFC] Fantasy arrangement detected; normal geometry is forbidden until the 14-17-card Fantasy pixel path is certified\\n");',
-  '    return false;',
-  '  }'
-) -join $eol
-
 $new = @(
   '  if (fantasy_active) {',
   '    if (!p_tablemap->OFCFantasyRecognizerCalibrated()) {',
   '      write_log(k_always_log_errors,',
-  '        "[DeepOFC] Fantasy arrangement detected; normal geometry is forbidden and Fantasy recognizer authority is OFF\\n");',
+  '        "[DeepOFC] Fantasy arrangement detected; normal geometry is forbidden and Fantasy recognizer authority is OFF\n");',
   '      return false;',
   '    }',
   '    // Never fall through to normal row/incoming geometry while Fantasy is',
@@ -118,10 +110,13 @@ $new = @(
   '  }'
 ) -join $eol
 
-if ($text.Contains($old)) {
-  $text = $text.Replace($old, $new)
-} elseif ($text -notmatch 'Fantasy recognizer authority is OFF') {
-  throw 'Could not replace old Fantasy fail-closed routing block'
+if ($text -notmatch 'Fantasy recognizer authority is OFF') {
+  $pattern = '(?s)  if \(fantasy_active\) \{\s*write_log\(k_always_log_errors,\s*"\[DeepOFC\] Fantasy arrangement detected; normal geometry is forbidden until the 14-17-card Fantasy pixel path is certified\\n"\);\s*return false;\s*\}'
+  $updated = [regex]::Replace($text, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $new }, 1)
+  if ($updated -eq $text) {
+    throw 'Could not structurally replace old Fantasy fail-closed routing block'
+  }
+  $text = $updated
 }
 
 [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
