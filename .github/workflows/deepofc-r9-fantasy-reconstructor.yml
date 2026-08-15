@@ -1,0 +1,111 @@
+name: DeepOFC R9 Fantasy reconstructor gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-fantasy-reconstructor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cross-language-fantasy-and-full-build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout OpenHoldem deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Apply Fantasy canonical reconstruction patch
+        shell: pwsh
+        run: .github/scripts/deepofc_r9_fantasy_reconstructor_integrate.ps1
+
+      - name: Checkout independent DeepOFC reference
+        uses: actions/checkout@v4
+        with:
+          repository: pmartins87/DeepOFC
+          ref: main
+          path: _deepofc_reference
+          persist-credentials: false
+
+      - name: Export eight-frame normal plus Fantasy reference v2
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = (Resolve-Path '_deepofc_reference').Path
+          python _deepofc_reference/tools/export_openholdem_replay_reference.py --out _deepofc_reference/openholdem_replay_reference_v2.txt
+          $frames = (Select-String -Path _deepofc_reference/openholdem_replay_reference_v2.txt -Pattern '^FRAME\|' -AllMatches).Count
+          if ($frames -ne 8) { throw "Expected 8 cross-language fixtures, got $frames" }
+          Get-Content _deepofc_reference/openholdem_replay_reference_v2.txt -Tail 12
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Native Python-to-C++ Fantasy canonical replay gate
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          if (-not $vs) { throw 'Visual Studio not found' }
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCReconstructorSelftest.cpp /Fe:COFCReconstructorSelftest.exe && COFCReconstructorSelftest.exe _deepofc_reference\openholdem_replay_reference_v2.txt'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Native Fantasy canonical replay gate failed: $LASTEXITCODE" }
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Assert OpenHoldem link inputs
+        shell: pwsh
+        run: |
+          $required = @('Preferences.lib','globals.lib','pokertracker_query_definitions.lib','Reference User DLL.lib','window_functions.lib','string_functions.lib','debug.lib','GameStateValidation.lib','files.lib')
+          foreach ($name in $required) {
+            if (-not (Test-Path (Join-Path 'Release' $name))) { throw "Missing link input: $name" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+
+      - name: Assert hard no-click guard remains
+        shell: pwsh
+        run: |
+          if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
+            throw 'R9 hard read-only guard missing'
+          }
+          Write-Host 'Fantasy reconstruction remains read-only; no physical action path enabled.'
+
+      - name: Persist only after cross-language and full-build PASS
+        shell: pwsh
+        run: |
+          $paths = @('OpenHoldem/COFCReconstructor.cpp','OpenHoldem/COFCReconstructorSelftest.cpp','OpenHoldem/CLazyScraper.cpp')
+          $changed = git diff --name-only -- $paths
+          if (-not $changed) { Write-Host 'Fantasy reconstructor already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $paths
+          git commit -m 'DeepOFC R9: add fail-closed 17-card Fantasy reconstruction'
+          git push origin HEAD:deepofc
