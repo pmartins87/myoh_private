@@ -104,8 +104,17 @@ jobs:
           $paths = @('OpenHoldem/COFCReconstructor.cpp','OpenHoldem/COFCReconstructorSelftest.cpp','OpenHoldem/CLazyScraper.cpp')
           $changed = git diff --name-only -- $paths
           if (-not $changed) { Write-Host 'Fantasy reconstructor already persisted.'; exit 0 }
+
           git config user.name 'DeepOFC Build Gate'
           git config user.email 'actions@users.noreply.github.com'
           git add -- $paths
           git commit -m 'DeepOFC R9: add fail-closed 17-card Fantasy reconstruction'
+
+          # Other independent DeepOFC gates may safely advance the same branch
+          # while this relatively long Windows build is running. Rebase this
+          # already-validated, narrowly-scoped commit onto the latest branch
+          # before pushing instead of failing merely because the remote moved.
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase validated Fantasy integration onto current deepofc' }
           git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated Fantasy integration' }
