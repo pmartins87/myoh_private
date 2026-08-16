@@ -1,0 +1,104 @@
+name: DeepOFC R9 pinned Fantasy15 pixel-model import
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-fantasy15-model-import.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-frozen-model:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout OpenHoldem deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Checkout pinned DeepOFC model source
+        uses: actions/checkout@v4
+        with:
+          repository: pmartins87/DeepOFC
+          ref: 03e584895ac81d33b5971f329a7da7ec81547f5d
+          path: _deepofc_model
+          fetch-depth: 1
+
+      - name: Copy frozen quantized model
+        shell: pwsh
+        run: |
+          $source = '_deepofc_model/native/fantasy15_pixel_model_v1.h'
+          $target = 'OpenHoldem/COFCFantasy15PixelModel.generated.h'
+          if (-not (Test-Path $source)) { throw 'Pinned Fantasy15 model source missing' }
+          Copy-Item -Force $source $target
+          Write-Host "Copied pinned model to $target"
+
+      - name: Verify exact structural model checksums
+        shell: pwsh
+        run: |
+          @'
+          import re
+          from pathlib import Path
+
+          p = Path('OpenHoldem/COFCFantasy15PixelModel.generated.h')
+          text = p.read_text(encoding='utf-8')
+          if 'kFeatureCount=324' not in text or 'kRankCount=13' not in text:
+              raise SystemExit('unexpected Fantasy15 model dimensions')
+          tail = text.split('kRankCentroidsQ', 1)[1]
+          rows = re.findall(r'\{([^{}]+)\}', tail)
+          parsed = []
+          for row in rows:
+              vals = [int(x) for x in re.findall(r'\d+', row)]
+              if len(vals) == 324:
+                  parsed.append(vals)
+          if len(parsed) != 13:
+              raise SystemExit(f'expected 13 centroid rows, got {len(parsed)}')
+          expected_sum = [5834,6827,6329,6496,6290,5830,6981,6464,6341,5928,6716,6898,6604]
+          expected_weighted = [848875,1048906,1058735,1037829,1026041,915146,1120686,1044284,1055344,914813,1089315,1162766,1112071]
+          got_sum = [sum(r) for r in parsed]
+          got_weighted = [sum((i + 1) * x for i, x in enumerate(r)) for r in parsed]
+          if got_sum != expected_sum:
+              raise SystemExit(f'model sum checksum mismatch: {got_sum}')
+          if got_weighted != expected_weighted:
+              raise SystemExit(f'model weighted checksum mismatch: {got_weighted}')
+          if 'kStandardMaxDistance=2.25f' not in text:
+              raise SystemExit('standard max-distance threshold drift')
+          if 'kStandardMinMargin=0.15f' not in text:
+              raise SystemExit('standard min-margin threshold drift')
+          if 'kJokerMinDistance=3.20f' not in text:
+              raise SystemExit('Joker reject threshold drift')
+          print('PASS: pinned Fantasy15 model dimensions, thresholds and checksums exact')
+          '@ | Set-Content -Encoding UTF8 _verify_f15_model.py
+          python _verify_f15_model.py
+          if ($LASTEXITCODE -ne 0) { throw 'Fantasy15 model verification failed' }
+
+      - name: Assert import grants no runtime authority
+        shell: pwsh
+        run: |
+          $scraper = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCScraper.cpp'
+          if ($scraper -notmatch 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED\s+0') {
+            throw 'Fantasy15 recognizer unexpectedly authorized during model import'
+          }
+          if (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'COFCActionExecutor|BeginPlacement' -Quiet) {
+            throw 'Live OFC action path unexpectedly wired during model import'
+          }
+          Write-Host 'PASS: model import remains recognition-only and runtime-disabled.'
+
+      - name: Persist imported model only after PASS
+        shell: pwsh
+        run: |
+          $target = 'OpenHoldem/COFCFantasy15PixelModel.generated.h'
+          $changed = git status --porcelain -- $target
+          if (-not $changed) { Write-Host 'Pinned Fantasy15 model already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Recognition Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $target
+          git commit -m 'DeepOFC R9: persist pinned Fantasy15 pixel model'
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase pinned model onto current deepofc' }
+          git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist pinned Fantasy15 pixel model' }
