@@ -1,0 +1,29 @@
+name: DeepSix 6+ boundary CI
+
+on:
+  push:
+    branches: [deepsix_6plus]
+    paths:
+      - 'OpenHoldem/DeepSix6Plus/**'
+      - '.github/workflows/deepsix-6plus-boundary.yml'
+  pull_request:
+    branches: [deepsix_6plus]
+    paths:
+      - 'OpenHoldem/DeepSix6Plus/**'
+      - '.github/workflows/deepsix-6plus-boundary.yml'
+  workflow_dispatch:
+
+jobs:
+  raw-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile pure RawTableSnapshot validation/serialization test
+        run: >-
+          g++ -std=c++17 -Wall -Wextra -pedantic
+          OpenHoldem/DeepSix6Plus/RawTableSnapshotValidation.cpp
+          OpenHoldem/DeepSix6Plus/RawTableSnapshotJson.cpp
+          OpenHoldem/DeepSix6Plus/tests/raw_table_snapshot_test.cpp
+          -o /tmp/deepsix_raw_table_snapshot_test
+      - name: Run pure RawTableSnapshot boundary test
+        run: /tmp/deepsix_raw_table_snapshot_test

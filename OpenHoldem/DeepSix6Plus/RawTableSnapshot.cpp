@@ -33,25 +33,6 @@ RawCard CaptureCard(Card* card) {
   return result;
 }
 
-bool ValidateKnownCard(const RawCard& card,
-                       bool seen[15][4],
-                       std::string* error) {
-  if (!card.known) {
-    return true;
-  }
-  if (card.openholdem_rank < 6 || card.openholdem_rank > 14) {
-    return Fail("known card rank is outside Short Deck 6..A", error);
-  }
-  if (card.suit < 0 || card.suit >= 4) {
-    return Fail("known card suit is outside 0..3", error);
-  }
-  if (seen[card.openholdem_rank][card.suit]) {
-    return Fail("duplicate known card in raw snapshot", error);
-  }
-  seen[card.openholdem_rank][card.suit] = true;
-  return true;
-}
-
 }  // namespace
 
 bool CaptureRawTableSnapshot(RawTableSnapshot* snapshot, std::string* error) {
@@ -119,52 +100,6 @@ bool CaptureRawTableSnapshot(RawTableSnapshot* snapshot, std::string* error) {
   }
 
   *snapshot = captured;
-  return true;
-}
-
-bool ValidateRawSnapshotForShortDeck(const RawTableSnapshot& snapshot,
-                                     std::string* error) {
-  if (snapshot.schema_version != 1) {
-    return Fail("unsupported raw snapshot schema version", error);
-  }
-  if (snapshot.dealer_chair < 0 || snapshot.dealer_chair >= kRawMaxChairs) {
-    return Fail("dealer chair is unknown or outside OpenHoldem chair range", error);
-  }
-  if (snapshot.hero_chair < -1 || snapshot.hero_chair >= kRawMaxChairs) {
-    return Fail("hero chair is outside OpenHoldem chair range", error);
-  }
-  if (!(snapshot.community_card_count == 0 ||
-        snapshot.community_card_count == 3 ||
-        snapshot.community_card_count == 4 ||
-        snapshot.community_card_count == 5)) {
-    return Fail("community card count is not a Holdem street boundary", error);
-  }
-
-  bool seen[15][4] = {};
-  for (const RawCard& card : snapshot.board) {
-    if (!ValidateKnownCard(card, seen, error)) {
-      return false;
-    }
-  }
-  for (const RawSeat& seat : snapshot.seats) {
-    if (seat.chair < 0 || seat.chair >= kRawMaxChairs) {
-      return Fail("seat chair is outside OpenHoldem chair range", error);
-    }
-    if (seat.balance < 0.0 || seat.current_bet < 0.0 ||
-        seat.stack_including_current_bet < 0.0) {
-      return Fail("negative money value in raw snapshot", error);
-    }
-    for (const RawCard& card : seat.hole_cards) {
-      if (!ValidateKnownCard(card, seen, error)) {
-        return false;
-      }
-    }
-  }
-  for (double pot : snapshot.pots) {
-    if (pot < 0.0) {
-      return Fail("negative pot value in raw snapshot", error);
-    }
-  }
   return true;
 }
 
