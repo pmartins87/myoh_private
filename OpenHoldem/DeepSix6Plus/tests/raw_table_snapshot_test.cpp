@@ -11,6 +11,8 @@ int main() {
   RawTableSnapshot snapshot;
   snapshot.dealer_chair = 5;
   snapshot.hero_chair = -1;  // observer mode is valid raw evidence.
+  snapshot.hero_myturnbits = kRawMyTurnFold | kRawMyTurnCall | kRawMyTurnRaise;
+  snapshot.hero_sitting_in = true;
   snapshot.community_card_count = 3;
   for (int chair = 0; chair < kRawMaxChairs; ++chair) {
     snapshot.seats[chair].chair = chair;
@@ -33,6 +35,9 @@ int main() {
   const std::string json = RawTableSnapshotAuditJson(snapshot);
   assert(json.find("\"dealer_chair\":5") != std::string::npos);
   assert(json.find("\"hero_chair\":-1") != std::string::npos);
+  assert(json.find("\"hero_myturnbits\":11") != std::string::npos);
+  assert(json.find("\"hero_sitting_in\":true") != std::string::npos);
+  assert(json.find("\"schema_version\":2") != std::string::npos);
   assert(json.find("\"community_card_count\":3") != std::string::npos);
   assert(json.find("\"balance\":\"97.5\"") != std::string::npos);
   assert(json.find("\"current_bet\":\"2\"") != std::string::npos);
@@ -54,6 +59,14 @@ int main() {
   RawTableSnapshot invalid_board_count = snapshot;
   invalid_board_count.community_card_count = 2;
   assert(!ValidateRawSnapshotForShortDeck(invalid_board_count, &error));
+
+  RawTableSnapshot invalid_turn_bits = snapshot;
+  invalid_turn_bits.hero_myturnbits = kRawMyTurnAllowedMask | 0x20;
+  assert(!ValidateRawSnapshotForShortDeck(invalid_turn_bits, &error));
+
+  RawTableSnapshot old_schema = snapshot;
+  old_schema.schema_version = 1;
+  assert(!ValidateRawSnapshotForShortDeck(old_schema, &error));
 
   return 0;
 }
