@@ -401,6 +401,7 @@
     <ClCompile Include="COFCReconstructor.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="COFCFantasy15PixelRecognizer.cpp" />
     <ClCompile Include="COFCActionPlanner.cpp" />
     <ClCompile Include="COFCActionExecutor.cpp" />
     <ClCompile Include="CardFunctions.cpp" />
