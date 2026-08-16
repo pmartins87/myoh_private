@@ -5,9 +5,22 @@ on:
     branches: [deepofc]
     paths:
       - '.github/workflows/deepofc-r10-executor-build.yml'
+      - '.github/scripts/deepofc_r10_casino_drag_integrate.ps1'
+      - 'CTablemap/CTablemap.cpp'
+      - 'CTablemap/CTablemap.h'
+      - 'OpenHoldem/COFCState.h'
+      - 'OpenHoldem/COFCReconstructor.cpp'
+      - 'OpenHoldem/COFCReconstructor.h'
+      - 'OpenHoldem/COFCScraper.cpp'
+      - 'OpenHoldem/CScraper.h'
+      - 'OpenHoldem/COFCActionPlanner.cpp'
+      - 'OpenHoldem/COFCActionPlanner.h'
       - 'OpenHoldem/COFCActionExecutor.cpp'
       - 'OpenHoldem/COFCActionExecutor.h'
+      - 'OpenHoldem/CCasinoInterface.cpp'
       - 'OpenHoldem/CCasinoInterface.h'
+      - 'OpenHoldem/CAutoplayer.cpp'
+      - 'OpenHoldem/OpenHoldem.vcxproj'
   workflow_dispatch:
 
 permissions:
@@ -40,7 +53,27 @@ jobs:
             $text = $text.Replace($needle, $needle + $eol + '    <ClCompile Include="COFCActionExecutor.cpp" />')
           }
           [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
-          Select-String -Path $path -Pattern 'COFCAction(Planner|Executor)\.cpp'
+          Select-String -Path $path -Pattern 'COFC(ActionPlanner|ActionExecutor|Reconstructor|Scraper)\.cpp'
+
+      - name: Assert R9-R10 vertical-slice contract before build
+        shell: pwsh
+        run: |
+          $scraper = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCScraper.cpp'
+          $reconstructor = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCReconstructor.cpp'
+          $planner = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCActionPlanner.cpp'
+          $executor = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCActionExecutor.cpp'
+          $tablemap = (Get-Content -Raw -Encoding UTF8 'CTablemap/CTablemap.cpp') + (Get-Content -Raw -Encoding UTF8 'CTablemap/CTablemap.h')
+
+          if ($scraper -notmatch 'ScrapeOFCFantasyVisualObservation') { throw 'isolated Fantasy scrape route missing' }
+          if ($scraper -notmatch 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED\s+0') { throw 'uncertified Fantasy recognizer is not hard-disabled' }
+          if ($reconstructor -notmatch 'JK1/JK2 are persistent visual identities') { throw 'persistent physical Joker identity contract missing' }
+          if ($planner -notmatch 'BuildPlacementStepFromObservation') { throw 'planner is not bound to fresh raw source geometry' }
+          if ($planner -notmatch 'ofc_drag_targets_calibrated') { throw 'explicit drag-target calibration gate missing' }
+          if ($executor -notmatch 'ofc_executor_enabled') { throw 'explicit executor runtime gate missing' }
+          if ($executor -notmatch 'VerifyPendingTransition') { throw 'post-drag canonical verification missing' }
+          foreach ($symbol in @('ofc_fantasy_recognizer_calibrated','ofc_drag_targets_calibrated','ofc_executor_enabled')) {
+            if ($tablemap -notmatch [regex]::Escape($symbol)) { throw "central tablemap authority symbol missing: $symbol" }
+          }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -107,7 +140,7 @@ jobs:
           if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
             throw 'R9 hard read-only guard missing'
           }
-          Write-Host 'Executor compiles and is transactionally guarded, but remains disconnected from live CAutoplayer.'
+          Write-Host 'R9 recognition/reconstruction and R10 transaction layer compile together; live execution remains disconnected.'
 
       - name: Persist validated wrapper/project entry only after PASS
         shell: pwsh
