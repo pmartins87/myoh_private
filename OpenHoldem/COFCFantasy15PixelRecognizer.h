@@ -8,8 +8,8 @@
 //
 //******************************************************************************
 
-#ifndef INC_COFCPANTASY15PIXELRECOGNIZER_H
-#define INC_COFCPANTASY15PIXELRECOGNIZER_H
+#ifndef INC_COFCFANTASY15PIXELRECOGNIZER_H
+#define INC_COFCFANTASY15PIXELRECOGNIZER_H
 
 #include <Windows.h>
 #include <string>
@@ -45,4 +45,4 @@ class COFCFantasy15PixelRecognizer {
       std::string *error);
 };
 
-#endif  // INC_COFCPANTASY15PIXELRECOGNIZER_H
+#endif  // INC_COFCFANTASY15PIXELRECOGNIZER_H
