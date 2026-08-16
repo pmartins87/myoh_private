@@ -39,7 +39,7 @@ bool IsValidMoney(double value) {
 
 bool ValidateRawSnapshotForShortDeck(const RawTableSnapshot& snapshot,
                                      std::string* error) {
-  if (snapshot.schema_version != 1) {
+  if (snapshot.schema_version != 2) {
     return Fail("unsupported raw snapshot schema version", error);
   }
   if (snapshot.dealer_chair < 0 || snapshot.dealer_chair >= kRawMaxChairs) {
@@ -47,6 +47,10 @@ bool ValidateRawSnapshotForShortDeck(const RawTableSnapshot& snapshot,
   }
   if (snapshot.hero_chair < -1 || snapshot.hero_chair >= kRawMaxChairs) {
     return Fail("hero chair is outside OpenHoldem chair range", error);
+  }
+  if (snapshot.hero_myturnbits < 0 ||
+      (snapshot.hero_myturnbits & ~kRawMyTurnAllowedMask) != 0) {
+    return Fail("hero myturnbits contain unknown OpenHoldem action bits", error);
   }
   if (!(snapshot.community_card_count == 0 ||
         snapshot.community_card_count == 3 ||
