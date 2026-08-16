@@ -53,12 +53,15 @@ jobs:
           $utf8 = New-Object System.Text.UTF8Encoding($false)
           $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
           if ($text -notmatch 'ClCompile Include="COFCFantasy15PixelRecognizer\.cpp"') {
-            $needle = '    <ClCompile Include="COFCReconstructor.cpp" />'
-            if (-not $text.Contains($needle)) { throw 'Could not find COFCReconstructor.cpp project entry' }
-            $text = $text.Replace($needle, $needle + $eol + '    <ClCompile Include="COFCFantasy15PixelRecognizer.cpp" />')
+            # COFCReconstructor.cpp has a non-self-closing project entry, so anchor
+            # to the adjacent self-closing planner entry instead of assuming XML shape.
+            $needle = '    <ClCompile Include="COFCActionPlanner.cpp" />'
+            if (-not $text.Contains($needle)) { throw 'Could not find COFCActionPlanner.cpp project entry' }
+            $entry = '    <ClCompile Include="COFCFantasy15PixelRecognizer.cpp" />'
+            $text = $text.Replace($needle, $entry + $eol + $needle)
           }
           [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
-          Select-String -Path $path -Pattern 'COFC(Fantasy15PixelRecognizer|Reconstructor)\.cpp'
+          Select-String -Path $path -Pattern 'COFC(Fantasy15PixelRecognizer|Reconstructor|ActionPlanner)\.cpp'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -105,4 +108,5 @@ jobs:
           git pull --rebase origin deepofc
           if ($LASTEXITCODE -ne 0) { throw 'Could not rebase validated recognizer project entry' }
           git push origin HEAD:deepofc
-          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated recognizer project entry' }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated recognizer project entry'
+          }
