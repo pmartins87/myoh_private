@@ -76,6 +76,9 @@ std::string RawTableSnapshotAuditJson(const RawTableSnapshot& snapshot) {
          std::to_string(snapshot.community_card_count);
   out += ",\"dealer_chair\":" + std::to_string(snapshot.dealer_chair);
   out += ",\"hero_chair\":" + std::to_string(snapshot.hero_chair);
+  out += ",\"hero_myturnbits\":" + std::to_string(snapshot.hero_myturnbits);
+  out += ",\"hero_sitting_in\":";
+  AppendBool(snapshot.hero_sitting_in, &out);
   out += ",\"pots\":[";
   for (std::size_t index = 0; index < snapshot.pots.size(); ++index) {
     if (index != 0) out.push_back(',');
