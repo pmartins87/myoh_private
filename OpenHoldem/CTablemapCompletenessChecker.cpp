@@ -168,7 +168,7 @@ void CTablemapCompletenessChecker::CheckMainPot() {
 
 void CTablemapCompletenessChecker::VerifySingleC0limitsItem(CString name) {
   // Each optional r$c0limitsX-region must have 
-  // a corresponding s£c0limitsX-symbol,
+  // a corresponding sÂ£c0limitsX-symbol,
   // otherwise OpenHoldem can crash on evaluation
   // http://www.maxinmontreal.com/forums/viewtopic.php?f=110&t=18865
   if (!p_tablemap->ItemExists(name)) return;
@@ -229,6 +229,23 @@ void CTablemapCompletenessChecker::VerifyMap() {
       p_tablemap->filepath());
     MessageBox_Interactive(message, "Error", 0);
   }
+
+  // DeepOFC has a different table surface from Hold'em/Omaha. In particular,
+  // it has no community-card, pot, betting-button or two-hole-card contract.
+  // Do not force synthetic 0,0 compatibility regions into an OFC tablemap
+  // merely to satisfy the legacy Hold'em completeness checker. Keep the
+  // generic connection checks above and validate the font groups that OFC
+  // actually uses; OFC-specific runtime/calibration gates are checked by the
+  // DeepOFC components themselves.
+  if (p_tablemap->SupportsOFCJokerUltimate()) {
+    for (int i = 0; i < k_max_number_of_font_groups_in_tablemap; ++i) {
+      if (p_tablemap->FontGroupInUse(i)) {
+        CheckItem("t", i, "type");
+      }
+    }
+    return;
+  }
+
   // Check mandatory items for every seat
   CheckSetOfItems("p", last_chair, "active",   true);  
   CheckSetOfItems("p", last_chair, "balance",  true);
