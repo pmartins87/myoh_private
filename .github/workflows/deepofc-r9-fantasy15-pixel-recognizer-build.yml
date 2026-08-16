@@ -1,0 +1,108 @@
+name: DeepOFC R9 Fantasy15 pixel recognizer build gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r9-fantasy15-pixel-recognizer-build.yml'
+      - 'OpenHoldem/COFCFantasy15PixelRecognizer.cpp'
+      - 'OpenHoldem/COFCFantasy15PixelRecognizer.h'
+      - 'OpenHoldem/COFCFantasy15PixelModel.generated.h'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-recognition-only-component:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Assert recognizer stays inert and fail-closed
+        shell: pwsh
+        run: |
+          $recognizer = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCFantasy15PixelRecognizer.cpp'
+          $scraper = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCScraper.cpp'
+          $autoplayer = Get-Content -Raw -Encoding UTF8 'OpenHoldem/CAutoplayer.cpp'
+          foreach ($primitive in @('SendInput','mouse_event','SetCursorPos','PostMessage','DragRectToRect','ClickRect')) {
+            if ($recognizer -match [regex]::Escape($primitive)) {
+              throw "action primitive leaked into recognition-only component: $primitive"
+            }
+          }
+          if ($scraper -notmatch 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED\s+0') {
+            throw 'Fantasy15 runtime certification guard is not hard-disabled'
+          }
+          if ($scraper -match 'COFCFantasy15PixelRecognizer|RecognizeInitialFan') {
+            throw 'new pixel recognizer was wired into scraper before native replay certification'
+          }
+          if ($autoplayer -match 'COFCFantasy15PixelRecognizer|RecognizeInitialFan') {
+            throw 'new pixel recognizer leaked into live autoplayer'
+          }
+          Write-Host 'PASS: Fantasy15 pixel recognizer is compile-only and has no runtime authority.'
+
+      - name: Add recognizer compilation unit to OpenHoldem project
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+          if ($text -notmatch 'ClCompile Include="COFCFantasy15PixelRecognizer\.cpp"') {
+            $needle = '    <ClCompile Include="COFCReconstructor.cpp" />'
+            if (-not $text.Contains($needle)) { throw 'Could not find COFCReconstructor.cpp project entry' }
+            $text = $text.Replace($needle, $needle + $eol + '    <ClCompile Include="COFCFantasy15PixelRecognizer.cpp" />')
+          }
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
+          Select-String -Path $path -Pattern 'COFC(Fantasy15PixelRecognizer|Reconstructor)\.cpp'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32 with Fantasy15 recognizer
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
+
+      - name: Persist project entry only after PASS
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $changed = git diff --name-only -- $path
+          if (-not $changed) { Write-Host 'Fantasy15 recognizer project entry already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Recognition Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $path
+          git commit -m 'DeepOFC R9: compile inert Fantasy15 pixel recognizer in OpenHoldem'
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase validated recognizer project entry' }
+          git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated recognizer project entry' }
