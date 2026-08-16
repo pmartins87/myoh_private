@@ -119,14 +119,32 @@ if ($text -notmatch 'Fantasy recognizer authority is OFF') {
   $start = $text.IndexOf($startAnchor, $methodStart)
   if ($start -lt 0) { throw 'Could not locate Fantasy routing block inside ScrapeOFCVisualObservation' }
 
-  $nextAnchor = '  for (int p = 0; p < player_count; ++p) {'
+  # Stop before the normal-play local state. The previous version stopped at the
+  # first player loop and accidentally deleted visible_joker_count, breaking all
+  # later Joker accounting in normal play.
+  $nextAnchor = '  int visible_joker_count = 0;'
   $finish = $text.IndexOf($nextAnchor, $start)
-  if ($finish -lt 0) { throw 'Could not locate first normal player loop after Fantasy routing block' }
+  if ($finish -lt 0) { throw 'Could not locate normal Joker counter after Fantasy routing block' }
   if ($finish -le $start) { throw 'Invalid Fantasy routing block bounds' }
 
   $text = $text.Substring(0, $start) + $new + $eol + $eol + $text.Substring($finish)
 }
 
 [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
-Write-Host 'DeepOFC Fantasy recognizer router patch applied.'
-Select-String -Path $path -Pattern 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED|ScrapeOFCFantasyVisualObservation|Fantasy recognizer authority is OFF'
+
+# The branch is built with warnings-as-errors. This legacy p$_insert declaration
+# creates an unused local `c` in every translation unit that includes CTablemap.h.
+# Removing it is semantics-preserving: the insertion result is carried by `r`.
+$tmPath = 'CTablemap/CTablemap.h'
+$tm = Get-Content -Raw -Encoding UTF8 $tmPath
+$dead = 'std::map<int, int>::size_type c; std::pair<PMapI, bool> r = _p$[i].insert'
+$live = 'std::pair<PMapI, bool> r = _p$[i].insert'
+if ($tm.Contains($dead)) {
+  $tm = $tm.Replace($dead, $live)
+  [System.IO.File]::WriteAllText((Resolve-Path $tmPath), $tm, $utf8)
+}
+if ($tm.Contains($dead)) { throw 'Failed to remove unused p$_insert local' }
+
+Write-Host 'DeepOFC Fantasy recognizer router/build-blocker patch applied.'
+Select-String -Path $path -Pattern 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED|ScrapeOFCFantasyVisualObservation|Fantasy recognizer authority is OFF|visible_joker_count'
+Select-String -Path $tmPath -Pattern 'p\$_insert'
