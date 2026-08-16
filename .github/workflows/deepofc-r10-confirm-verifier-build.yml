@@ -1,0 +1,116 @@
+name: DeepOFC R10 normal Confirm semantic verifier build gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r10-confirm-verifier-build.yml'
+      - 'OpenHoldem/COFCConfirmVerifier.cpp'
+      - 'OpenHoldem/COFCConfirmVerifier.h'
+      - 'OpenHoldem/COFCTurnPlan.cpp'
+      - 'OpenHoldem/COFCTurnPlan.h'
+      - 'OpenHoldem/CAutoplayer.cpp'
+      - 'OpenHoldem/OpenHoldem.vcxproj'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-confirm-verifier-without-confirm-click:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Add Confirm verifier compilation unit to OpenHoldem project
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+          if ($text -notmatch 'ClCompile Include="COFCTurnOrchestrator\.cpp"') {
+            throw 'COFCTurnOrchestrator.cpp must be persisted before Confirm verifier build'
+          }
+          if ($text -notmatch 'ClCompile Include="COFCConfirmVerifier\.cpp"') {
+            $needle = '    <ClCompile Include="COFCTurnOrchestrator.cpp" />'
+            if (-not $text.Contains($needle)) { throw 'Could not find COFCTurnOrchestrator.cpp project entry' }
+            $text = $text.Replace($needle, $needle + $eol + '    <ClCompile Include="COFCConfirmVerifier.cpp" />')
+          }
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
+          Select-String -Path $path -Pattern 'COFC(TurnPlan|TurnOrchestrator|ConfirmVerifier|ActionExecutor|ActionPlanner)\.cpp'
+
+      - name: Assert semantic-only Confirm proof
+        shell: pwsh
+        run: |
+          $h = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCConfirmVerifier.h'
+          $c = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCConfirmVerifier.cpp'
+          if ($h -notmatch 'kOFCConfirmSameRoundHandoff') { throw 'same-round Confirm receipt missing' }
+          if ($h -notmatch 'kOFCConfirmNextRoundCommitted') { throw 'next-round Confirm receipt missing' }
+          if ($c -notmatch 'rounds 0\.\.3 only') { throw 'final-round scope guard missing' }
+          if ($c -notmatch 'does not certify Fantasy transitions') { throw 'Fantasy scope guard missing' }
+          if ($c -notmatch 'PendingExactlyMatchesPlan') { throw 'pre/post exact target preservation proof missing' }
+          if ($c -notmatch 'NextRoundBoardCommitsPlan') { throw 'next-round board commit proof missing' }
+          if ($c -notmatch 'NextRoundDiscardsCommitPlan') { throw 'next-round discard commit proof missing' }
+          foreach ($forbidden in @('SendInput','mouse_event','SetCursorPos','PostMessage','ClickRect','DragRectToRect','p_casino_interface')) {
+            if (($h + $c) -match [regex]::Escape($forbidden)) {
+              throw "physical input leaked into semantic Confirm verifier: $forbidden"
+            }
+          }
+          if (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'COFCConfirmVerifier|COFCTurnOrchestrator|COFCTurnPlan|COFCStrategyAction' -Quiet) {
+            throw 'R10 semantic Confirm/runtime layers were wired into live CAutoplayer prematurely'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
+            throw 'R9 hard read-only guard missing'
+          }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
+
+      - name: Persist validated project entry only after PASS
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $changed = git diff --name-only -- $path
+          if (-not $changed) { Write-Host 'COFCConfirmVerifier project integration already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $path
+          git commit -m 'DeepOFC R10: persist normal Confirm verifier build integration'
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase validated Confirm verifier integration onto current deepofc' }
+          git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated Confirm verifier integration' }
