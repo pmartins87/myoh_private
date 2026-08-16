@@ -1,1 +1,0 @@
-RawTableSnapshot schema v2 adds only raw visible-turn evidence (`hero_myturnbits` and `hero_sitting_in`) and does not infer a strategic action.
