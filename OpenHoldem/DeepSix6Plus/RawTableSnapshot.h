@@ -10,6 +10,18 @@ constexpr int kRawHoleCards = 2;
 constexpr int kRawBoardCards = 5;
 constexpr int kRawPotSlots = 10;
 
+// Raw visible-action button bits. These intentionally mirror OpenHoldem's
+// F/C/K/R/A my-turn bits at the capture boundary; they are evidence only, not
+// a strategic action decision.
+constexpr int kRawMyTurnFold = 0x01;
+constexpr int kRawMyTurnCall = 0x02;
+constexpr int kRawMyTurnCheck = 0x04;
+constexpr int kRawMyTurnRaise = 0x08;
+constexpr int kRawMyTurnAllin = 0x10;
+constexpr int kRawMyTurnAllowedMask =
+    kRawMyTurnFold | kRawMyTurnCall | kRawMyTurnCheck |
+    kRawMyTurnRaise | kRawMyTurnAllin;
+
 struct RawCard {
   bool any_card = false;
   bool known = false;
@@ -33,9 +45,11 @@ struct RawSeat {
 };
 
 struct RawTableSnapshot {
-  int schema_version = 1;
+  int schema_version = 2;
   int dealer_chair = -1;
   int hero_chair = -1;  // -1 is valid in observer mode.
+  int hero_myturnbits = 0;
+  bool hero_sitting_in = false;
   int community_card_count = 0;
   std::array<RawCard, kRawBoardCards> board{};
   std::array<RawSeat, kRawMaxChairs> seats{};
