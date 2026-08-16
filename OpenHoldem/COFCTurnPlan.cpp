@@ -234,6 +234,11 @@ bool COFCTurnPlanBuilder::Build(
   SortPlacements(out->to_add, out->to_add_count);
   SortInts(out->unused_cards, out->unused_count);
 
+  // Bind the complete semantic plan to the exact canonical state for which the
+  // solver action was validated. R10 orchestration may later ignore only
+  // tentative pending/UI-progress fields while proving the decision is still
+  // the same; it must never reuse the plan after strategic state drift.
+  out->decision_state = state;
   out->valid = true;
   return true;
 }
