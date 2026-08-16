@@ -1,0 +1,112 @@
+name: DeepOFC R10 solver-action turn-plan build gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r10-turn-plan-build.yml'
+      - 'OpenHoldem/COFCState.h'
+      - 'OpenHoldem/COFCTurnPlan.cpp'
+      - 'OpenHoldem/COFCTurnPlan.h'
+      - 'OpenHoldem/CAutoplayer.cpp'
+      - 'OpenHoldem/OpenHoldem.vcxproj'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-semantic-turn-plan-with-live-path-disconnected:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Add turn-plan compilation unit to OpenHoldem project
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+          if ($text -notmatch 'ClCompile Include="COFCTurnPlan\.cpp"') {
+            $needle = '    <ClCompile Include="COFCActionPlanner.cpp" />'
+            if (-not $text.Contains($needle)) { throw 'Could not find COFCActionPlanner.cpp project entry' }
+            $text = $text.Replace($needle, $needle + $eol + '    <ClCompile Include="COFCTurnPlan.cpp" />')
+          }
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
+          Select-String -Path $path -Pattern 'COFC(TurnPlan|ActionPlanner|ActionExecutor|Reconstructor|Scraper)\.cpp'
+
+      - name: Assert strategy-action bridge is semantic and fail-closed
+        shell: pwsh
+        run: |
+          $header = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCTurnPlan.h'
+          $impl = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCTurnPlan.cpp'
+          if ($header -notmatch 'COFCStrategyAction') { throw 'versioned strategy-action semantic contract missing' }
+          if ($header -notmatch 'unused_cards') { throw 'unused/discard-card contract missing' }
+          if ($impl -notmatch 'acting_chair != state.hero_chair') { throw 'ordered-actor guard missing' }
+          if ($impl -notmatch 'hero_can_prepare') { throw 'prepare-authority guard missing' }
+          if ($impl -notmatch 'rearrangement is not certified') { throw 'pending-mismatch fail-close missing' }
+          if ($impl -notmatch 'target_by_row\[kOFCRowTop\] != 3') { throw 'Fantasy 3/5/5 target validation missing' }
+          foreach ($forbidden in @('SendInput','mouse_event','SetCursorPos','PostMessage','DragRectToRect','ClickRect','RECT source','RECT target')) {
+            if (($header + $impl) -match [regex]::Escape($forbidden)) {
+              throw "UI mutation/geometry leaked into semantic strategy bridge: $forbidden"
+            }
+          }
+          if (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'COFCTurnPlan|COFCStrategyAction' -Quiet) {
+            throw 'semantic turn plan was wired into live CAutoplayer before R9/R10 certification'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
+            throw 'R9 hard read-only guard missing'
+          }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
+
+      - name: Persist validated project entry only after PASS
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $changed = git diff --name-only -- $path
+          if (-not $changed) { Write-Host 'COFCTurnPlan project integration already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $path
+          git commit -m 'DeepOFC R10: persist solver-action turn-plan build integration'
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase validated turn-plan integration onto current deepofc' }
+          git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated turn-plan integration'
+          }
