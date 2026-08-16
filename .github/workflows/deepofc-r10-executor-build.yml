@@ -13,6 +13,9 @@ on:
       - 'OpenHoldem/COFCReconstructor.h'
       - 'OpenHoldem/COFCScraper.cpp'
       - 'OpenHoldem/CScraper.h'
+      - 'OpenHoldem/COFCFantasy15PixelRecognizer.cpp'
+      - 'OpenHoldem/COFCFantasy15PixelRecognizer.h'
+      - 'OpenHoldem/COFCFantasy15PixelModel.generated.h'
       - 'OpenHoldem/COFCActionPlanner.cpp'
       - 'OpenHoldem/COFCActionPlanner.h'
       - 'OpenHoldem/COFCActionExecutor.cpp'
@@ -53,20 +56,43 @@ jobs:
             $text = $text.Replace($needle, $needle + $eol + '    <ClCompile Include="COFCActionExecutor.cpp" />')
           }
           [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
-          Select-String -Path $path -Pattern 'COFC(ActionPlanner|ActionExecutor|Reconstructor|Scraper)\.cpp'
+          Select-String -Path $path -Pattern 'COFC(Fantasy15PixelRecognizer|ActionPlanner|ActionExecutor|Reconstructor|Scraper)\.cpp'
 
       - name: Assert R9-R10 vertical-slice contract before build
         shell: pwsh
         run: |
           $scraper = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCScraper.cpp'
           $reconstructor = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCReconstructor.cpp'
+          $fantasyPixel = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCFantasy15PixelRecognizer.cpp'
+          $fantasyModel = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCFantasy15PixelModel.generated.h'
           $planner = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCActionPlanner.cpp'
           $executor = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCActionExecutor.cpp'
+          $project = Get-Content -Raw -Encoding UTF8 'OpenHoldem/OpenHoldem.vcxproj'
           $tablemap = (Get-Content -Raw -Encoding UTF8 'CTablemap/CTablemap.cpp') + (Get-Content -Raw -Encoding UTF8 'CTablemap/CTablemap.h')
 
           if ($scraper -notmatch 'ScrapeOFCFantasyVisualObservation') { throw 'isolated Fantasy scrape route missing' }
           if ($scraper -notmatch 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED\s+0') { throw 'uncertified Fantasy recognizer is not hard-disabled' }
+          if ($scraper -match 'COFCFantasy15PixelRecognizer|RecognizeInitialFan') { throw 'pixel recognizer wired into scraper before native replay certification' }
           if ($reconstructor -notmatch 'JK1/JK2 are persistent visual identities') { throw 'persistent physical Joker identity contract missing' }
+
+          if ($fantasyPixel -notmatch 'RecognizeInitialFan') { throw 'Fantasy15 real-pixel recognizer entrypoint missing' }
+          if ($fantasyPixel -notmatch 'VerifyFrozenModel') { throw 'Fantasy15 frozen-model integrity check missing' }
+          if ($fantasyPixel -notmatch 'kExpectedWidth\s*=\s*450' -or $fantasyPixel -notmatch 'kExpectedHeight\s*=\s*830') {
+            throw 'Fantasy15 certified geometry dimensions drifted'
+          }
+          foreach ($primitive in @('SendInput','mouse_event','SetCursorPos','PostMessage','DragRectToRect','ClickRect')) {
+            if ($fantasyPixel -match [regex]::Escape($primitive)) { throw "action primitive leaked into recognition-only component: $primitive" }
+          }
+          if ($fantasyModel -notmatch 'kFeatureCount=324' -or $fantasyModel -notmatch 'kRankCount=13') {
+            throw 'Fantasy15 frozen model dimensions missing/drifted'
+          }
+          if ($fantasyModel -notmatch 'kStandardMaxDistance=2.25f' -or $fantasyModel -notmatch 'kStandardMinMargin=0.15f' -or $fantasyModel -notmatch 'kJokerMinDistance=3.20f') {
+            throw 'Fantasy15 frozen model thresholds drifted'
+          }
+          if ($project -notmatch 'ClCompile Include="COFCFantasy15PixelRecognizer\.cpp"') {
+            throw 'Fantasy15 pixel recognizer is not compiled into OpenHoldem'
+          }
+
           if ($planner -notmatch 'BuildPlacementStepFromObservation') { throw 'planner is not bound to fresh raw source geometry' }
           if ($planner -notmatch 'ofc_drag_targets_calibrated') { throw 'explicit drag-target calibration gate missing' }
           if ($executor -notmatch 'ofc_executor_enabled') { throw 'explicit executor runtime gate missing' }
@@ -134,8 +160,8 @@ jobs:
           if (-not (Select-String -Path 'OpenHoldem/CCasinoInterface.cpp' -Pattern 'TableLostFocus\(\)' -Quiet)) {
             throw 'Casino drag focus safety check missing'
           }
-          if (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'COFCActionExecutor|BeginPlacement' -Quiet) {
-            throw 'Transactional executor was wired into live CAutoplayer before R9/R10 gates'
+          if (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'COFCActionExecutor|BeginPlacement|COFCFantasy15PixelRecognizer|RecognizeInitialFan' -Quiet) {
+            throw 'OFC execution/recognition was wired into live CAutoplayer before R9/R10 gates'
           }
           if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
             throw 'R9 hard read-only guard missing'
