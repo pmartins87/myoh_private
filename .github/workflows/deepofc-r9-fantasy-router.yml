@@ -78,6 +78,8 @@ jobs:
           if ($cpp -notmatch 'OFCFantasyRecognizerCalibrated\(\)') { throw 'tablemap Fantasy recognizer gate missing from scraper' }
           if ($cpp -notmatch 'ScrapeOFCFantasyVisualObservation\(player_count, hero_chair\)') { throw 'isolated Fantasy router missing' }
           if ($cpp -notmatch 'normal geometry is forbidden and Fantasy recognizer authority is OFF') { throw 'fail-closed Fantasy route missing' }
+          if ($cpp -notmatch 'int visible_joker_count = 0;') { throw 'normal-play Joker counter was lost by Fantasy routing patch' }
+          if ($tm -match 'std::map<int, int>::size_type c; std::pair<PMapI, bool> r = _p\$\[i\]\.insert') { throw 'warning-as-error p$_insert dead local still present' }
           if ($tm -notmatch 'ofc_fantasy_recognizer_calibrated') { throw 'central tablemap recognizer gate missing' }
           if ($tm -notmatch 'ofc_drag_targets_calibrated') { throw 'central drag gate missing' }
           if ($tm -notmatch 'ofc_executor_enabled') { throw 'central executor gate missing' }
@@ -117,9 +119,9 @@ jobs:
       - name: Persist router only after all gates pass
         shell: pwsh
         run: |
-          $paths = @('OpenHoldem/COFCScraper.cpp')
+          $paths = @('OpenHoldem/COFCScraper.cpp', 'CTablemap/CTablemap.h')
           $changed = git diff --name-only -- $paths
-          if (-not $changed) { Write-Host 'Router already persisted.'; exit 0 }
+          if (-not $changed) { Write-Host 'Router prerequisites already persisted.'; exit 0 }
           git config user.name 'DeepOFC Build Gate'
           git config user.email 'actions@users.noreply.github.com'
           git add -- $paths
