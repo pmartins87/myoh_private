@@ -53,6 +53,13 @@ struct COFCStrategyAction {
 
 struct COFCTurnPlan {
   bool valid;
+
+  // Exact canonical state against which the solver action was validated.
+  // Runtime orchestration compares fresh states to this binding while ignoring
+  // only tentative Hero placement/UI-progress fields. This prevents a stale
+  // plan from being reused after any strategy-relevant state drift.
+  COFCState decision_state;
+
   COFCStrategyPlacement target[kOFCMaxIncomingCards];
   int target_count;
   COFCStrategyPlacement already_correct[kOFCMaxIncomingCards];
@@ -66,6 +73,7 @@ struct COFCTurnPlan {
 
   void Reset() {
     valid = false;
+    decision_state.Reset();
     target_count = 0;
     already_correct_count = 0;
     to_add_count = 0;
