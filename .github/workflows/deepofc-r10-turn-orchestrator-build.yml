@@ -1,0 +1,123 @@
+name: DeepOFC R10 multi-placement turn orchestrator build gate
+
+on:
+  push:
+    branches: [deepofc]
+    paths:
+      - '.github/workflows/deepofc-r10-turn-orchestrator-build.yml'
+      - 'OpenHoldem/COFCState.h'
+      - 'OpenHoldem/COFCTurnPlan.cpp'
+      - 'OpenHoldem/COFCTurnPlan.h'
+      - 'OpenHoldem/COFCTurnOrchestrator.cpp'
+      - 'OpenHoldem/COFCTurnOrchestrator.h'
+      - 'OpenHoldem/COFCActionExecutor.cpp'
+      - 'OpenHoldem/COFCActionExecutor.h'
+      - 'OpenHoldem/COFCActionPlanner.cpp'
+      - 'OpenHoldem/CAutoplayer.cpp'
+      - 'OpenHoldem/OpenHoldem.vcxproj'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-turn-orchestrator-with-live-path-disconnected:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout deepofc
+        uses: actions/checkout@v4
+        with:
+          ref: deepofc
+          fetch-depth: 0
+
+      - name: Add orchestrator compilation unit to OpenHoldem project
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $text = Get-Content -Raw -Encoding UTF8 $path
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $eol = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+          if ($text -notmatch 'ClCompile Include="COFCTurnPlan\.cpp"') {
+            throw 'COFCTurnPlan.cpp must be persisted before orchestrator build'
+          }
+          if ($text -notmatch 'ClCompile Include="COFCTurnOrchestrator\.cpp"') {
+            $needle = '    <ClCompile Include="COFCTurnPlan.cpp" />'
+            if (-not $text.Contains($needle)) { throw 'Could not find COFCTurnPlan.cpp project entry' }
+            $text = $text.Replace($needle, $needle + $eol + '    <ClCompile Include="COFCTurnOrchestrator.cpp" />')
+          }
+          [System.IO.File]::WriteAllText((Resolve-Path $path), $text, $utf8)
+          Select-String -Path $path -Pattern 'COFC(TurnPlan|TurnOrchestrator|ActionPlanner|ActionExecutor|Reconstructor|Scraper)\.cpp'
+
+      - name: Assert fresh-scrape transaction invariants
+        shell: pwsh
+        run: |
+          $h = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCTurnOrchestrator.h'
+          $c = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCTurnOrchestrator.cpp'
+          $planh = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCTurnPlan.h'
+          $planc = Get-Content -Raw -Encoding UTF8 'OpenHoldem/COFCTurnPlan.cpp'
+          if ($planh -notmatch 'COFCState decision_state') { throw 'turn plan is not bound to canonical solver state' }
+          if ($planc -notmatch 'out->decision_state = state') { throw 'turn-plan state binding is not populated' }
+          if ($h -notmatch 'AdvanceAfterFreshScrape') { throw 'fresh-scrape advance API missing' }
+          if ($c -notmatch 'VerifyAfterFreshScrape') { throw 'single-drag verification is not composed into orchestration' }
+          if ($c -notmatch 'SameStrategicDecision') { throw 'fixed solver decision drift guard missing' }
+          if ($c -notmatch 'pending card row disagrees with fixed solver target') { throw 'pending-row fail-close missing' }
+          if ($c -notmatch 'Confirm can legitimately appear one scrape later') { throw 'post-placement Confirm wait state missing' }
+          if ($c -notmatch 'BeginNextPlacement') { throw 'one-at-a-time placement progression missing' }
+          foreach ($forbidden in @('SendInput','mouse_event','SetCursorPos','PostMessage','ClickRect','ConfirmButton')) {
+            if (($h + $c) -match [regex]::Escape($forbidden)) {
+              throw "direct UI mutation/Confirm leaked into orchestration layer: $forbidden"
+            }
+          }
+          if (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'COFCTurnOrchestrator|COFCTurnPlan|COFCStrategyAction' -Quiet) {
+            throw 'R10 turn orchestration was wired into live CAutoplayer prematurely'
+          }
+          if (-not (Select-String -Path 'OpenHoldem/CAutoplayer.cpp' -Pattern 'DeepOFC R9 hard read-only guard' -Quiet)) {
+            throw 'R9 hard read-only guard missing'
+          }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
+
+      - name: Persist validated project entry only after PASS
+        shell: pwsh
+        run: |
+          $path = 'OpenHoldem/OpenHoldem.vcxproj'
+          $changed = git diff --name-only -- $path
+          if (-not $changed) { Write-Host 'COFCTurnOrchestrator project integration already persisted.'; exit 0 }
+          git config user.name 'DeepOFC Build Gate'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- $path
+          git commit -m 'DeepOFC R10: persist multi-placement orchestrator build integration'
+          git pull --rebase origin deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not rebase validated orchestrator integration onto current deepofc' }
+          git push origin HEAD:deepofc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not persist validated orchestrator integration' }
