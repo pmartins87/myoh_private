@@ -18,3 +18,10 @@ Rules for this boundary:
 bets and pot slots. It does **not** infer folds, action history, committed-total,
 legal raise bounds or terminality. Those belong to the versioned DeepSix state
 reconstructor and will be derived from successive snapshots with replay tests.
+
+The raw structural validator is kept separate from the MFC/OpenHoldem capture
+code so it can be compiled independently in CI. `RawTableSnapshotJson` emits a
+deterministic audit representation; scraped money remains raw `double` evidence
+and is serialized as round-trip decimal **strings**, not promoted to strategic
+money. Exact integer-unit conversion happens later under a versioned table/stake
+configuration.
