@@ -404,6 +404,7 @@
     <ClCompile Include="COFCFantasy15PixelRecognizer.cpp" />
     <ClCompile Include="COFCActionPlanner.cpp" />
     <ClCompile Include="COFCTurnPlan.cpp" />
+    <ClCompile Include="COFCTurnOrchestrator.cpp" />
     <ClCompile Include="COFCActionExecutor.cpp" />
     <ClCompile Include="CardFunctions.cpp" />
     <ClCompile Include="CStringHashtableTemplate.cpp" />
