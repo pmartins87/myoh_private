@@ -3,6 +3,7 @@
 #include "../Card.h"
 #include "../CEngineContainer.h"
 #include "../CPlayer.h"
+#include "../CSymbolEngineAutoplayer.h"
 #include "../CSymbolEngineDealerchair.h"
 #include "../CSymbolengineUserchair.h"
 #include "../CTableState.h"
@@ -42,6 +43,16 @@ bool CaptureRawTableSnapshot(RawTableSnapshot* snapshot, std::string* error) {
                 "DeepSix raw board count must match OpenHoldem");
   static_assert(kRawPotSlots == kMaxNumberOfPots,
                 "DeepSix raw pot count must match OpenHoldem");
+  static_assert(kRawMyTurnFold == kMyTurnBitsFold,
+                "DeepSix fold bit must match OpenHoldem");
+  static_assert(kRawMyTurnCall == kMyTurnBitsCall,
+                "DeepSix call bit must match OpenHoldem");
+  static_assert(kRawMyTurnCheck == kMyTurnBitsCheck,
+                "DeepSix check bit must match OpenHoldem");
+  static_assert(kRawMyTurnRaise == kMyTurnBitsRaise,
+                "DeepSix raise bit must match OpenHoldem");
+  static_assert(kRawMyTurnAllin == kMyTurnBitsAllin,
+                "DeepSix all-in bit must match OpenHoldem");
 
   if (snapshot == nullptr) {
     return Fail("snapshot output pointer is null", error);
@@ -57,14 +68,19 @@ bool CaptureRawTableSnapshot(RawTableSnapshot* snapshot, std::string* error) {
       p_engine_container->symbol_engine_dealerchair();
   CSymbolEngineUserchair* user_engine =
       p_engine_container->symbol_engine_userchair();
-  if (dealer_engine == nullptr || user_engine == nullptr) {
-    return Fail("required chair engines are unavailable", error);
+  CSymbolEngineAutoplayer* autoplayer_engine =
+      p_engine_container->symbol_engine_autoplayer();
+  if (dealer_engine == nullptr || user_engine == nullptr ||
+      autoplayer_engine == nullptr) {
+    return Fail("required chair/autoplayer engines are unavailable", error);
   }
 
   RawTableSnapshot captured;
   captured.dealer_chair = dealer_engine->dealerchair();
   captured.hero_chair =
       user_engine->userchair_confirmed() ? user_engine->userchair() : -1;
+  captured.hero_myturnbits = autoplayer_engine->myturnbits();
+  captured.hero_sitting_in = autoplayer_engine->issittingin();
   captured.community_card_count = p_table_state->NumberOfCommunityCards();
 
   for (int index = 0; index < kRawBoardCards; ++index) {
