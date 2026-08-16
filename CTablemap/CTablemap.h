@@ -226,7 +226,7 @@ public:
 	const bool	s$_insert(const STablemapSymbol s) { ENT std::pair<SMapI, bool> r = _s$.insert(SPair(s.name, s)); return r.second; }
 	const bool	r$_insert(const STablemapRegion s) { ENT std::pair<RMapI, bool> r = _r$.insert(RPair(s.name, s)); return r.second; }
 	const bool	t$_insert(const int i, const STablemapFont s) { ENT if (i >= 0 && i<k_max_number_of_font_groups_in_tablemap) { std::pair<TMapI, bool> r = _t$[i].insert(TPair(s.hexmash, s)); return r.second; } else return false; }
-	const bool	p$_insert(const int i, const STablemapHashPoint s) { ENT if (i >= 0 && i<k_max_number_of_hash_groups_in_tablemap) { std::map<int, int>::size_type c; std::pair<PMapI, bool> r = _p$[i].insert(PPair(((s.x & 0xffff) << 16) | (s.y & 0xffff), s)); return r.second; } else return false; }
+	const bool	p$_insert(const int i, const STablemapHashPoint s) { ENT if (i >= 0 && i<k_max_number_of_hash_groups_in_tablemap) { std::pair<PMapI, bool> r = _p$[i].insert(PPair(((s.x & 0xffff) << 16) | (s.y & 0xffff), s)); return r.second; } else return false; }
 	const bool	h$_insert(const int i, const STablemapHashValue s) { ENT if (i >= 0 && i<k_max_number_of_hash_groups_in_tablemap) { std::pair<HMapI, bool> r = _h$[i].insert(HPair(s.hash, s)); return r.second; } else return false; }
 	const bool	i$_insert(const STablemapImage s);
 	const bool	tpl$_insert(const STablemapTemplate s) { ENT std::pair<TPLMapI, bool> r = _tpl$.insert(TPLPair(s.name, s)); return r.second; };
