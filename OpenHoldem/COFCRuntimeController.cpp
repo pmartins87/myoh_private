@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "COFCBaselinePolicy.h"
+#include "CardFunctions.h"
 #include "CCasinoInterface.h"
 #include "CTableState.h"
 #include "..\CTablemap\CTablemap.h"
@@ -27,6 +28,48 @@ bool ReadRegion(const CString &name, RECT *rect) {
   rect->right = static_cast<LONG>(it->second.right);
   rect->bottom = static_cast<LONG>(it->second.bottom);
   return rect->right > rect->left && rect->bottom > rect->top;
+}
+
+string CardLabel(int value) {
+  if (value == kOFCCardJoker1) return "JK1";
+  if (value == kOFCCardJoker2) return "JK2";
+  if (value < 0 || value > 51) return "INVALID";
+  const char ranks[] = "23456789TJQKA";
+  const char suits[] = "cdhs";
+  string label;
+  label.push_back(ranks[StdDeck_RANK(value)]);
+  label.push_back(suits[StdDeck_SUIT(value)]);
+  return label;
+}
+
+const char *RowLabel(EOFCRow row) {
+  switch (row) {
+    case kOFCRowTop: return "top";
+    case kOFCRowMiddle: return "middle";
+    case kOFCRowBottom: return "bottom";
+    default: return "undefined";
+  }
+}
+
+void LogStrategyAction(const COFCStrategyAction &action) {
+  ostringstream placements;
+  placements << "[";
+  for (int i = 0; i < action.placement_count; ++i) {
+    if (i != 0) placements << ",";
+    placements << CardLabel(action.placements[i].card_value)
+      << "->" << RowLabel(action.placements[i].row);
+  }
+  placements << "]";
+  ostringstream unused;
+  unused << "[";
+  for (int i = 0; i < action.unused_count; ++i) {
+    if (i != 0) unused << ",";
+    unused << CardLabel(action.unused_cards[i]);
+  }
+  unused << "]";
+  write_log(true,
+    "[DeepOFC POLICY] valid=%d placements=%s unused=%s\n",
+    action.valid ? 1 : 0, placements.str().c_str(), unused.str().c_str());
 }
 
 }  // namespace
@@ -115,6 +158,10 @@ bool COFCRuntimeController::SendConfirm(const COFCState &state) {
     Block("missing calibrated Confirm button region");
     return false;
   }
+  write_log(true,
+    "[DeepOFC CONFIRM] sending region=%s rect=(%ld,%ld,%ld,%ld) round=%d fantasy=%d\n",
+    region.GetString(), rect.left, rect.top, rect.right, rect.bottom,
+    state.round_index, state.players[state.hero_chair].fantasy ? 1 : 0);
   if (p_casino_interface == NULL || !p_casino_interface->ClickRectSafely(rect)) {
     Block("safe Confirm click was refused after transaction start");
     return false;
@@ -132,13 +179,20 @@ bool COFCRuntimeController::StartDecision(
   COFCStrategyAction action;
   string error;
   if (!COFCBaselinePolicy::Choose(state, &action, &error)) {
+    write_log(k_always_log_errors,
+      "[DeepOFC POLICY] result=REJECTED reason=\"%s\"\n", error.c_str());
     Block("policy refused state: " + error);
     return false;
   }
+  LogStrategyAction(action);
   if (!COFCTurnPlanBuilder::Build(state, action, &plan_, &error)) {
     Block("turn-plan validation failed: " + error);
     return false;
   }
+  write_log(true,
+    "[DeepOFC PLAN] target=%d already_correct=%d to_add=%d unused=%d\n",
+    plan_.target_count, plan_.already_correct_count,
+    plan_.to_add_count, plan_.unused_count);
   bool complete = false;
   bool ready = false;
   const int duration = max(100,
@@ -162,6 +216,9 @@ bool COFCRuntimeController::AdvanceArrangement(
   const int current_pending = PendingCount(state);
   if (orchestrator_.awaiting_drag_verification()
       && PendingSignature(state) == pending_signature_before_drag_) {
+    write_log(true,
+      "[DeepOFC WAIT] drag not visible yet pending_signature=\"%s\"\n",
+      pending_signature_before_drag_.c_str());
     return true;  // Current frame has not incorporated the drag yet.
   }
   bool complete = false;
@@ -214,14 +271,32 @@ bool COFCRuntimeController::HandlePostConfirm(const COFCState &state) {
 void COFCRuntimeController::Tick(
     const COFCState &state,
     const COFCVisualObservation &observation) {
-  if (!state.valid || !observation.valid) return;
+  write_log(true,
+    "[DeepOFC TICK] phase=%d state_valid=%d raw_valid=%d actor=%d hero=%d "
+    "round=%d prepare=%d confirm=%d action_required=%d pending=%d\n",
+    static_cast<int>(phase_), state.valid ? 1 : 0, observation.valid ? 1 : 0,
+    state.acting_chair, state.hero_chair, state.round_index,
+    state.hero_can_prepare ? 1 : 0, state.hero_can_confirm ? 1 : 0,
+    state.action_required ? 1 : 0, PendingCount(state));
+  if (!state.valid || !observation.valid) {
+    write_log(true, "[DeepOFC TICK] action=NONE reason=INVALID_PERCEPTION\n");
+    return;
+  }
   if (IsKnownNewHand(state)) ResetForKnownNewHand(state);
-  if (phase_ == kBlocked) return;
+  if (phase_ == kBlocked) {
+    write_log(true, "[DeepOFC TICK] action=NONE reason=RUNTIME_BLOCKED\n");
+    return;
+  }
   if (phase_ == kConfirmSent) {
     HandlePostConfirm(state);
     return;
   }
-  if (state.acting_chair != state.hero_chair || !state.hero_can_prepare) return;
+  if (state.acting_chair != state.hero_chair || !state.hero_can_prepare) {
+    write_log(true,
+      "[DeepOFC TICK] action=NONE reason=WAITING_TURN actor=%d hero=%d prepare=%d\n",
+      state.acting_chair, state.hero_chair, state.hero_can_prepare ? 1 : 0);
+    return;
+  }
   if (phase_ == kIdle) {
     if (hand_signature_.empty()) hand_signature_ = IncomingSignature(state);
     StartDecision(state, observation);
