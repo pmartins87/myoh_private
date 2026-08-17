@@ -403,11 +403,15 @@
     </ClCompile>
     <ClCompile Include="COFCFantasy15PixelRecognizer.cpp" />
     <ClCompile Include="COFCActionPlanner.cpp" />
-    <ClCompile Include="COFCTurnPlan.cpp" />
+    <ClCompile Include="COFCTurnPlan.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="COFCTurnOrchestrator.cpp" />
     <ClCompile Include="COFCConfirmVerifier.cpp" />
     <ClCompile Include="COFCActionExecutor.cpp" />
-    <ClCompile Include="COFCBaselinePolicy.cpp" />
+    <ClCompile Include="COFCBaselinePolicy.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="COFCRuntimeController.cpp" />
     <ClCompile Include="CardFunctions.cpp" />
     <ClCompile Include="CStringHashtableTemplate.cpp" />
