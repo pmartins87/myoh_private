@@ -11,9 +11,35 @@
 #include "COFCActionExecutor.h"
 
 #include "..\CTablemap\CTablemap.h"
+#include "CardFunctions.h"
 #include "CCasinoInterface.h"
 
 using namespace std;
+
+namespace {
+
+string CardLabel(int value) {
+  if (value == kOFCCardJoker1) return "JK1";
+  if (value == kOFCCardJoker2) return "JK2";
+  if (value < 0 || value > 51) return "INVALID";
+  const char ranks[] = "23456789TJQKA";
+  const char suits[] = "cdhs";
+  string label;
+  label.push_back(ranks[StdDeck_RANK(value)]);
+  label.push_back(suits[StdDeck_SUIT(value)]);
+  return label;
+}
+
+const char *RowLabel(EOFCRow row) {
+  switch (row) {
+    case kOFCRowTop: return "top";
+    case kOFCRowMiddle: return "middle";
+    case kOFCRowBottom: return "bottom";
+    default: return "undefined";
+  }
+}
+
+}  // namespace
 
 COFCActionExecutor::COFCActionExecutor() {
   ResetForKnownNewHand();
@@ -99,6 +125,16 @@ bool COFCActionExecutor::BeginPlacement(
   row_ = row;
   awaiting_verification_ = true;
 
+  write_log(true,
+    "[DeepOFC DRAG] stage=SEND card=%s value=%d row=%s "
+    "source=(%ld,%ld,%ld,%ld) target=(%ld,%ld,%ld,%ld) duration_ms=%d\n",
+    CardLabel(card_value_).c_str(), card_value_, RowLabel(row_),
+    step.source_rect.left, step.source_rect.top,
+    step.source_rect.right, step.source_rect.bottom,
+    step.target_rect.left, step.target_rect.top,
+    step.target_rect.right, step.target_rect.bottom,
+    duration_ms);
+
   if (!p_casino_interface->DragRectToRect(
         step.source_rect, step.target_rect, duration_ms)) {
     // Once the physical primitive was attempted we cannot prove whether KKPoker
@@ -109,8 +145,8 @@ bool COFCActionExecutor::BeginPlacement(
   }
 
   write_log(true,
-    "[DeepOFC R10] drag sent card=%d row=%d; awaiting fresh canonical verification\n",
-    card_value_, static_cast<int>(row_));
+    "[DeepOFC DRAG] stage=SENT card=%s value=%d row=%s result=OK awaiting=FRESH_SCRAPE\n",
+    CardLabel(card_value_).c_str(), card_value_, RowLabel(row_));
   return true;
 }
 
@@ -134,8 +170,8 @@ bool COFCActionExecutor::VerifyAfterFreshScrape(
   }
 
   write_log(true,
-    "[DeepOFC R10] drag VERIFIED card=%d row=%d; next placement may be planned\n",
-    card_value_, static_cast<int>(row_));
+    "[DeepOFC DRAG] stage=VERIFIED card=%s value=%d row=%s result=OK\n",
+    CardLabel(card_value_).c_str(), card_value_, RowLabel(row_));
   awaiting_verification_ = false;
   card_value_ = kOFCCardNoCard;
   row_ = kOFCRowUndefined;
