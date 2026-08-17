@@ -104,8 +104,33 @@ jobs:
             if (-not (Test-Path $source)) { throw "Required runtime file missing: $source" }
             Copy-Item $source DeepOFC_FP0_Fantasy15/
           }
+          $thirdPartyRuntime = @(
+            'archive.dll',
+            'bz2.dll',
+            'gif.dll',
+            'jpeg62.dll',
+            'libcurl.dll',
+            'libcrypto-3.dll',
+            'liblzma.dll',
+            'libpng16.dll',
+            'libsharpyuv.dll',
+            'libwebp.dll',
+            'libwebpmux.dll',
+            'lz4.dll',
+            'openjp2.dll',
+            'tiff.dll',
+            'zlib1.dll',
+            'zstd.dll',
+            'leptonica-1.83.1.dll',
+            'tesseract53.dll',
+            'opencv_world480.dll'
+          )
+          foreach ($name in $thirdPartyRuntime) {
+            $source = Join-Path 'lib' $name
+            if (-not (Test-Path $source)) { throw "Required third-party runtime missing: $source" }
+            Copy-Item $source DeepOFC_FP0_Fantasy15/
+          }
           Copy-Item License_GPLv3.htm DeepOFC_FP0_Fantasy15/
-          if (Test-Path 'lib') { Copy-Item lib DeepOFC_FP0_Fantasy15/lib -Recurse }
 
           # App-local VC143 CRT/MFC makes the ZIP runnable even when the target
           # machine does not already have the x86 redistributable installed.
