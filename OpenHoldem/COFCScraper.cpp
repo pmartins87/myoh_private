@@ -7,6 +7,7 @@
 #include "CScraper.h"
 
 #include <set>
+#include <sstream>
 #include <vector>
 
 #include "CardFunctions.h"
@@ -31,9 +32,12 @@ static int DeepOFCPixelCardValue(const COFCFantasy15PixelCard &card) {
 }
 
 static string DeepOFCPhysicalLabel(int value) {
+  if (value == kOFCCardNoCard) return "--";
+  if (value == kOFCCardBack) return "BACK";
+  if (value == kOFCCardUnknown) return "UNKNOWN";
   if (value == kOFCCardJoker1) return "JK1";
   if (value == kOFCCardJoker2) return "JK2";
-  if (value < 0 || value > 51) return "AMBIGUOUS";
+  if (value < 0 || value > 51) return "INVALID";
   const char ranks[] = "23456789TJQKA";
   const char suits[] = "cdhs";
   string label;
@@ -56,6 +60,89 @@ static bool DeepOFCReadRegionRect(const CString &name, RECT *out) {
   out->right = static_cast<LONG>(it->second.right);
   out->bottom = static_cast<LONG>(it->second.bottom);
   return out->right > out->left && out->bottom > out->top;
+}
+
+static const char *DeepOFCBoolText(bool value) {
+  return value ? "true" : "false";
+}
+
+static void DeepOFCLogSlot(
+    const CString &base_name,
+    const char *classification,
+    int value,
+    const CString &rank_text,
+    const CString &suit_text,
+    bool empty,
+    bool back,
+    bool joker1,
+    bool joker2,
+    const std::string &detail) {
+  const std::string label = DeepOFCPhysicalLabel(value);
+  write_log(true,
+    "[DeepOFC READ] slot=%s class=%s card=%s value=%d "
+    "rank=\"%s\" suit=\"%s\" gates={empty:%s,back:%s,jk1:%s,jk2:%s} detail=\"%s\"\n",
+    base_name.GetString(), classification, label.c_str(), value,
+    rank_text.GetString(), suit_text.GetString(),
+    DeepOFCBoolText(empty), DeepOFCBoolText(back),
+    DeepOFCBoolText(joker1), DeepOFCBoolText(joker2), detail.c_str());
+}
+
+static std::string DeepOFCBoardRowText(const COFCCard *cards, int count) {
+  std::ostringstream out;
+  out << "[";
+  for (int i = 0; i < count; ++i) {
+    if (i != 0) out << ",";
+    out << DeepOFCPhysicalLabel(cards[i].value);
+  }
+  out << "]";
+  return out.str();
+}
+
+static void DeepOFCLogRawObservation(
+    const COFCVisualObservation &obs,
+    const char *route) {
+  write_log(true,
+    "[DeepOFC RAW] route=%s valid=%d players=%d hero=%d dealer=%d actor=%d "
+    "round=%d prepare=%d confirm=%d loose=%d discards=%d\n",
+    route, obs.valid ? 1 : 0, obs.player_count, obs.hero_chair,
+    obs.dealer_chair, obs.acting_chair, obs.round_index,
+    obs.hero_can_prepare ? 1 : 0, obs.confirm_visible ? 1 : 0,
+    obs.hero_loose_count, obs.hero_discard_tracker_count);
+  for (int p = 0; p < obs.player_count; ++p) {
+    const COFCVisualPlayerObservation &player = obs.players[p];
+    const std::string top =
+      DeepOFCBoardRowText(player.visual_board.top, kOFCTopCards);
+    const std::string middle =
+      DeepOFCBoardRowText(player.visual_board.middle, kOFCMiddleCards);
+    const std::string bottom =
+      DeepOFCBoardRowText(player.visual_board.bottom, kOFCBottomCards);
+    write_log(true,
+      "[DeepOFC BOARD] p=%d top=%s middle=%s bottom=%s hidden_in=%d hidden_discard=%d fantasy=%d\n",
+      p, top.c_str(), middle.c_str(), bottom.c_str(),
+      player.hidden_incoming_count, player.hidden_discard_count,
+      player.fantasy ? 1 : 0);
+  }
+  std::ostringstream loose;
+  loose << "[";
+  for (int i = 0; i < obs.hero_loose_count; ++i) {
+    if (i != 0) loose << ",";
+    loose << DeepOFCPhysicalLabel(obs.hero_loose_cards[i].value);
+    if (obs.hero_loose_sources[i].valid) {
+      const RECT &r = obs.hero_loose_sources[i].rect;
+      loose << "@(" << r.left << "," << r.top << ","
+            << r.right << "," << r.bottom << ")";
+    }
+  }
+  loose << "]";
+  std::ostringstream discards;
+  discards << "[";
+  for (int i = 0; i < obs.hero_discard_tracker_count; ++i) {
+    if (i != 0) discards << ",";
+    discards << DeepOFCPhysicalLabel(obs.hero_discard_tracker[i].value);
+  }
+  discards << "]";
+  write_log(true, "[DeepOFC HERO] loose=%s discards=%s\n",
+    loose.str().c_str(), discards.str().c_str());
 }
 
 int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
@@ -83,7 +170,11 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
   }
   bool empty = false;
   EvaluateTrueFalseRegion(&empty, empty_region);
-  if (empty) return 0;
+  if (empty) {
+    DeepOFCLogSlot(base_name, "EMPTY", kOFCCardNoCard,
+      CString(""), CString(""), true, false, false, false, "");
+    return 0;
+  }
 
   if (!DeepOFCRegionExists(back_region)
       || !DeepOFCRegionExists(joker1_region)
@@ -110,6 +201,8 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
   }
   if (back) {
     *is_back = true;
+    DeepOFCLogSlot(base_name, "BACK", kOFCCardBack,
+      CString(""), CString(""), empty, back, joker1, joker2, "");
     return 0;
   }
 
@@ -121,11 +214,15 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
   if (joker1) {
     *joker_id = 1;
     card->value = kOFCCardJoker1;
+    DeepOFCLogSlot(base_name, "JOKER_GATE", card->value,
+      CString(""), CString(""), empty, back, joker1, joker2, "JK1");
     return 1;
   }
   if (joker2) {
     *joker_id = 2;
     card->value = kOFCCardJoker2;
+    DeepOFCLogSlot(base_name, "JOKER_GATE", card->value,
+      CString(""), CString(""), empty, back, joker1, joker2, "JK2");
     return 1;
   }
 
@@ -157,12 +254,33 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
   if (persistent_joker != 0) {
     *joker_id = persistent_joker;
     card->value = persistent_joker == 1 ? kOFCCardJoker1 : kOFCCardJoker2;
+    DeepOFCLogSlot(base_name, "PERSISTENT_JOKER", card->value,
+      CString(""), CString(""), empty, back, joker1, joker2, native_error);
     return 1;
   }
 
-  const int legacy_card = ScrapeCardByRankAndSuit(base_name);
+  // Read and log the exact TableMap OCR outputs used to form the physical card.
+  // This makes a runtime rejection reproducible instead of hiding whether rank,
+  // suit, validation or card-number conversion failed.
+  CString rank_result;
+  CString suit_result;
+  const bool suit_evaluated = EvaluateRegion(suit_region, &suit_result);
+  const bool suit_valid = suit_evaluated && IsSuitString(suit_result);
+  bool rank_evaluated = false;
+  bool rank_valid = false;
+  int legacy_card = CARD_UNDEFINED;
+  if (suit_valid) {
+    rank_evaluated = EvaluateRegion(rank_region, &rank_result);
+    rank_valid = rank_evaluated && IsRankString(rank_result);
+    if (rank_valid) {
+      if (rank_result == "10") rank_result = "T";
+      legacy_card = CardString2CardNumber(rank_result + suit_result);
+    }
+  }
   if ((legacy_card >= 0) && (legacy_card <= 51)) {
     card->value = legacy_card;
+    DeepOFCLogSlot(base_name, "TABLEMAP_OCR", card->value,
+      rank_result, suit_result, empty, back, joker1, joker2, "");
     return 1;
   }
 
@@ -177,13 +295,28 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
     if (value >= 0) {
       card->value = value;
       *joker_id = native_card.joker_id;
+      DeepOFCLogSlot(base_name, "NATIVE_FALLBACK", card->value,
+        rank_result, suit_result, empty, back, joker1, joker2, native_error);
       return 1;
     }
   }
 
+  std::ostringstream failure_detail;
+  failure_detail
+    << "suit_eval=" << (suit_evaluated ? 1 : 0)
+    << " suit_valid=" << (suit_valid ? 1 : 0)
+    << " rank_eval=" << (rank_evaluated ? 1 : 0)
+    << " rank_valid=" << (rank_valid ? 1 : 0)
+    << " legacy=" << legacy_card
+    << " native=" << native_error;
+  DeepOFCLogSlot(base_name, "REJECTED", kOFCCardUnknown,
+    rank_result, suit_result, empty, back, joker1, joker2,
+    failure_detail.str());
   write_log(k_always_log_errors,
-    "[DeepOFC] Non-empty slot has no unambiguous standard/persistent-Joker face: %s (%s)\n",
-    base_name.GetString(), native_error.c_str());
+    "[DeepOFC] Non-empty slot has no unambiguous standard/persistent-Joker face: %s "
+    "rank=\"%s\" suit=\"%s\" legacy=%d (%s)\n",
+    base_name.GetString(), rank_result.GetString(), suit_result.GetString(),
+    legacy_card, native_error.c_str());
   return -3;
 }
 
@@ -480,6 +613,7 @@ bool CScraper::ScrapeOFCFantasyVisualObservation(int player_count, int hero_chai
     return false;
   }
   obs->valid = true;
+  DeepOFCLogRawObservation(*obs, "FANTASY15");
   write_log(true,
     "[DeepOFC] Fantasy15 raw valid pending=%d loose=%d confirm=%d\n",
     arrangement_count, obs->hero_loose_count, obs->confirm_visible ? 1 : 0);
@@ -531,6 +665,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
   }
 
   int visible_joker_count = 0;
+  bool all_slots_ok = true;
 
   for (int p = 0; p < player_count; ++p) {
     COFCVisualPlayerObservation *player = &obs->players[p];
@@ -542,7 +677,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
       base.Format("ofc_p%d_top%d", p, i);
       bool back = false; int joker_id = 0;
       int rc = ScrapeOFCSlot(base, &player->visual_board.top[i], &back, &joker_id);
-      if (rc < 0) return false;
+      if (rc < 0) { all_slots_ok = false; continue; }
       if (back) ++player->hidden_incoming_count;
       if (joker_id != 0) ++visible_joker_count;
     }
@@ -550,7 +685,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
       base.Format("ofc_p%d_middle%d", p, i);
       bool back = false; int joker_id = 0;
       int rc = ScrapeOFCSlot(base, &player->visual_board.middle[i], &back, &joker_id);
-      if (rc < 0) return false;
+      if (rc < 0) { all_slots_ok = false; continue; }
       if (back) ++player->hidden_incoming_count;
       if (joker_id != 0) ++visible_joker_count;
     }
@@ -558,7 +693,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
       base.Format("ofc_p%d_bottom%d", p, i);
       bool back = false; int joker_id = 0;
       int rc = ScrapeOFCSlot(base, &player->visual_board.bottom[i], &back, &joker_id);
-      if (rc < 0) return false;
+      if (rc < 0) { all_slots_ok = false; continue; }
       if (back) ++player->hidden_incoming_count;
       if (joker_id != 0) ++visible_joker_count;
     }
@@ -577,7 +712,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
       COFCCard discard_face;
       bool back = false; int joker_id = 0;
       int rc = ScrapeOFCSlot(base, &discard_face, &back, &joker_id);
-      if (rc < 0) return false;
+      if (rc < 0) { all_slots_ok = false; continue; }
       if (back) {
         ++player->hidden_discard_count;
       } else if (rc > 0) {
@@ -606,8 +741,8 @@ bool CScraper::ScrapeOFCVisualObservation() {
     COFCCard card;
     bool back = false; int joker_id = 0;
     int rc = ScrapeOFCSlot(base, &card, &back, &joker_id);
-    if (rc < 0) return false;
-    if (back) return false;
+    if (rc < 0) { all_slots_ok = false; continue; }
+    if (back) { all_slots_ok = false; continue; }
     if (joker_id != 0) ++visible_joker_count;
     if (rc > 0) {
       const int loose_index = obs->hero_loose_count;
@@ -629,10 +764,17 @@ bool CScraper::ScrapeOFCVisualObservation() {
     COFCCard card;
     bool back = false; int joker_id = 0;
     int rc = ScrapeOFCSlot(base, &card, &back, &joker_id);
-    if (rc < 0) return false;
-    if (back) return false;
+    if (rc < 0) { all_slots_ok = false; continue; }
+    if (back) { all_slots_ok = false; continue; }
     if (joker_id != 0) ++visible_joker_count;
     if (rc > 0) obs->hero_discard_tracker[obs->hero_discard_tracker_count++] = card;
+  }
+
+  if (!all_slots_ok) {
+    write_log(k_always_log_errors,
+      "[DeepOFC RAW] full slot sweep completed with one or more rejected slots; no action\n");
+    DeepOFCLogRawObservation(*obs, "NORMAL_REJECTED");
+    return false;
   }
 
   int dealer_count = 0, actor_count = 0;
@@ -680,6 +822,7 @@ bool CScraper::ScrapeOFCVisualObservation() {
   }
 
   obs->valid = true;
+  DeepOFCLogRawObservation(*obs, "NORMAL");
   write_log(true,
     "[DeepOFC] raw valid players=%d hero=%d dealer=%d actor=%d round=%d confirm=%d loose=%d discards=%d visible_jokers=%d\n",
     obs->player_count, obs->hero_chair, obs->dealer_chair,
