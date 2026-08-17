@@ -79,11 +79,22 @@ CLazyScraper::~CLazyScraper() {
 // If in doubt be conservative.
 
 void CLazyScraper::DoScrape() {
-	if (p_scraper->IsIdenticalScrape())	{
-		_is_identical_scrape = true;
+  const bool identical_bitmap = p_scraper->IsIdenticalScrape();
+  _is_identical_scrape = identical_bitmap;
+  if (identical_bitmap && !p_tablemap->SupportsOFCJokerUltimate()) {
     return;
-	}
-  _is_identical_scrape = false;
+  }
+  // OFC is deliberately re-evaluated even when the bitmap is identical. A
+  // transient first read must not strand the controller forever, and every
+  // heartbeat must leave a complete auditable perception/action trace.
+  static unsigned long deepofc_cycle = 0;
+  if (p_tablemap->SupportsOFCJokerUltimate()) {
+    ++deepofc_cycle;
+    write_log(true,
+      "[DeepOFC CYCLE] id=%lu bitmap=%s previous_canonical_valid=%d\n",
+      deepofc_cycle, identical_bitmap ? "IDENTICAL_RECHECK" : "CHANGED",
+      p_table_state->OFCState()->valid ? 1 : 0);
+  }
   // DeepOFC R9 canonical reconstruction path. Joker Ultimate never falls
   // through to legacy Hold'em hole/community/betting semantics.
   if (p_tablemap->SupportsOFCJokerUltimate()) {
@@ -94,6 +105,9 @@ void CLazyScraper::DoScrape() {
       // scrape, but the current raw observation remains invalid so the FP0
       // controller cannot act on stale state.
       *p_table_state->OFCState() = previous_state;
+      write_log(k_always_log_errors,
+        "[DeepOFC CYCLE] id=%lu result=RAW_REJECTED action=NONE lineage=%s\n",
+        deepofc_cycle, previous_state.valid ? "PRESERVED" : "EMPTY");
       write_log(k_always_log_errors,
         "[DeepOFC] raw OFC scrape rejected; no action, last canonical lineage preserved\n");
       return;
@@ -127,6 +141,7 @@ void CLazyScraper::DoScrape() {
 
     *p_table_state->OFCState() = rebuilt;
     std::string snapshot = COFCReconstructor::DiagnosticSnapshot(rebuilt);
+    write_log(true, "[DeepOFC CYCLE] id=%lu result=CANONICAL_VALID\n", deepofc_cycle);
     write_log(true, "[DeepOFC SNAPSHOT v1] %s\n", snapshot.c_str());
     return;
   }
