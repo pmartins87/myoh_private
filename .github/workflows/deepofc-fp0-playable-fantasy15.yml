@@ -33,8 +33,8 @@ jobs:
             throw 'OFC runtime controller is not connected'
           }
           $lazy = Get-Content -Raw 'OpenHoldem/CLazyScraper.cpp'
-          if ($lazy -notmatch 'last canonical lineage preserved'
-              -or $lazy -notmatch 'OFCVisualObservation\(\)->valid = false') {
+          if (($lazy -notmatch 'last canonical lineage preserved') -or
+              ($lazy -notmatch 'OFCVisualObservation\(\)->valid = false')) {
             throw 'Transient-frame lineage preservation is not active'
           }
 
