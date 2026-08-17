@@ -111,7 +111,9 @@ jobs:
           # machine does not already have the x86 redistributable installed.
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $redist = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC') -Directory |
-            Sort-Object Name | Select-Object -Last 1
+            Where-Object {
+              Test-Path (Join-Path $_.FullName 'x86\Microsoft.VC143.CRT')
+            } | Sort-Object Name | Select-Object -Last 1
           if (-not $redist) { throw 'VC143 redistributable directory missing' }
           foreach ($component in @('Microsoft.VC143.CRT','Microsoft.VC143.MFC')) {
             $componentPath = Join-Path $redist.FullName "x86\$component"
