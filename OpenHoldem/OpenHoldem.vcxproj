@@ -407,6 +407,8 @@
     <ClCompile Include="COFCTurnOrchestrator.cpp" />
     <ClCompile Include="COFCConfirmVerifier.cpp" />
     <ClCompile Include="COFCActionExecutor.cpp" />
+    <ClCompile Include="COFCBaselinePolicy.cpp" />
+    <ClCompile Include="COFCRuntimeController.cpp" />
     <ClCompile Include="CardFunctions.cpp" />
     <ClCompile Include="CStringHashtableTemplate.cpp" />
     <ClCompile Include="CStringMatch.cpp" />

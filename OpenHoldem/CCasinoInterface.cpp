@@ -182,6 +182,25 @@ bool CCasinoInterface::DragRectToRect(RECT source_rect, RECT target_rect, int du
   return ok;
 }
 
+bool CCasinoInterface::ClickRectSafely(RECT rect) {
+  if (theApp._dll_mouse_click == NULL || p_autoconnector == NULL) return false;
+  HWND hwnd = p_autoconnector->attached_hwnd();
+  if (hwnd == NULL || !IsWindow(hwnd)) return false;
+  RECT client;
+  if (!GetClientRect(hwnd, &client)) return false;
+  const bool rect_ok = rect.right > rect.left && rect.bottom > rect.top
+    && rect.left >= client.left && rect.top >= client.top
+    && rect.right <= client.right && rect.bottom <= client.bottom;
+  if (!rect_ok || TableLostFocus()) {
+    write_log(k_always_log_errors,
+      "[DeepOFC FP0] Refusing Confirm click outside client bounds or without focus\n");
+    return false;
+  }
+  (theApp._dll_mouse_click)(hwnd, rect, MouseLeft, 1);
+  p_engine_container->symbol_engine_time()->UpdateOnAutoPlayerAction();
+  return true;
+}
+
 bool CCasinoInterface::ClickButtonSequence(int first_button, int second_button, int delay_in_milli_seconds) {
 	if (LogicalAutoplayerButton(first_button)->Click()) {
 		Sleep(delay_in_milli_seconds); 

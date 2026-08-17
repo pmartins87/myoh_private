@@ -89,9 +89,13 @@ void CLazyScraper::DoScrape() {
   if (p_tablemap->SupportsOFCJokerUltimate()) {
     COFCState previous_state = *p_table_state->OFCState();
     if (!p_scraper->ScrapeOFCVisualObservation()) {
-      p_table_state->OFCState()->Reset();
+      // A drag animation may legitimately produce one ambiguous intermediate
+      // bitmap. Keep the last valid canonical lineage for the next settled
+      // scrape, but the current raw observation remains invalid so the FP0
+      // controller cannot act on stale state.
+      *p_table_state->OFCState() = previous_state;
       write_log(k_always_log_errors,
-        "[DeepOFC] R9 raw OFC scrape rejected; canonical state invalid\n");
+        "[DeepOFC] raw OFC scrape rejected; no action, last canonical lineage preserved\n");
       return;
     }
 
@@ -111,9 +115,12 @@ void CLazyScraper::DoScrape() {
     std::string reconstruction_error;
     if (!COFCReconstructor::Reconstruct(
           *raw, previous, &rebuilt, &reconstruction_error)) {
-      p_table_state->OFCState()->Reset();
+      // Never expose a fresh raw bitmap together with a stale canonical state
+      // to the controller. Preserve lineage only for the next reconstruction.
+      p_table_state->OFCVisualObservation()->valid = false;
+      *p_table_state->OFCState() = previous_state;
       write_log(k_always_log_errors,
-        "[DeepOFC] canonical reconstruction rejected: %s\n",
+        "[DeepOFC] canonical reconstruction rejected; no action, last lineage preserved: %s\n",
         reconstruction_error.c_str());
       return;
     }

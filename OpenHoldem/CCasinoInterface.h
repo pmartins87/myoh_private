@@ -51,6 +51,8 @@ class CCasinoInterface: public CSpaceOptimizedGlobalObject {
   // DLL primitive; OFC semantic authorization and post-drag verification stay
   // in the dedicated transaction layer. It is not wired into the live R9 path.
   bool DragRectToRect(RECT source_rect, RECT target_rect, int duration_ms);
+  // Bounds/focus checked single click used by the OFC Confirm transaction.
+  bool ClickRectSafely(RECT rect);
   void SendKey(const char ascii_key);
   void SendHotKey(const char * hot_key);
  private:

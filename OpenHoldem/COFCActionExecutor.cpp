@@ -2,9 +2,8 @@
 //
 // DeepOFC R10 single-drag transaction executor.
 //
-// Not wired into live CAutoplayer while R9 is read-only. When that gate is
-// deliberately advanced, this class enforces one physical drag followed by a
-// fresh canonical verification before another drag can begin.
+// Enforces one physical drag followed by a fresh canonical verification before
+// another drag can begin. The controller never retries an uncertain mutation.
 //
 //******************************************************************************
 

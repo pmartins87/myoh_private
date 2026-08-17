@@ -30,6 +30,7 @@
 
 #include "CRebuyManagement.h"
 #include "CReplayFrame.h"
+#include "COFCRuntimeController.h"
 #include "CScraper.h"
 #include "CStableFramesCounter.h"
 #include "CSymbolEngineAutoplayer.h"
@@ -46,6 +47,7 @@
 #include "CMyMutex.h"
 
 CAutoplayer	*p_autoplayer = NULL;
+static COFCRuntimeController deepofc_runtime_controller;
 
 CAutoplayer::CAutoplayer(void) {
 	// Autoplayer is not enabled at startup.
@@ -455,10 +457,12 @@ bool CAutoplayer::DoAllin(void) {
 }
 
 void CAutoplayer::DoAutoplayer(void) {
-  // DeepOFC R9 hard read-only guard. No popup, hopper, formula,
-  // mouse or keyboard action is allowed on a Joker Ultimate table yet.
   if (p_tablemap->SupportsOFCJokerUltimate()) {
-    write_log(true, "[DeepOFC] R9 hard read-only guard: autoplayer suppressed\n");
+    // Dedicated OFC path. Legacy Hold'em formulas/buttons are never evaluated
+    // on this table. The controller itself emits at most one physical input,
+    // then requires an exact fresh-state transition before continuing.
+    deepofc_runtime_controller.Tick(
+      *p_table_state->OFCState(), *p_table_state->OFCVisualObservation());
     action_sequence_needs_to_be_finished = false;
     return;
   }
