@@ -1,0 +1,38 @@
+name: OpenOFC one-shot perception capture repair
+
+on:
+  push:
+    branches:
+      - agent/openofc-foundation
+
+permissions:
+  contents: write
+
+jobs:
+  apply-repair:
+    if: github.event.head_commit.message == 'OpenOFC: trigger perception capture repair'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/openofc-foundation
+          fetch-depth: 0
+
+      - name: Apply deterministic source repair
+        run: python tools/apply_openofc_runtime_repair.py
+
+      - name: Commit repaired sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CTransform/CTransform.cpp OpenHoldem/COFCScraper.cpp OpenHoldem/CScraper.cpp .github/workflows/deepofc-fp0-playable-fantasy15.yml
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "Repair produced no changes"
+            exit 1
+          fi
+          git commit -m "OpenOFC: repair text perception and capture"
+          git push origin HEAD:agent/openofc-foundation
