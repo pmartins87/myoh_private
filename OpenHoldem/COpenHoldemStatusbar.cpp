@@ -82,7 +82,9 @@ void COpenHoldemStatusbar::OnUpdateStatusbar() {
     if (raw != NULL && raw->valid) perception = "OFC READ: OK";
     else if (raw != NULL) perception = "OFC READ: REJECTED";
 
-    if (state != NULL && state->valid) {
+    const bool canonical_ready = state != NULL && state->valid
+      && state->hero_chair >= 0 && state->hero_chair < state->player_count;
+    if (canonical_ready) {
       if (state->players[state->hero_chair].fantasy) {
         round.Format("Fantasy | in=%d", state->hero_incoming_count);
       } else {
@@ -91,8 +93,10 @@ void COpenHoldemStatusbar::OnUpdateStatusbar() {
       }
       if (state->acting_chair == state->hero_chair) {
         actor = state->hero_can_confirm ? "Hero: CONFIRM" : "Hero: ARRANGE";
-      } else {
+      } else if (state->acting_chair >= 0) {
         actor.Format("Waiting P%d", state->acting_chair);
+      } else {
+        actor = "Waiting actor";
       }
       if (!state->action_required) actor = "Waiting transition";
     }
