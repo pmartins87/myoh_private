@@ -80,24 +80,38 @@ CLazyScraper::~CLazyScraper() {
 
 void CLazyScraper::DoScrape() {
   const bool identical_bitmap = p_scraper->IsIdenticalScrape();
+  const bool openofc_mode = p_tablemap->SupportsOFCJokerUltimate();
   _is_identical_scrape = identical_bitmap;
-  if (identical_bitmap && !p_tablemap->SupportsOFCJokerUltimate()) {
+
+  static unsigned long deepofc_cycle = 0;
+  if (openofc_mode) {
+    ++deepofc_cycle;
+    if (identical_bitmap) {
+      // Recognition is a pure function of this captured bitmap plus the
+      // active TableMap. Re-running the complete OFC OCR/classifier stack on
+      // byte-identical pixels can only reproduce the same result, while it
+      // burns CPU, floods the log and can make the attached table appear to
+      // blink. Reuse the last raw/canonical snapshot until capture changes.
+      // The runtime still receives its heartbeat; while verifying a drag it
+      // sees the unchanged pending signature and waits for a genuinely fresh
+      // frame instead of treating repeated OCR as fresh evidence.
+      write_log(true,
+        "[OpenOFC CACHE] cycle=%lu bitmap=IDENTICAL reused_raw_valid=%d reused_canonical_valid=%d\n",
+        deepofc_cycle,
+        p_table_state->OFCVisualObservation()->valid ? 1 : 0,
+        p_table_state->OFCState()->valid ? 1 : 0);
+      return;
+    }
+    write_log(true,
+      "[DeepOFC CYCLE] id=%lu bitmap=CHANGED previous_canonical_valid=%d\n",
+      deepofc_cycle, p_table_state->OFCState()->valid ? 1 : 0);
+  } else if (identical_bitmap) {
     return;
   }
-  // OFC is deliberately re-evaluated even when the bitmap is identical. A
-  // transient first read must not strand the controller forever, and every
-  // heartbeat must leave a complete auditable perception/action trace.
-  static unsigned long deepofc_cycle = 0;
-  if (p_tablemap->SupportsOFCJokerUltimate()) {
-    ++deepofc_cycle;
-    write_log(true,
-      "[DeepOFC CYCLE] id=%lu bitmap=%s previous_canonical_valid=%d\n",
-      deepofc_cycle, identical_bitmap ? "IDENTICAL_RECHECK" : "CHANGED",
-      p_table_state->OFCState()->valid ? 1 : 0);
-  }
+
   // DeepOFC R9 canonical reconstruction path. Joker Ultimate never falls
   // through to legacy Hold'em hole/community/betting semantics.
-  if (p_tablemap->SupportsOFCJokerUltimate()) {
+  if (openofc_mode) {
     COFCState previous_state = *p_table_state->OFCState();
     if (!p_scraper->ScrapeOFCVisualObservation()) {
       // A drag animation may legitimately produce one ambiguous intermediate
