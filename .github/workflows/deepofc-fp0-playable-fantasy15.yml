@@ -47,8 +47,8 @@ jobs:
           if ($heartbeat -notmatch 'holdem_engines_bypassed=1') {
             throw 'OpenOFC startup evidence is missing'
           }
-          if ($heartbeat -notmatch '(?s)if \(!openofc_mode\).*?EvaluateAll\(\)') {
-            throw 'Holdem EvaluateAll is not explicitly gated away from OpenOFC'
+          if ($heartbeat -notmatch '(?s)if \(openofc_mode\).*?else \{.*?EvaluateAll\(\)') {
+            throw 'Holdem EvaluateAll is not explicitly isolated behind the non-OpenOFC branch'
           }
           if ($heartbeat -notmatch '(?s)if \(!openofc_mode\).*?Validate\(\)') {
             throw 'Holdem validator is not explicitly gated away from OpenOFC'
