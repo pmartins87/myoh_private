@@ -1,0 +1,57 @@
+name: OpenOFC text-only card refactor
+
+on:
+  push:
+    branches:
+      - agent/openofc-foundation
+    paths:
+      - tools/apply_openofc_text_only_refactor.py
+      - .github/workflows/openofc-text-only-refactor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refactor-source:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/openofc-foundation
+
+      - name: Apply source refactor
+        run: python tools/apply_openofc_text_only_refactor.py
+
+      - name: Verify standard OFC path has no native pixel fallback
+        shell: python
+        run: |
+          from pathlib import Path
+          text = Path('OpenHoldem/COFCScraper.cpp').read_text(encoding='utf-8')
+          start = text.index('int CScraper::ScrapeOFCSlot')
+          end = text.index('static bool DeepOFCRegisterKnownCard', start)
+          slot = text[start:end]
+          forbidden = ['DetectPersistentJoker', 'RecognizeUprightCard', 'TABLEMAP_OCR', 'NATIVE_FALLBACK']
+          bad = [x for x in forbidden if x in slot]
+          if bad:
+              raise SystemExit('forbidden standard-card fallback remains: ' + ', '.join(bad))
+          required = ['ScrapeCardByRankAndSuit(base_name)', 'TABLEMAP_TEXT', 'shared=ScrapeCardByRankAndSuit']
+          missing = [x for x in required if x not in slot]
+          if missing:
+              raise SystemExit('missing text-transform contract: ' + ', '.join(missing))
+          print('PASS: standard OpenOFC card path is TableMap-text-only')
+
+      - name: Commit refactor
+        shell: bash
+        run: |
+          if git diff --quiet -- OpenHoldem/COFCScraper.cpp; then
+            echo "No source change required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add OpenHoldem/COFCScraper.cpp
+          git diff --cached --check
+          git commit -m "OpenOFC: make standard card recognition text-transform only"
+          git push origin HEAD:agent/openofc-foundation
