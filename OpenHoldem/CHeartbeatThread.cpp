@@ -156,33 +156,67 @@ void CHeartbeatThread::ScrapeEvaluateAct() {
   p_table_title->UpdateTitle();
   write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] Calling DoScrape.\n");
   p_lazyscraper->DoScrape();
-  // We must not check if the scrape of the table changed, because:
-  //   * some symbol-engines must be evaluated no matter what
-  //   * we might need to act (sitout, ...) on empty/non-changing tables
-  //   * auto-player needs stable frames too
-	p_engine_container->EvaluateAll();
+
+  // OpenOFC has its own perception, canonical state and action transaction.
+  // Do not run the Hold'em symbol-engine graph for an OFC table. Besides being
+  // strategically meaningless, that graph derives concepts such as blinds,
+  // betting rounds, handrank/prwin, raise/call/check/fold and userchair from a
+  // layout that does not contain those semantics. Keeping it out of the OFC
+  // heartbeat is the architectural boundary between OpenHoldem compatibility
+  // code and the OFC-native runtime.
+  const bool openofc_mode = (p_tablemap != NULL)
+    && p_tablemap->SupportsOFCJokerUltimate();
+  if (openofc_mode) {
+    static bool logged_openofc_mode = false;
+    if (!logged_openofc_mode) {
+      write_log(true,
+        "[OpenOFC MODE] ACTIVE tablemap=\"%s\" formula_bypassed=1 "
+        "holdem_engines_bypassed=1 holdem_validator_bypassed=1\n",
+        p_tablemap->filepath().GetString());
+      logged_openofc_mode = true;
+    }
+  } else {
+    // Legacy OpenHoldem path, unchanged for non-OFC tablemaps.
+    // We must not check if the scrape of the table changed, because:
+    //   * some symbol-engines must be evaluated no matter what
+    //   * we might need to act (sitout, ...) on empty/non-changing tables
+    //   * auto-player needs stable frames too
+    p_engine_container->EvaluateAll();
+  }
+
 	// Reply-frames no longer here in the heartbeat.
   // we have a "ReplayFrameController for that.
   LeaveCriticalSection(&pParent->cs_update_in_progress);
 	p_openholdem_title->UpdateTitle();
+
 	////////////////////////////////////////////////////////////////////////////////////////////
-	// Update scraper output dialog if it is present
-	if (m_ScraperOutputDlg) {
+	// The legacy ScraperOutput dialog is a Hold'em view (SABDP, two hole cards,
+	// bets/balances/community cards). Updating it in OpenOFC mode creates a
+	// misleading empty display, so it is intentionally suppressed until the
+	// dedicated OFC inspector replaces it.
+	if (!openofc_mode && m_ScraperOutputDlg) {
 		m_ScraperOutputDlg->UpdateDisplay();
 	}
   
 	////////////////////////////////////////////////////////////////////////////////////////////
-	// OH-Validator
-	write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] Calling Validator.\n");
-  p_validator->Validate();
+	// OH-Validator validates Hold'em invariants. It must never veto or mutate an
+	// OFC heartbeat; OFC validity is enforced by COFCScraper/COFCReconstructor.
+	if (!openofc_mode) {
+		write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] Calling Validator.\n");
+    p_validator->Validate();
+  }
 
 	////////////////////////////////////////////////////////////////////////////////////////////
 	// Autoplayer
 	write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] autoplayer_engaged(): %s\n", 
 		Bool2CString(p_autoplayer->autoplayer_engaged()));
-	write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] p_engine_container->symbol_engine_userchair()->userchair()_confirmed(): %s\n", 
-		Bool2CString(p_engine_container->symbol_engine_userchair()->userchair_confirmed()));
-	// If autoplayer is engaged, we know our chair, and the DLL hasn't told us to wait, then go do it!
+  if (!openofc_mode) {
+	  write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] p_engine_container->symbol_engine_userchair()->userchair()_confirmed(): %s\n", 
+		  Bool2CString(p_engine_container->symbol_engine_userchair()->userchair_confirmed()));
+  }
+	// In OpenOFC the dedicated CAutoplayer branch invokes COFCRuntimeController
+	// directly and never evaluates an OpenPPL betting formula. In legacy mode the
+	// original OpenHoldem autoplayer behavior remains unchanged.
 	if (p_autoplayer->autoplayer_engaged()) {
 		write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] Calling DoAutoplayer.\n");
 		p_autoplayer->DoAutoplayer();
