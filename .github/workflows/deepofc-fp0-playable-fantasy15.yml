@@ -93,9 +93,20 @@ jobs:
           if ($title -notmatch 'OpenOFC \| KKPoker Joker Ultimate') {
             throw 'OpenOFC window identity is missing'
           }
+
+          # Canonical inspector must expose the exact OFC source of truth and
+          # publish a full snapshot only when state changes.
+          $inspector = Get-Content -Raw 'OpenHoldem/COFCInspectorSnapshot.h'
           $status = Get-Content -Raw 'OpenHoldem/COpenHoldemStatusbar.cpp'
-          if (($status -notmatch 'OFC READ: OK') -or ($status -notmatch 'Hero: ARRANGE')) {
-            throw 'OpenOFC status display is missing'
+          if (($inspector -notmatch 'BoardText') -or
+              ($inspector -notmatch 'hero_incoming') -or
+              ($inspector -notmatch 'hero_discards') -or
+              ($inspector -notmatch 'RAW\{prepare=') -or
+              ($status -notmatch 'COFCInspectorSnapshot::Compact') -or
+              ($status -notmatch 'COFCInspectorSnapshot::Full') -or
+              ($status -notmatch '\[OpenOFC INSPECTOR\]') -or
+              ($status -notmatch 'last_full_snapshot')) {
+            throw 'OpenOFC canonical inspector is incomplete'
           }
 
       - name: Setup MSBuild
