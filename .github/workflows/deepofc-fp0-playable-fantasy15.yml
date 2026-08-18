@@ -109,6 +109,36 @@ jobs:
             throw 'OpenOFC canonical inspector is incomplete'
           }
 
+      - name: Materialize and validate canonical TableMap
+        shell: pwsh
+        run: |
+          $source = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v1.tm.gz.b64'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v1.tm'
+          $gz = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v1.tm.gz'
+          if (-not (Test-Path $source)) {
+            throw "Canonical TableMap source missing: $source"
+          }
+          $bytes = [Convert]::FromBase64String((Get-Content -Raw $source).Trim())
+          [IO.File]::WriteAllBytes($gz, $bytes)
+          $input = [IO.File]::OpenRead($gz)
+          try {
+            $gzip = New-Object IO.Compression.GzipStream($input, [IO.Compression.CompressionMode]::Decompress)
+            try {
+              $output = [IO.File]::Create($canonical)
+              try { $gzip.CopyTo($output) } finally { $output.Dispose() }
+            } finally { $gzip.Dispose() }
+          } finally { $input.Dispose() }
+          Remove-Item $gz -Force
+
+          python tools/validate_openofc_tablemap.py $canonical --require-contract 1
+          if ($LASTEXITCODE -ne 0) { throw "Canonical OpenOFC TableMap validation failed: $LASTEXITCODE" }
+
+          $expected = '7d9403f82b0dca8a0e991c9f005de38ee014f200e62370975f04c9bba6257303'
+          $actual = (Get-FileHash $canonical -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Canonical TableMap SHA256 mismatch: expected=$expected actual=$actual"
+          }
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
@@ -156,25 +186,45 @@ jobs:
         run: |
           $release = 'Release'
           $out = 'artifact/DeepOFC_FP0_Fantasy15_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v1.tm'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           if (-not (Test-Path "$release/OpenHoldem.exe")) {
             throw "Compiled OpenHoldem.exe not found in $release"
+          }
+          if (-not (Test-Path $canonical)) {
+            throw "Validated canonical TableMap missing: $canonical"
           }
           Copy-Item "$release/OpenHoldem.exe" $out
           Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
           if (Test-Path "$release/tessdata") {
             Copy-Item "$release/tessdata" "$out/tessdata" -Recurse
           }
-          @'
-          OpenOFC / DeepOFC FP0 code package
 
-          This artifact contains the compiled OFC-native runtime code and required DLLs.
-          A compatible OFC TableMap must declare:
+          $scraperOut = Join-Path $out 'scraper'
+          New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v1.tm')
+          $tmFiles = @(Get-ChildItem $out -Recurse -Filter '*.tm')
+          if ($tmFiles.Count -ne 1) {
+            throw "OpenOFC runtime must contain exactly one TableMap; got $($tmFiles.Count)"
+          }
+
+          @'
+          OpenOFC / DeepOFC diagnostic runtime
+
+          This artifact contains the compiled OFC-native runtime, required DLLs, and
+          exactly one canonical KKPoker Joker Ultimate TableMap:
+              scraper/KKPoker_OpenOFC_JokerUltimate_v1.tm
+
+          Runtime/TableMap contract:
               s$openofc_contract 1
 
-          Until the canonical TableMap is packaged with the runtime, any OFC map without
-          that exact contract is treated as OFC (so Hold'em engines stay bypassed) but
-          physical autoplayer input is hard-blocked.
+          Canonical TableMap SHA256:
+              7d9403f82b0dca8a0e991c9f005de38ee014f200e62370975f04c9bba6257303
+
+          Standard OFC rank/suit recognition uses only TableMap Tn text transforms.
+          Native/pixel recognition remains isolated to the Fantasy route.
+          A stale or unversioned OFC map remains isolated from Hold'em but physical
+          autoplayer input is hard-blocked.
           '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
 
       - name: Upload Windows runtime
