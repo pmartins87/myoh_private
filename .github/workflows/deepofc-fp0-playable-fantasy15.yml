@@ -25,6 +25,17 @@ jobs:
           if ($scraper -notmatch 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED\s+1') {
             throw 'Native Fantasy15 recognizer is not enabled in this build'
           }
+
+          # Standard OFC rank/suit recognition is TableMap-transform based.
+          # Do not let AutoOCR/template-detection creep into the OFC path.
+          if ($scraper -match 'p_auto_ocr|GetDetectTemplateResult|GetDetectTemplatesResult|get_ocr_result') {
+            throw 'AutoOCR/template recognition is forbidden in the standard OpenOFC scraper path'
+          }
+          if (($scraper -notmatch 'EvaluateRegion\(suit_region') -or
+              ($scraper -notmatch 'EvaluateRegion\(rank_region')) {
+            throw 'OpenOFC standard card recognition is not using TableMap rank/suit transforms'
+          }
+
           $autoplayer = Get-Content -Raw 'OpenHoldem/CAutoplayer.cpp'
           if ($autoplayer -match 'R9 hard read-only guard') {
             throw 'Obsolete OFC no-action guard is still present'
