@@ -37,6 +37,12 @@ CString COpenHoldemTitle::GetTitle() {
 	if (user_defined_title != "") 	{
 		return user_defined_title;
 	}
+  // An OFC table gets an OFC-native identity even when the user normally asks
+  // for a simple title. Formula names are deliberately absent because OpenPPL
+  // is not part of the OpenOFC decision path.
+  if (p_tablemap != NULL && p_tablemap->SupportsOFCJokerUltimate()) {
+    return FullTitle();
+  }
 	if (Preferences()->simple_window_title()) {
 		return simple_title;
 	}	else {
@@ -51,10 +57,19 @@ CString COpenHoldemTitle::FullTitle() {
   CString full_title;
   write_log(Preferences()->debug_alltherest(), "[COpenHoldemTitle] location Johnny_6\n");
 	if (p_autoconnector->IsConnectedToAnything())	{
-		full_title.Format("%s | %s | %s", p_function_collection->FormulaName(),
-			p_tablemap->sitename(), p_table_title->Title());
+    if (p_tablemap->SupportsOFCJokerUltimate()) {
+      full_title.Format("OpenOFC | KKPoker Joker Ultimate | %s",
+        p_table_title->Title());
+    } else {
+		  full_title.Format("%s | %s | %s", p_function_collection->FormulaName(),
+			  p_tablemap->sitename(), p_table_title->Title());
+    }
 	}	else {
-		full_title.Format("%s", p_function_collection->FormulaName());
+    if (p_tablemap->SupportsOFCJokerUltimate()) {
+      full_title.Format("OpenOFC");
+    } else {
+		  full_title.Format("%s", p_function_collection->FormulaName());
+    }
 	}
 	return full_title;
 }
