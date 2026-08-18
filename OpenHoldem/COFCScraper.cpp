@@ -227,78 +227,30 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
   }
 
 
-  RECT rank_rect;
-  if (!DeepOFCReadRegionRect(rank_region, &rank_rect)) {
-    write_log(k_always_log_errors,
-      "[DeepOFC] Non-empty slot has invalid rank geometry: %s\n",
-      base_name.GetString());
-    return -3;
-  }
-  RECT native_rect;
-  native_rect.left = rank_rect.left;
-  native_rect.top = rank_rect.top;
-  native_rect.right = std::min<LONG>(450, native_rect.left + 55);
-  native_rect.bottom = std::min<LONG>(830, native_rect.top + 71);
-
-  int persistent_joker = 0;
-  std::string native_error;
-  const bool wide_normal_slot = base_name.Find("discard") < 0;
-  if (wide_normal_slot) {
-    if (!COFCFantasy15PixelRecognizer::DetectPersistentJoker(
-          _entire_window_cur, native_rect, &persistent_joker, &native_error)) {
-      write_log(k_always_log_errors,
-        "[DeepOFC] Persistent Joker probe failed: %s\n", native_error.c_str());
-      return -3;
-    }
-  }
-  if (persistent_joker != 0) {
-    *joker_id = persistent_joker;
-    card->value = persistent_joker == 1 ? kOFCCardJoker1 : kOFCCardJoker2;
-    DeepOFCLogSlot(base_name, "PERSISTENT_JOKER", card->value,
-      CString(""), CString(""), empty, back, joker1, joker2, native_error);
+  // Standard OpenOFC cards are decoded exclusively by TableMap text
+  // transforms. Reuse the mature OpenHoldem rank/suit primitive so the OFC
+  // runtime consumes exactly the same Tn transform results as OpenScrape.
+  // Native pixel recognition remains reserved for the isolated Fantasy route.
+  const int tablemap_card = ScrapeCardByRankAndSuit(base_name);
+  if ((tablemap_card >= 0) && (tablemap_card <= 51)) {
+    card->value = tablemap_card;
+    DeepOFCLogSlot(base_name, "TABLEMAP_TEXT", card->value,
+      CString(""), CString(""), empty, back, joker1, joker2,
+      "shared=ScrapeCardByRankAndSuit");
     return 1;
   }
 
-  // Read and log the exact TableMap OCR outputs used to form the physical card.
-  // This makes a runtime rejection reproducible instead of hiding whether rank,
-  // suit, validation or card-number conversion failed.
+  // On failure, evaluate the exact text-transform outputs once more only for
+  // diagnostics. This path never substitutes OCR or a native pixel guess.
   CString rank_result;
   CString suit_result;
   const bool suit_evaluated = EvaluateRegion(suit_region, &suit_result);
   const bool suit_valid = suit_evaluated && IsSuitString(suit_result);
   bool rank_evaluated = false;
   bool rank_valid = false;
-  int legacy_card = CARD_UNDEFINED;
   if (suit_valid) {
     rank_evaluated = EvaluateRegion(rank_region, &rank_result);
     rank_valid = rank_evaluated && IsRankString(rank_result);
-    if (rank_valid) {
-      if (rank_result == "10") rank_result = "T";
-      legacy_card = CardString2CardNumber(rank_result + suit_result);
-    }
-  }
-  if ((legacy_card >= 0) && (legacy_card <= 51)) {
-    card->value = legacy_card;
-    DeepOFCLogSlot(base_name, "TABLEMAP_OCR", card->value,
-      rank_result, suit_result, empty, back, joker1, joker2, "");
-    return 1;
-  }
-
-  // Normal Hero Jokers do not expose a conventional rank/suit pair. Use the
-  // same replay-backed upright physical-card classifier as Fantasy before
-  // rejecting the whole observation. Small opponent transitional faces still
-  // fail closed; their confirmed gold marker is handled above.
-  COFCFantasy15PixelCard native_card;
-  if (wide_normal_slot && COFCFantasy15PixelRecognizer::RecognizeUprightCard(
-        _entire_window_cur, native_rect, &native_card, &native_error)) {
-    const int value = DeepOFCPixelCardValue(native_card);
-    if (value >= 0) {
-      card->value = value;
-      *joker_id = native_card.joker_id;
-      DeepOFCLogSlot(base_name, "NATIVE_FALLBACK", card->value,
-        rank_result, suit_result, empty, back, joker1, joker2, native_error);
-      return 1;
-    }
   }
 
   std::ostringstream failure_detail;
@@ -307,16 +259,14 @@ int CScraper::ScrapeOFCSlot(CString base_name, COFCCard *card,
     << " suit_valid=" << (suit_valid ? 1 : 0)
     << " rank_eval=" << (rank_evaluated ? 1 : 0)
     << " rank_valid=" << (rank_valid ? 1 : 0)
-    << " legacy=" << legacy_card
-    << " native=" << native_error;
+    << " shared=ScrapeCardByRankAndSuit";
   DeepOFCLogSlot(base_name, "REJECTED", kOFCCardUnknown,
     rank_result, suit_result, empty, back, joker1, joker2,
     failure_detail.str());
   write_log(k_always_log_errors,
-    "[DeepOFC] Non-empty slot has no unambiguous standard/persistent-Joker face: %s "
-    "rank=\"%s\" suit=\"%s\" legacy=%d (%s)\n",
-    base_name.GetString(), rank_result.GetString(), suit_result.GetString(),
-    legacy_card, native_error.c_str());
+    "[DeepOFC] Non-empty slot rejected by TableMap text transforms: %s "
+    "rank=\"%s\" suit=\"%s\"\n",
+    base_name.GetString(), rank_result.GetString(), suit_result.GetString());
   return -3;
 }
 
