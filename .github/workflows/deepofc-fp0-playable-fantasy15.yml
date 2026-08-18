@@ -107,12 +107,16 @@ jobs:
       - name: Collect runtime package
         shell: pwsh
         run: |
+          $release = 'Release'
           $out = 'artifact/DeepOFC_FP0_Fantasy15_Windows'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Copy-Item '##_OpenHoldem_Release_Directory_##/OpenHoldem.exe' $out
-          Get-ChildItem '##_OpenHoldem_Release_Directory_##' -Filter '*.dll' | Copy-Item -Destination $out
-          if (Test-Path '##_OpenHoldem_Release_Directory_##/tessdata') {
-            Copy-Item '##_OpenHoldem_Release_Directory_##/tessdata' "$out/tessdata" -Recurse
+          if (-not (Test-Path "$release/OpenHoldem.exe")) {
+            throw "Compiled OpenHoldem.exe not found in $release"
+          }
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") {
+            Copy-Item "$release/tessdata" "$out/tessdata" -Recurse
           }
           @'
           OpenOFC / DeepOFC FP0 code package
