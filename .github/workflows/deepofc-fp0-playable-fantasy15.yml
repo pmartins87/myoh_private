@@ -18,6 +18,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Apply OpenOFC perception and capture repair
+        shell: pwsh
+        run: |
+          python tools/apply_openofc_runtime_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC source repair failed: $LASTEXITCODE" }
+
       - name: Assert operational code contract
         shell: pwsh
         run: |
