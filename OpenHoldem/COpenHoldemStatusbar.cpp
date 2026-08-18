@@ -28,6 +28,7 @@
 #include "CSymbolEngineUserchair.h"
 #include "CTableState.h"
 #include "resource.h"
+#include "..\CTablemap\CTablemap.h"
 #include "..\DLLs\StringFunctions_DLL\string_functions.h"
 
 COpenHoldemStatusbar *p_openholdem_statusbar = NULL;
@@ -68,6 +69,45 @@ void COpenHoldemStatusbar::GetWindowRect(RECT *statusbar_position) {
 }
 
 void COpenHoldemStatusbar::OnUpdateStatusbar() {
+  if (p_tablemap != NULL && p_tablemap->SupportsOFCJokerUltimate()) {
+    const COFCState *state = p_table_state == NULL ? NULL : p_table_state->OFCState();
+    const COFCVisualObservation *raw = p_table_state == NULL
+      ? NULL : p_table_state->OFCVisualObservation();
+
+    CString perception = "OFC READ: WAIT";
+    CString round = "Round: ?";
+    CString actor = "Actor: ?";
+    CString action = "OpenOFC";
+
+    if (raw != NULL && raw->valid) perception = "OFC READ: OK";
+    else if (raw != NULL) perception = "OFC READ: REJECTED";
+
+    if (state != NULL && state->valid) {
+      if (state->players[state->hero_chair].fantasy) {
+        round.Format("Fantasy | in=%d", state->hero_incoming_count);
+      } else {
+        round.Format("Round %d/5 | in=%d", state->round_index + 1,
+          state->hero_incoming_count);
+      }
+      if (state->acting_chair == state->hero_chair) {
+        actor = state->hero_can_confirm ? "Hero: CONFIRM" : "Hero: ARRANGE";
+      } else {
+        actor.Format("Waiting P%d", state->acting_chair);
+      }
+      if (!state->action_required) actor = "Waiting transition";
+    }
+
+    _status_bar.SetPaneText(
+      _status_bar.CommandToIndex(ID_INDICATOR_STATUS_ACTION), action);
+    _status_bar.SetPaneText(
+      _status_bar.CommandToIndex(ID_INDICATOR_STATUS_HANDRANK), round);
+    _status_bar.SetPaneText(
+      _status_bar.CommandToIndex(ID_INDICATOR_STATUS_PRWIN), actor);
+    _status_bar.SetPaneText(
+      _status_bar.CommandToIndex(ID_INDICATOR_STATUS_DUMMY), perception);
+    return;
+  }
+
   if (p_table_state->User()->HasKnownCards()){
     // Format data for display
     // Handrank
@@ -93,6 +133,9 @@ void COpenHoldemStatusbar::OnUpdateStatusbar() {
 }
 
 CString COpenHoldemStatusbar::LastAction() {
+  if (p_tablemap != NULL && p_tablemap->SupportsOFCJokerUltimate()) {
+    return "OpenOFC";
+  }
   if (p_engine_container->symbol_engine_userchair() == NULL)	{
 		// Very early phase of initialization
 		// Can't continue here.
