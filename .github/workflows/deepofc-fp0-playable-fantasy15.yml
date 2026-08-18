@@ -26,14 +26,28 @@ jobs:
             throw 'Native Fantasy15 recognizer is not enabled in this build'
           }
 
-          # Standard OFC rank/suit recognition is TableMap-transform based.
-          # Do not let AutoOCR/template-detection creep into the OFC path.
-          if ($scraper -match 'p_auto_ocr|GetDetectTemplateResult|GetDetectTemplatesResult|get_ocr_result') {
-            throw 'AutoOCR/template recognition is forbidden in the standard OpenOFC scraper path'
+          # Standard OFC card recognition is TableMap text-transform based.
+          # Pixel/native recognition is allowed only in the isolated Fantasy path.
+          $slotStart = $scraper.IndexOf('int CScraper::ScrapeOFCSlot')
+          $slotEnd = $scraper.IndexOf('static bool DeepOFCRegisterKnownCard', $slotStart)
+          if (($slotStart -lt 0) -or ($slotEnd -le $slotStart)) {
+            throw 'Could not isolate CScraper::ScrapeOFCSlot for contract validation'
           }
-          if (($scraper -notmatch 'EvaluateRegion\(suit_region') -or
-              ($scraper -notmatch 'EvaluateRegion\(rank_region')) {
-            throw 'OpenOFC standard card recognition is not using TableMap rank/suit transforms'
+          $standardSlot = $scraper.Substring($slotStart, $slotEnd - $slotStart)
+          if ($standardSlot -match 'p_auto_ocr|GetDetectTemplateResult|GetDetectTemplatesResult|get_ocr_result') {
+            throw 'AutoOCR/template recognition is forbidden in the standard OpenOFC card path'
+          }
+          if ($standardSlot -match 'DetectPersistentJoker|RecognizeUprightCard|NATIVE_FALLBACK|TABLEMAP_OCR') {
+            throw 'Native pixel fallback is forbidden in the standard OpenOFC card path'
+          }
+          if (($standardSlot -notmatch 'ScrapeCardByRankAndSuit\(base_name\)') -or
+              ($standardSlot -notmatch 'TABLEMAP_TEXT') -or
+              ($standardSlot -notmatch 'shared=ScrapeCardByRankAndSuit')) {
+            throw 'OpenOFC standard cards are not routed through the shared TableMap text primitive'
+          }
+          if (($standardSlot -notmatch 'EvaluateRegion\(suit_region') -or
+              ($standardSlot -notmatch 'EvaluateRegion\(rank_region')) {
+            throw 'OpenOFC failure diagnostics lost direct rank/suit transform evidence'
           }
 
           $autoplayer = Get-Content -Raw 'OpenHoldem/CAutoplayer.cpp'
