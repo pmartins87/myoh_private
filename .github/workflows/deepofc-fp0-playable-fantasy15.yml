@@ -78,6 +78,17 @@ jobs:
           if ($heartbeat -notmatch '(?s)if \(!openofc_mode\).*?Validate\(\)') {
             throw 'Holdem validator is not explicitly gated away from OpenOFC'
           }
+
+          # A stale OFC map must stay isolated from Hold'em, while all physical
+          # input is blocked until the explicit OpenOFC contract matches.
+          if (($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*1') -or
+              ($heartbeat -notmatch 'GetTMSymbol\("openofc_contract",\s*0\)') -or
+              ($heartbeat -notmatch '\[OpenOFC CONTRACT\] BLOCKED') -or
+              ($heartbeat -notmatch 'legacy_holdem_fallback=0') -or
+              ($heartbeat -notmatch 'openofc_mode && !openofc_contract_ok')) {
+            throw 'OpenOFC stale-TableMap hard block is incomplete'
+          }
+
           $title = Get-Content -Raw 'OpenHoldem/COpenHoldemTitle.cpp'
           if ($title -notmatch 'OpenOFC \| KKPoker Joker Ultimate') {
             throw 'OpenOFC window identity is missing'
@@ -147,9 +158,12 @@ jobs:
           OpenOFC / DeepOFC FP0 code package
 
           This artifact contains the compiled OFC-native runtime code and required DLLs.
-          The operational KKPoker TableMap and private replay evidence are deliberately
-          not stored in this repository artifact. Assemble the certified TableMap into
-          scraper/ before a live test.
+          A compatible OFC TableMap must declare:
+              s$openofc_contract 1
+
+          Until the canonical TableMap is packaged with the runtime, any OFC map without
+          that exact contract is treated as OFC (so Hold'em engines stay bypassed) but
+          physical autoplayer input is hard-blocked.
           '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
 
       - name: Upload Windows runtime
