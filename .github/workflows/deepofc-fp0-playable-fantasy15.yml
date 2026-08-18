@@ -23,6 +23,8 @@ jobs:
         run: |
           python tools/apply_openofc_runtime_repair.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC source repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_log248_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
 
       - name: Assert operational code contract
         shell: pwsh
@@ -54,6 +56,29 @@ jobs:
           if (($standardSlot -notmatch 'EvaluateRegion\(suit_region') -or
               ($standardSlot -notmatch 'EvaluateRegion\(rank_region')) {
             throw 'OpenOFC failure diagnostics lost direct rank/suit transform evidence'
+          }
+
+          # The 2026-08-18 simulator log proved two further contracts:
+          # 1) visible Hero Confirm is OFC input authority even if no single
+          #    Hold'em-style actor marker exists; 2) StdDeck suit order is hdcs.
+          if (($scraper -notmatch 'OPENOFC_CONFIRM_AUTHORITY') -or
+              ($scraper -notmatch 'source=CONFIRM_VISIBLE') -or
+              ($scraper -notmatch 'HU_WAIT_INFERENCE')) {
+            throw 'OpenOFC Hero action-authority repair is missing'
+          }
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $executor = Get-Content -Raw 'OpenHoldem/COFCActionExecutor.cpp'
+          $inspector = Get-Content -Raw 'OpenHoldem/COFCInspectorSnapshot.h'
+          foreach ($source in @($scraper, $runtime, $executor, $inspector)) {
+            if ($source -match 'suits\[\]\s*=\s*"cdhs"') {
+              throw 'OFC diagnostic card labels still use the wrong StdDeck suit order'
+            }
+          }
+          if (($scraper -notmatch 'suits\[\]\s*=\s*"hdcs"') -or
+              ($runtime -notmatch 'suits\[\]\s*=\s*"hdcs"') -or
+              ($executor -notmatch 'suits\[\]\s*=\s*"hdcs"') -or
+              ($inspector -notmatch 'suits\[\]\s*=\s*"hdcs"')) {
+            throw 'OFC diagnostic card labels do not match StdDeck HEARTS/DIAMONDS/CLUBS/SPADES order'
           }
 
           $autoplayer = Get-Content -Raw 'OpenHoldem/CAutoplayer.cpp'
@@ -102,7 +127,6 @@ jobs:
 
           # Canonical inspector must expose the exact OFC source of truth and
           # publish a full snapshot only when state changes.
-          $inspector = Get-Content -Raw 'OpenHoldem/COFCInspectorSnapshot.h'
           $status = Get-Content -Raw 'OpenHoldem/COpenHoldemStatusbar.cpp'
           if (($inspector -notmatch 'BoardText') -or
               ($inspector -notmatch 'hero_incoming') -or
