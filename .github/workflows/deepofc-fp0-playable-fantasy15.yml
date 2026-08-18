@@ -38,6 +38,30 @@ jobs:
             throw 'Transient-frame lineage preservation is not active'
           }
 
+          # OpenOFC architectural boundary. OFC is not allowed to fall through
+          # the Hold'em symbol/validator/UI pipeline anymore.
+          $heartbeat = Get-Content -Raw 'OpenHoldem/CHeartbeatThread.cpp'
+          if ($heartbeat -notmatch 'SupportsOFCJokerUltimate') {
+            throw 'OpenOFC heartbeat mode gate is missing'
+          }
+          if ($heartbeat -notmatch 'holdem_engines_bypassed=1') {
+            throw 'OpenOFC startup evidence is missing'
+          }
+          if ($heartbeat -notmatch 'if \(!openofc_mode\).*EvaluateAll\(\)') {
+            throw 'Holdem EvaluateAll is not explicitly gated away from OpenOFC'
+          }
+          if ($heartbeat -notmatch 'if \(!openofc_mode\).*Validate\(\)') {
+            throw 'Holdem validator is not explicitly gated away from OpenOFC'
+          }
+          $title = Get-Content -Raw 'OpenHoldem/COpenHoldemTitle.cpp'
+          if ($title -notmatch 'OpenOFC \| KKPoker Joker Ultimate') {
+            throw 'OpenOFC window identity is missing'
+          }
+          $status = Get-Content -Raw 'OpenHoldem/COpenHoldemStatusbar.cpp'
+          if (($status -notmatch 'OFC READ: OK') -or ($status -notmatch 'Hero: ARRANGE')) {
+            throw 'OpenOFC status display is missing'
+          }
+
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
@@ -78,78 +102,30 @@ jobs:
         run: |
           $root = (Resolve-Path '.').Path + '\'
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
-          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
-          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'OpenHoldem.exe missing' }
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
 
-      - name: Assemble runnable package
+      - name: Collect runtime package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force DeepOFC_FP0_Fantasy15 | Out-Null
-          $runtime = @(
-            'OpenHoldem.exe',
-            'debug.dll',
-            'files.dll',
-            'GamestateValidation.dll',
-            'globals.dll',
-            'keyboard.dll',
-            'mouse.dll',
-            'pokertracker_query_definitions.dll',
-            'preferences.dll',
-            'string_functions.dll',
-            'user.dll',
-            'window_functions.dll'
-          )
-          foreach ($name in $runtime) {
-            $source = Join-Path 'Release' $name
-            if (-not (Test-Path $source)) { throw "Required runtime file missing: $source" }
-            Copy-Item $source DeepOFC_FP0_Fantasy15/
+          $out = 'artifact/DeepOFC_FP0_Fantasy15_Windows'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item '##_OpenHoldem_Release_Directory_##/OpenHoldem.exe' $out
+          Get-ChildItem '##_OpenHoldem_Release_Directory_##' -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path '##_OpenHoldem_Release_Directory_##/tessdata') {
+            Copy-Item '##_OpenHoldem_Release_Directory_##/tessdata' "$out/tessdata" -Recurse
           }
-          $thirdPartyRuntime = @(
-            'archive.dll',
-            'bz2.dll',
-            'gif.dll',
-            'jpeg62.dll',
-            'libcurl.dll',
-            'libcrypto-3.dll',
-            'liblzma.dll',
-            'libpng16.dll',
-            'libsharpyuv.dll',
-            'libwebp.dll',
-            'libwebpmux.dll',
-            'lz4.dll',
-            'openjp2.dll',
-            'tiff.dll',
-            'zlib1.dll',
-            'zstd.dll',
-            'leptonica-1.83.1.dll',
-            'tesseract53.dll',
-            'opencv_world480.dll'
-          )
-          foreach ($name in $thirdPartyRuntime) {
-            $source = Join-Path 'lib' $name
-            if (-not (Test-Path $source)) { throw "Required third-party runtime missing: $source" }
-            Copy-Item $source DeepOFC_FP0_Fantasy15/
-          }
-          Copy-Item License_GPLv3.htm DeepOFC_FP0_Fantasy15/
+          @'
+          OpenOFC / DeepOFC FP0 code package
 
-          # App-local VC143 CRT/MFC makes the ZIP runnable even when the target
-          # machine does not already have the x86 redistributable installed.
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
-          $redist = Get-ChildItem (Join-Path $vs 'VC\Redist\MSVC') -Directory |
-            Where-Object {
-              Test-Path (Join-Path $_.FullName 'x86\Microsoft.VC143.CRT')
-            } | Sort-Object Name | Select-Object -Last 1
-          if (-not $redist) { throw 'VC143 redistributable directory missing' }
-          foreach ($component in @('Microsoft.VC143.CRT','Microsoft.VC143.MFC')) {
-            $componentPath = Join-Path $redist.FullName "x86\$component"
-            if (-not (Test-Path $componentPath)) { throw "Missing app-local component: $componentPath" }
-            Copy-Item (Join-Path $componentPath '*.dll') DeepOFC_FP0_Fantasy15/
-          }
-          Compress-Archive DeepOFC_FP0_Fantasy15 DeepOFC_FP0_Fantasy15.zip -Force
+          This artifact contains the compiled OFC-native runtime code and required DLLs.
+          The operational KKPoker TableMap and private replay evidence are deliberately
+          not stored in this repository artifact. Assemble the certified TableMap into
+          scraper/ before a live test.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
 
-      - name: Upload runnable package
+      - name: Upload Windows runtime
         uses: actions/upload-artifact@v4
         with:
           name: DeepOFC_FP0_Fantasy15_Windows
-          path: DeepOFC_FP0_Fantasy15.zip
+          path: artifact/DeepOFC_FP0_Fantasy15_Windows
           if-no-files-found: error
