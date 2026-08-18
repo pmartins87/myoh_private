@@ -51,6 +51,10 @@ CHeartbeatThread   *CHeartbeatThread::pParent = NULL;
 CHeartbeatDelay    CHeartbeatThread::_heartbeat_delay;
 COpenHoldemStarter CHeartbeatThread::_openholdem_starter;
 
+namespace {
+const int kOpenOFCContractVersion = 1;
+}
+
 CHeartbeatThread::CHeartbeatThread() {
 	InitializeCriticalSectionAndSpinCount(&cs_update_in_progress, 4000);
   _heartbeat_counter = 0;
@@ -166,14 +170,31 @@ void CHeartbeatThread::ScrapeEvaluateAct() {
   // code and the OFC-native runtime.
   const bool openofc_mode = (p_tablemap != NULL)
     && p_tablemap->SupportsOFCJokerUltimate();
+  const int openofc_contract = openofc_mode
+    ? p_tablemap->GetTMSymbol("openofc_contract", 0)
+    : 0;
+  const bool openofc_contract_ok = !openofc_mode
+    || (openofc_contract == kOpenOFCContractVersion);
   if (openofc_mode) {
-    static bool logged_openofc_mode = false;
-    if (!logged_openofc_mode) {
-      write_log(true,
-        "[OpenOFC MODE] ACTIVE tablemap=\"%s\" formula_bypassed=1 "
-        "holdem_engines_bypassed=1 holdem_validator_bypassed=1\n",
-        p_tablemap->filepath().GetString());
-      logged_openofc_mode = true;
+    static CString last_logged_tablemap;
+    static int last_logged_contract = -1;
+    const CString current_tablemap = p_tablemap->filepath();
+    if ((last_logged_tablemap != current_tablemap)
+        || (last_logged_contract != openofc_contract)) {
+      if (openofc_contract_ok) {
+        write_log(true,
+          "[OpenOFC MODE] ACTIVE tablemap=\"%s\" contract=%d formula_bypassed=1 "
+          "holdem_engines_bypassed=1 holdem_validator_bypassed=1\n",
+          current_tablemap.GetString(), openofc_contract);
+      } else {
+        write_log(k_always_log_errors,
+          "[OpenOFC CONTRACT] BLOCKED tablemap=\"%s\" expected=%d got=%d "
+          "autoplayer_blocked=1 legacy_holdem_fallback=0\n",
+          current_tablemap.GetString(), kOpenOFCContractVersion,
+          openofc_contract);
+      }
+      last_logged_tablemap = current_tablemap;
+      last_logged_contract = openofc_contract;
     }
   } else {
     // Legacy OpenHoldem path, unchanged for non-OFC tablemaps.
@@ -215,11 +236,18 @@ void CHeartbeatThread::ScrapeEvaluateAct() {
 		  Bool2CString(p_engine_container->symbol_engine_userchair()->userchair_confirmed()));
   }
 	// In OpenOFC the dedicated CAutoplayer branch invokes COFCRuntimeController
-	// directly and never evaluates an OpenPPL betting formula. In legacy mode the
-	// original OpenHoldem autoplayer behavior remains unchanged.
+	// directly and never evaluates an OpenPPL betting formula. A stale or
+	// unversioned OFC TableMap remains in OpenOFC isolation but is hard-blocked
+	// from physical input, so it can never fall back to Hold'em action semantics.
 	if (p_autoplayer->autoplayer_engaged()) {
-		write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] Calling DoAutoplayer.\n");
-		p_autoplayer->DoAutoplayer();
+    if (openofc_mode && !openofc_contract_ok) {
+      write_log(k_always_log_errors,
+        "[OpenOFC CONTRACT] Autoplayer suppressed until TableMap contract=%d\n",
+        kOpenOFCContractVersion);
+    } else {
+		  write_log(Preferences()->debug_heartbeat(), "[HeartBeatThread] Calling DoAutoplayer.\n");
+		  p_autoplayer->DoAutoplayer();
+    }
 	}
 }
 
