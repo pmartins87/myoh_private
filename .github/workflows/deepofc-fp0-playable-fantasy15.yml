@@ -1,4 +1,4 @@
-name: OpenOFC gameflow v2 build
+name: OpenOFC normal-flow v3 build
 
 on:
   push:
@@ -27,8 +27,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
           python tools/run_openofc_gameflow_v2.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_flow_v3.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC normal-flow v3 repair failed: $LASTEXITCODE" }
 
-      - name: Assert OpenOFC v2 code contract
+      - name: Assert OpenOFC v3 code contract
         shell: pwsh
         run: |
           $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
@@ -62,8 +64,8 @@ jobs:
             throw 'Dealer provisional-arrangement/finalization state machine is missing'
           }
           if (($lazy -notmatch 'OPENOFC_ROUND0_FRESH_RECONSTRUCT') -or
-              ($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*2')) {
-            throw 'New-hand recovery or TableMap contract v2 gate is missing'
+              ($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*3')) {
+            throw 'New-hand recovery or TableMap contract v3 gate is missing'
           }
           if (($policy -notmatch 'fantasy_count\s*<\s*14') -or
               ($policy -notmatch 'fantasy_count\s*>\s*17') -or
@@ -75,6 +77,17 @@ jobs:
           if ($orchestrator -notmatch 'opponent_drift_allowed') {
             throw 'Provisional dealer arrangement cannot tolerate opponent reveal drift'
           }
+          if (($scraper -notmatch 'OPENOFC_TRANSIENT_SLOT_TOLERANCE') -or
+              ($scraper -notmatch 'OPENOFC_PARTIAL_OPPONENT_PROGRESS') -or
+              ($scraper -notmatch 'partial_public=%d.*tolerated=1')) {
+            throw 'Normal-flow v3 transient/partial perception tolerance is missing'
+          }
+          if ($scraper -match 'Impossible opponent public-board progression') {
+            throw 'Legacy fatal opponent partial-board gate is still reachable'
+          }
+          if ($runtime -notmatch '\[OpenOFC DEADLINE\] confirm_ready=1') {
+            throw 'Confirm deadline trace is missing'
+          }
           if (($scraper -match 'p_auto_ocr|GetDetectTemplateResult|GetDetectTemplatesResult|get_ocr_result') -and
               ($scraper -notmatch 'ScrapeOFCFantasyVisualObservation')) {
             throw 'Unexpected OCR/template dependency in OpenOFC scraper'
@@ -84,12 +97,12 @@ jobs:
             throw 'OpenOFC Holdem isolation contract is missing'
           }
 
-      - name: Materialize and validate canonical TableMap v2
+      - name: Materialize and validate canonical TableMap v3
         shell: pwsh
         run: |
-          $source = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v2.tm.gz.b64'
-          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v2.tm'
-          $gz = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v2.tm.gz'
+          $source = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v3.tm.gz.b64'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v3.tm'
+          $gz = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v3.tm.gz'
           if (-not (Test-Path $source)) { throw "Canonical TableMap source missing: $source" }
           $bytes = [Convert]::FromBase64String((Get-Content -Raw $source).Trim())
           [IO.File]::WriteAllBytes($gz, $bytes)
@@ -103,21 +116,39 @@ jobs:
           } finally { $input.Dispose() }
           Remove-Item $gz -Force
 
-          python tools/validate_openofc_tablemap.py $canonical --require-contract 2
-          if ($LASTEXITCODE -ne 0) { throw "Canonical TableMap v2 validation failed: $LASTEXITCODE" }
+          python tools/validate_openofc_tablemap.py $canonical --require-contract 3
+          if ($LASTEXITCODE -ne 0) { throw "Canonical TableMap v3 validation failed: $LASTEXITCODE" }
 
           $text = Get-Content -Raw $canonical
           if ($text -notmatch 's\$ofc_joker_rank_token\s+X') { throw 'TableMap lacks Joker rank-token X contract' }
+          if ($text -notmatch 's\$openofc_partial_slot_tolerance\s+1') { throw 'TM v3 lacks partial-slot tolerance marker' }
+          if ($text -notmatch 's\$openofc_opponent_partial_progression\s+1') { throw 'TM v3 lacks partial-opponent marker' }
+          if ($text -notmatch 's\$openofc_fantasy_dynamic_sources\s+1') { throw 'TM v3 lacks Fantasy dynamic-source marker' }
           if (($text -notmatch 'r\$ofc_p0_timer_active') -or ($text -notmatch 'r\$ofc_p1_timer_active')) {
             throw 'TableMap lacks normal timer-active regions'
           }
           if ($text -match 'r\$ofc_.*joker[12]') { throw 'TableMap still contains separate Joker identity regions' }
+          if ($text -notmatch 'r\$ofc_p0_bottom2rank\s+191\s+242\s+205\s+260\s+ffffffff\s+-120\s+T5') {
+            throw 'Known p0_bottom2 rank-bank regression was not repaired to T5'
+          }
 
-          $expected = 'a3dfefa9b7090bf0c4896438f27e62d9c5a1da06c8ddd3b5fc2fda8688b8d0dc'
+          $expected = 'dcefdee38ed8f628fe07e364885591540c223b53f54d6f4fc474b7b16569daa3'
           $actual = (Get-FileHash $canonical -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) {
             throw "Canonical TableMap SHA256 mismatch: expected=$expected actual=$actual"
           }
+
+          @'
+          OpenOFC font-bank calibration status for this TableMap:
+          - T1 (Hero board): full A,K,Q,J,T,9..2 + c,d,h,s + X
+          - T5 (opponent board): full A,K,Q,J,T,9..2 + c,d,h,s + X
+          - T3 (Hero incoming): currently missing A,K,Q,9
+          - T2 (Hero discard tracker): currently missing K and X
+
+          Missing T3/T2 glyphs are calibration gaps, not runtime logic fallbacks.
+          Add the real simulator glyphs in OpenScrape when available; do not
+          substitute OCR/native guessing into the normal OFC path.
+          '@ | Set-Content -Encoding UTF8 'OpenOFC/TableMaps/FONT_GAPS_OPENOFC_v3.txt'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -165,8 +196,8 @@ jobs:
         shell: pwsh
         run: |
           $release = 'Release'
-          $out = 'artifact/OpenOFC_Gameflow_v2_Windows'
-          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v2.tm'
+          $out = 'artifact/OpenOFC_NormalFlow_v3_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v3.tm'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           if (-not (Test-Path "$release/OpenHoldem.exe")) { throw "Compiled OpenHoldem.exe not found" }
           Copy-Item "$release/OpenHoldem.exe" $out
@@ -175,30 +206,35 @@ jobs:
 
           $scraperOut = Join-Path $out 'scraper'
           New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
-          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v2.tm')
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v3.tm')
+          Copy-Item 'OpenOFC/TableMaps/FONT_GAPS_OPENOFC_v3.txt' $out
           $tmFiles = @(Get-ChildItem $out -Recurse -Filter '*.tm')
           if ($tmFiles.Count -ne 1) { throw "Runtime must contain exactly one TableMap; got $($tmFiles.Count)" }
 
           @'
-          OpenOFC gameflow v2 diagnostic runtime
+          OpenOFC normal-flow v3 runtime
 
           Canonical TableMap:
-            scraper/KKPoker_OpenOFC_JokerUltimate_v2.tm
-          Contract: s$openofc_contract 2
-          SHA256: a3dfefa9b7090bf0c4896438f27e62d9c5a1da06c8ddd3b5fc2fda8688b8d0dc
+            scraper/KKPoker_OpenOFC_JokerUltimate_v3.tm
+          Contract: s$openofc_contract 3
+          SHA256: dcefdee38ed8f628fe07e364885591540c223b53f54d6f4fc474b7b16569daa3
 
-          Key v2 semantics:
-          - normal OFC preparation is simultaneous and can start as soon as cards exist;
-          - dealer-side early placement is provisional; Confirm is held until Hero timer is active;
-          - final opponent information triggers a fresh analysis/reposition before Confirm;
-          - Fantasy starts immediately and supports 14..17 cards;
-          - Fantasy loose-card source rectangles are detected again after every placement;
-          - Joker is a rank transform token X; separate joker1/joker2 TableMap regions are removed.
+          Normal-game v3 fixes driven by the 19-Aug playable log:
+          - a vacated source slot that briefly fails empty/rank recognition no longer poisons the whole frame;
+          - exact Hero 5/3 incoming-card counts remain mandatory before a decision;
+          - partial opponent placement is legal during simultaneous OFC play;
+          - p0_bottom2 rank recognition now uses the complete T5 bank;
+          - once arrangement is complete and finalizable, Confirm is attempted immediately and logged as OpenOFC DEADLINE;
+          - Joker remains rank token X.
+
+          Fantasy architecture remains dynamic: the runtime re-detects/deskews the current loose-card objects after every drag rather than relying on fixed source rectangles. Fantasy remains secondary until normal R0-R4 is proven.
+
+          See FONT_GAPS_OPENOFC_v3.txt before broad random-card testing.
           '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
 
       - name: Upload Windows runtime
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOFC_Gameflow_v2_Windows
-          path: artifact/OpenOFC_Gameflow_v2_Windows
+          name: OpenOFC_NormalFlow_v3_Windows
+          path: artifact/OpenOFC_NormalFlow_v3_Windows
           if-no-files-found: error
