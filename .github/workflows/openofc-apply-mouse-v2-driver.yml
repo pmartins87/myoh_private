@@ -1,0 +1,53 @@
+name: OpenOFC mouse v2 driver
+
+on:
+  push:
+    branches:
+      - oh_pre_release_v15
+    paths:
+      - '.github/workflows/openofc-apply-mouse-v2-driver.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout OpenOFC branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/openofc-foundation
+          fetch-depth: 0
+
+      - name: Harden patch boundary
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tools/apply_openofc_mouse_v2.py')
+          s = p.read_text(encoding='utf-8')
+          old = 'end = text.find("const POINT RandomizeClickLocation", start)'
+          new = 'end = text.find("\\nMOUSEDLL_API void ProcessMessage", start)'
+          if old in s:
+              s = s.replace(old, new, 1)
+              p.write_text(s, encoding='utf-8')
+          elif new not in s:
+              raise SystemExit('mouse function boundary target missing')
+          PY
+
+      - name: Apply repair
+        run: python tools/apply_openofc_mouse_v2.py
+
+      - name: Commit repair to OpenOFC branch
+        shell: bash
+        run: |
+          git config user.name "OpenOFC automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add OpenHoldem/CCasinoInterface.cpp "Reference Mouse DLL/mousedll.cpp" OpenHoldem/COFCRuntimeController.h OpenHoldem/COFCRuntimeController.cpp OpenHoldem/OpenHoldemView.cpp .github/workflows/deepofc-fp0-playable-fantasy15.yml
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git commit -m "OpenOFC: restore legacy mouse arbitration and bound drag retries"
+          git push origin HEAD:agent/openofc-foundation
