@@ -121,8 +121,8 @@ def patch_contract_v3():
 def patch_confirm_deadline_trace():
     rel = "OpenHoldem/COFCRuntimeController.cpp"
     old = '''  write_log(true,
-    "[DeepOFC CONFIRM] sending region=%s rect=(%d,%d,%d,%d) round=%d fantasy=%d\\n",
-    confirm_region.GetString(), rect.left, rect.top, rect.right, rect.bottom,
+    "[DeepOFC CONFIRM] sending region=%s rect=(%ld,%ld,%ld,%ld) round=%d fantasy=%d\\n",
+    region.GetString(), rect.left, rect.top, rect.right, rect.bottom,
     state.round_index, state.players[state.hero_chair].fantasy ? 1 : 0);
 '''
     new = '''  write_log(true,
@@ -131,8 +131,8 @@ def patch_confirm_deadline_trace():
     state.hero_timer_active ? 1 : 0,
     state.round_index, state.players[state.hero_chair].fantasy ? 1 : 0);
   write_log(true,
-    "[DeepOFC CONFIRM] sending region=%s rect=(%d,%d,%d,%d) round=%d fantasy=%d\\n",
-    confirm_region.GetString(), rect.left, rect.top, rect.right, rect.bottom,
+    "[DeepOFC CONFIRM] sending region=%s rect=(%ld,%ld,%ld,%ld) round=%d fantasy=%d\\n",
+    region.GetString(), rect.left, rect.top, rect.right, rect.bottom,
     state.round_index, state.players[state.hero_chair].fantasy ? 1 : 0);
 '''
     replace_once(rel, old, new)
