@@ -1,4 +1,4 @@
-name: OpenOFC mouse v2 PR driver
+name: OpenOFC mouse v3 PR driver
 
 on:
   pull_request:
@@ -19,24 +19,8 @@ jobs:
           ref: agent/openofc-foundation
           fetch-depth: 0
 
-      - name: Harden patch boundary
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('tools/apply_openofc_mouse_v2.py')
-          s = p.read_text(encoding='utf-8')
-          old = 'end = text.find("const POINT RandomizeClickLocation", start)'
-          new = 'end = text.find("\\nMOUSEDLL_API void ProcessMessage", start)'
-          if old in s:
-              s = s.replace(old, new, 1)
-              p.write_text(s, encoding='utf-8')
-          elif new not in s:
-              raise SystemExit('mouse function boundary target missing')
-          PY
-
-      - name: Apply repair
-        run: python tools/apply_openofc_mouse_v2.py
+      - name: Apply robust mouse v3 repair
+        run: python tools/apply_openofc_mouse_v3.py
 
       - name: Commit repair
         shell: bash
