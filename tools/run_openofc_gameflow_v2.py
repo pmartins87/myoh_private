@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-import tools.apply_openofc_gameflow_v2 as gameflow
+import apply_openofc_gameflow_v2 as gameflow
 
 
 def regex_once_literal(rel: str, pattern: str, replacement: str, flags=re.S):
