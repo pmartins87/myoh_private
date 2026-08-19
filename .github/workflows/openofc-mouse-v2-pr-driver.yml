@@ -22,12 +22,12 @@ jobs:
       - name: Apply robust mouse v3 repair
         run: python tools/apply_openofc_mouse_v3.py
 
-      - name: Commit repair
+      - name: Commit source repair
         shell: bash
         run: |
           git config user.name "OpenOFC automation"
           git config user.email "actions@users.noreply.github.com"
-          git add OpenHoldem/CCasinoInterface.cpp "Reference Mouse DLL/mousedll.cpp" OpenHoldem/COFCRuntimeController.h OpenHoldem/COFCRuntimeController.cpp OpenHoldem/OpenHoldemView.cpp .github/workflows/deepofc-fp0-playable-fantasy15.yml
+          git add OpenHoldem/CCasinoInterface.cpp "Reference Mouse DLL/mousedll.cpp" OpenHoldem/COFCRuntimeController.h OpenHoldem/COFCRuntimeController.cpp OpenHoldem/OpenHoldemView.cpp
           if git diff --cached --quiet; then
             echo "No source changes to commit"
             exit 0
