@@ -185,6 +185,11 @@ jobs:
           v4.3 guarantees remain: Hero discard OCR disabled, Joker-X physical
           source bridge, unavoidable-foul completion fallback, Leave Next Hand.
 
+          Fantasy implementation is intentionally staged separately in v5. The
+          field-derived click-select + row-check contract is frozen in
+          docs/OPENOFC_FANTASY_V5_EXECUTION_CONTRACT.md; v4.4 should not be used
+          as evidence of Fantasy end-to-end readiness.
+
           Primary field acceptance target: observe dealer rounds log
           mode=PROVISIONAL while timer=0, physical arrangement before opponent
           finishes, then opponent_final_info=1 reanalyze=1 and Confirm.
