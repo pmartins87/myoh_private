@@ -1,4 +1,4 @@
-name: DeepOFC FP0 playable build
+name: OpenOFC gameflow v2 build
 
 on:
   push:
@@ -12,142 +12,85 @@ permissions:
   contents: read
 
 jobs:
-  windows-build-replay-package:
+  windows-build-package:
     runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Apply OpenOFC perception and capture repair
+      - name: Apply OpenOFC source repairs
         shell: pwsh
         run: |
           python tools/apply_openofc_runtime_repair.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC source repair failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_log248_repair.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_gameflow_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
 
-      - name: Assert operational code contract
+      - name: Assert OpenOFC v2 code contract
         shell: pwsh
         run: |
           $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
-          if ($scraper -notmatch 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED\s+1') {
-            throw 'Native Fantasy15 recognizer is not enabled in this build'
-          }
-
-          # Standard OFC card recognition is TableMap text-transform based.
-          # Pixel/native recognition is allowed only in the isolated Fantasy path.
-          $slotStart = $scraper.IndexOf('int CScraper::ScrapeOFCSlot')
-          $slotEnd = $scraper.IndexOf('static bool DeepOFCRegisterKnownCard', $slotStart)
-          if (($slotStart -lt 0) -or ($slotEnd -le $slotStart)) {
-            throw 'Could not isolate CScraper::ScrapeOFCSlot for contract validation'
-          }
-          $standardSlot = $scraper.Substring($slotStart, $slotEnd - $slotStart)
-          if ($standardSlot -match 'p_auto_ocr|GetDetectTemplateResult|GetDetectTemplatesResult|get_ocr_result') {
-            throw 'AutoOCR/template recognition is forbidden in the standard OpenOFC card path'
-          }
-          if ($standardSlot -match 'DetectPersistentJoker|RecognizeUprightCard|NATIVE_FALLBACK|TABLEMAP_OCR') {
-            throw 'Native pixel fallback is forbidden in the standard OpenOFC card path'
-          }
-          if (($standardSlot -notmatch 'ScrapeCardByRankAndSuit\(base_name\)') -or
-              ($standardSlot -notmatch 'TABLEMAP_TEXT') -or
-              ($standardSlot -notmatch 'shared=ScrapeCardByRankAndSuit')) {
-            throw 'OpenOFC standard cards are not routed through the shared TableMap text primitive'
-          }
-          if (($standardSlot -notmatch 'EvaluateRegion\(suit_region') -or
-              ($standardSlot -notmatch 'EvaluateRegion\(rank_region')) {
-            throw 'OpenOFC failure diagnostics lost direct rank/suit transform evidence'
-          }
-
-          # The 2026-08-18 simulator log proved two further contracts:
-          # 1) visible Hero Confirm is OFC input authority even if no single
-          #    Hold'em-style actor marker exists; 2) StdDeck suit order is hdcs.
-          if (($scraper -notmatch 'OPENOFC_CONFIRM_AUTHORITY') -or
-              ($scraper -notmatch 'source=CONFIRM_VISIBLE') -or
-              ($scraper -notmatch 'HU_WAIT_INFERENCE')) {
-            throw 'OpenOFC Hero action-authority repair is missing'
-          }
+          $state = Get-Content -Raw 'OpenHoldem/COFCState.h'
+          $visual = Get-Content -Raw 'OpenHoldem/COFCVisualObservation.h'
           $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
-          $executor = Get-Content -Raw 'OpenHoldem/COFCActionExecutor.cpp'
-          $inspector = Get-Content -Raw 'OpenHoldem/COFCInspectorSnapshot.h'
-          foreach ($source in @($scraper, $runtime, $executor, $inspector)) {
-            if ($source -match 'suits\[\]\s*=\s*"cdhs"') {
-              throw 'OFC diagnostic card labels still use the wrong StdDeck suit order'
-            }
-          }
-          if (($scraper -notmatch 'suits\[\]\s*=\s*"hdcs"') -or
-              ($runtime -notmatch 'suits\[\]\s*=\s*"hdcs"') -or
-              ($executor -notmatch 'suits\[\]\s*=\s*"hdcs"') -or
-              ($inspector -notmatch 'suits\[\]\s*=\s*"hdcs"')) {
-            throw 'OFC diagnostic card labels do not match StdDeck HEARTS/DIAMONDS/CLUBS/SPADES order'
-          }
-
-          $autoplayer = Get-Content -Raw 'OpenHoldem/CAutoplayer.cpp'
-          if ($autoplayer -match 'R9 hard read-only guard') {
-            throw 'Obsolete OFC no-action guard is still present'
-          }
-          if ($autoplayer -notmatch 'deepofc_runtime_controller\.Tick') {
-            throw 'OFC runtime controller is not connected'
-          }
+          $policy = Get-Content -Raw 'OpenHoldem/COFCBaselinePolicy.cpp'
           $lazy = Get-Content -Raw 'OpenHoldem/CLazyScraper.cpp'
-          if (($lazy -notmatch 'last canonical lineage preserved') -or
-              ($lazy -notmatch 'OFCVisualObservation\(\)->valid = false')) {
-            throw 'Transient-frame lineage preservation is not active'
-          }
-
-          # OpenOFC architectural boundary. OFC is not allowed to fall through
-          # the Hold'em symbol/validator/UI pipeline anymore.
           $heartbeat = Get-Content -Raw 'OpenHoldem/CHeartbeatThread.cpp'
-          if ($heartbeat -notmatch 'SupportsOFCJokerUltimate') {
-            throw 'OpenOFC heartbeat mode gate is missing'
+          $fantasy = Get-Content -Raw 'OpenHoldem/COFCFantasy15PixelRecognizer.cpp'
+          $orchestrator = Get-Content -Raw 'OpenHoldem/COFCTurnOrchestrator.cpp'
+
+          if ($scraper -notmatch 'DEEPOFC_NATIVE_FANTASY15_RECOGNIZER_CERTIFIED\s+1') {
+            throw 'Fantasy recognizer is not enabled'
           }
-          if ($heartbeat -notmatch 'holdem_engines_bypassed=1') {
-            throw 'OpenOFC startup evidence is missing'
+          if (($scraper -notmatch 'OPENOFC_JOKER_RANK_TOKEN') -or
+              ($scraper -notmatch 'rank_result\s*==\s*"X"') -or
+              ($scraper -match 'joker1_region|joker2_region')) {
+            throw 'Joker is not rank-token X only in the standard TableMap path'
           }
-          if ($heartbeat -notmatch '(?s)if \(openofc_mode\).*?else \{.*?EvaluateAll\(\)') {
-            throw 'Holdem EvaluateAll is not explicitly isolated behind the non-OpenOFC branch'
+          if (($state -notmatch 'kOFCCardJokerGeneric') -or
+              ($state -notmatch 'decision_finalizable') -or
+              ($state -notmatch 'hero_timer_active') -or
+              ($visual -notmatch 'hero_timer_active')) {
+            throw 'OFC-native timing/Joker state contract is missing'
           }
-          if ($heartbeat -notmatch '(?s)if \(!openofc_mode\).*?Validate\(\)') {
-            throw 'Holdem validator is not explicitly gated away from OpenOFC'
+          if (($scraper -notmatch 'OPENOFC_SIMULTANEOUS_PREPARE') -or
+              ($runtime -notmatch 'mode=%s dealer=%d hero=%d timer=%d finalizable=%d') -or
+              ($runtime -notmatch 'confirm=HELD') -or
+              ($runtime -notmatch 'opponent_final_info=1 reanalyze=1')) {
+            throw 'Dealer provisional-arrangement/finalization state machine is missing'
+          }
+          if (($lazy -notmatch 'OPENOFC_ROUND0_FRESH_RECONSTRUCT') -or
+              ($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*2')) {
+            throw 'New-hand recovery or TableMap contract v2 gate is missing'
+          }
+          if (($policy -notmatch 'fantasy_count\s*<\s*14') -or
+              ($policy -notmatch 'fantasy_count\s*>\s*17') -or
+              ($fantasy -notmatch '!original_fantasy_cards\.empty\(\)') -or
+              ($scraper -notmatch 'Initial dynamic Fantasy fan') -or
+              ($scraper -notmatch 'stable 14\.\.17-card lineage')) {
+            throw 'Fantasy 14..17 dynamic-reflow contract is missing'
+          }
+          if ($orchestrator -notmatch 'opponent_drift_allowed') {
+            throw 'Provisional dealer arrangement cannot tolerate opponent reveal drift'
+          }
+          if (($scraper -match 'p_auto_ocr|GetDetectTemplateResult|GetDetectTemplatesResult|get_ocr_result') -and
+              ($scraper -notmatch 'ScrapeOFCFantasyVisualObservation')) {
+            throw 'Unexpected OCR/template dependency in OpenOFC scraper'
+          }
+          if (($heartbeat -notmatch 'holdem_engines_bypassed=1') -or
+              ($heartbeat -notmatch 'legacy_holdem_fallback=0')) {
+            throw 'OpenOFC Holdem isolation contract is missing'
           }
 
-          # A stale OFC map must stay isolated from Hold'em, while all physical
-          # input is blocked until the explicit OpenOFC contract matches.
-          if (($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*1') -or
-              ($heartbeat -notmatch 'GetTMSymbol\("openofc_contract",\s*0\)') -or
-              ($heartbeat -notmatch '\[OpenOFC CONTRACT\] BLOCKED') -or
-              ($heartbeat -notmatch 'legacy_holdem_fallback=0') -or
-              ($heartbeat -notmatch 'openofc_mode && !openofc_contract_ok')) {
-            throw 'OpenOFC stale-TableMap hard block is incomplete'
-          }
-
-          $title = Get-Content -Raw 'OpenHoldem/COpenHoldemTitle.cpp'
-          if ($title -notmatch 'OpenOFC \| KKPoker Joker Ultimate') {
-            throw 'OpenOFC window identity is missing'
-          }
-
-          # Canonical inspector must expose the exact OFC source of truth and
-          # publish a full snapshot only when state changes.
-          $status = Get-Content -Raw 'OpenHoldem/COpenHoldemStatusbar.cpp'
-          if (($inspector -notmatch 'BoardText') -or
-              ($inspector -notmatch 'hero_incoming') -or
-              ($inspector -notmatch 'hero_discards') -or
-              ($inspector -notmatch 'RAW\{prepare=') -or
-              ($status -notmatch 'COFCInspectorSnapshot::Compact') -or
-              ($status -notmatch 'COFCInspectorSnapshot::Full') -or
-              ($status -notmatch '\[OpenOFC INSPECTOR\]') -or
-              ($status -notmatch 'last_full_snapshot')) {
-            throw 'OpenOFC canonical inspector is incomplete'
-          }
-
-      - name: Materialize and validate canonical TableMap
+      - name: Materialize and validate canonical TableMap v2
         shell: pwsh
         run: |
-          $source = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v1.tm.gz.b64'
-          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v1.tm'
-          $gz = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v1.tm.gz'
-          if (-not (Test-Path $source)) {
-            throw "Canonical TableMap source missing: $source"
-          }
+          $source = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v2.tm.gz.b64'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v2.tm'
+          $gz = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v2.tm.gz'
+          if (-not (Test-Path $source)) { throw "Canonical TableMap source missing: $source" }
           $bytes = [Convert]::FromBase64String((Get-Content -Raw $source).Trim())
           [IO.File]::WriteAllBytes($gz, $bytes)
           $input = [IO.File]::OpenRead($gz)
@@ -160,10 +103,17 @@ jobs:
           } finally { $input.Dispose() }
           Remove-Item $gz -Force
 
-          python tools/validate_openofc_tablemap.py $canonical --require-contract 1
-          if ($LASTEXITCODE -ne 0) { throw "Canonical OpenOFC TableMap validation failed: $LASTEXITCODE" }
+          python tools/validate_openofc_tablemap.py $canonical --require-contract 2
+          if ($LASTEXITCODE -ne 0) { throw "Canonical TableMap v2 validation failed: $LASTEXITCODE" }
 
-          $expected = '7d9403f82b0dca8a0e991c9f005de38ee014f200e62370975f04c9bba6257303'
+          $text = Get-Content -Raw $canonical
+          if ($text -notmatch 's\$ofc_joker_rank_token\s+X') { throw 'TableMap lacks Joker rank-token X contract' }
+          if (($text -notmatch 'r\$ofc_p0_timer_active') -or ($text -notmatch 'r\$ofc_p1_timer_active')) {
+            throw 'TableMap lacks normal timer-active regions'
+          }
+          if ($text -match 'r\$ofc_.*joker[12]') { throw 'TableMap still contains separate Joker identity regions' }
+
+          $expected = 'a3dfefa9b7090bf0c4896438f27e62d9c5a1da06c8ddd3b5fc2fda8688b8d0dc'
           $actual = (Get-FileHash $canonical -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) {
             throw "Canonical TableMap SHA256 mismatch: expected=$expected actual=$actual"
@@ -215,51 +165,40 @@ jobs:
         shell: pwsh
         run: |
           $release = 'Release'
-          $out = 'artifact/DeepOFC_FP0_Fantasy15_Windows'
-          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v1.tm'
+          $out = 'artifact/OpenOFC_Gameflow_v2_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v2.tm'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          if (-not (Test-Path "$release/OpenHoldem.exe")) {
-            throw "Compiled OpenHoldem.exe not found in $release"
-          }
-          if (-not (Test-Path $canonical)) {
-            throw "Validated canonical TableMap missing: $canonical"
-          }
+          if (-not (Test-Path "$release/OpenHoldem.exe")) { throw "Compiled OpenHoldem.exe not found" }
           Copy-Item "$release/OpenHoldem.exe" $out
           Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
-          if (Test-Path "$release/tessdata") {
-            Copy-Item "$release/tessdata" "$out/tessdata" -Recurse
-          }
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
 
           $scraperOut = Join-Path $out 'scraper'
           New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
-          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v1.tm')
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v2.tm')
           $tmFiles = @(Get-ChildItem $out -Recurse -Filter '*.tm')
-          if ($tmFiles.Count -ne 1) {
-            throw "OpenOFC runtime must contain exactly one TableMap; got $($tmFiles.Count)"
-          }
+          if ($tmFiles.Count -ne 1) { throw "Runtime must contain exactly one TableMap; got $($tmFiles.Count)" }
 
           @'
-          OpenOFC / DeepOFC diagnostic runtime
+          OpenOFC gameflow v2 diagnostic runtime
 
-          This artifact contains the compiled OFC-native runtime, required DLLs, and
-          exactly one canonical KKPoker Joker Ultimate TableMap:
-              scraper/KKPoker_OpenOFC_JokerUltimate_v1.tm
+          Canonical TableMap:
+            scraper/KKPoker_OpenOFC_JokerUltimate_v2.tm
+          Contract: s$openofc_contract 2
+          SHA256: a3dfefa9b7090bf0c4896438f27e62d9c5a1da06c8ddd3b5fc2fda8688b8d0dc
 
-          Runtime/TableMap contract:
-              s$openofc_contract 1
-
-          Canonical TableMap SHA256:
-              7d9403f82b0dca8a0e991c9f005de38ee014f200e62370975f04c9bba6257303
-
-          Standard OFC rank/suit recognition uses only TableMap Tn text transforms.
-          Native/pixel recognition remains isolated to the Fantasy route.
-          A stale or unversioned OFC map remains isolated from Hold'em but physical
-          autoplayer input is hard-blocked.
+          Key v2 semantics:
+          - normal OFC preparation is simultaneous and can start as soon as cards exist;
+          - dealer-side early placement is provisional; Confirm is held until Hero timer is active;
+          - final opponent information triggers a fresh analysis/reposition before Confirm;
+          - Fantasy starts immediately and supports 14..17 cards;
+          - Fantasy loose-card source rectangles are detected again after every placement;
+          - Joker is a rank transform token X; separate joker1/joker2 TableMap regions are removed.
           '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
 
       - name: Upload Windows runtime
         uses: actions/upload-artifact@v4
         with:
-          name: DeepOFC_FP0_Fantasy15_Windows
-          path: artifact/DeepOFC_FP0_Fantasy15_Windows
+          name: OpenOFC_Gameflow_v2_Windows
+          path: artifact/OpenOFC_Gameflow_v2_Windows
           if-no-files-found: error
