@@ -21,7 +21,7 @@ jobs:
       - name: Apply OpenOFC source repairs
         shell: pwsh
         run: |
-          python tools/apply_openofc_runtime_repair.py
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_log248_repair.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
