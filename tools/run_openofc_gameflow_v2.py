@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import re
 
 import apply_openofc_gameflow_v2 as gameflow
@@ -33,3 +34,8 @@ gameflow.regex_once = regex_once_literal
 
 if __name__ == "__main__":
     gameflow.main()
+    # Apply the dealer finalization safety-net after the main v2 rewrite.
+    # The timer marker remains the preferred trigger, but complete opponent
+    # public placement is an equivalent semantic proof and prevents a bad
+    # pixel calibration from permanently withholding Confirm.
+    importlib.import_module("apply_openofc_finalization_fallback")
