@@ -44,6 +44,44 @@
 
 CCasinoInterface *p_casino_interface = NULL;
 
+
+// OpenOFC focus handoff.
+//
+// Clicking the OpenOFC toolbar to enable the autoplayer necessarily makes the
+// OpenOFC window foreground. The old Hold'em safety rule then refused the very
+// first OFC drag because the attached simulator was no longer foreground. In
+// OFC mode we may safely hand focus back only when the foreground window belongs
+// to this OpenOFC process. We never steal focus from an unrelated application.
+static bool OpenOFCEnsureAttachedTableForeground(HWND attached_hwnd) {
+  if (attached_hwnd == NULL || !IsWindow(attached_hwnd)) return false;
+  if (GetForegroundWindow() == attached_hwnd) return true;
+  if (p_tablemap == NULL || !p_tablemap->SupportsOFCJokerUltimate()) return false;
+
+  HWND foreground = GetForegroundWindow();
+  if (foreground == NULL) return false;
+  DWORD foreground_pid = 0;
+  GetWindowThreadProcessId(foreground, &foreground_pid);
+  if (foreground_pid != GetCurrentProcessId()) {
+    write_log(k_always_log_errors,
+      "[OpenOFC FOCUS] recovery_refused reason=UNRELATED_FOREGROUND pid=%lu self=%lu\n",
+      static_cast<unsigned long>(foreground_pid),
+      static_cast<unsigned long>(GetCurrentProcessId()));
+    return false;
+  }
+
+  if (IsIconic(attached_hwnd)) ShowWindow(attached_hwnd, SW_RESTORE);
+  BringWindowToTop(attached_hwnd);
+  const BOOL requested = SetForegroundWindow(attached_hwnd);
+  for (int i = 0; i < 8 && GetForegroundWindow() != attached_hwnd; ++i) {
+    Sleep(25);
+  }
+  const bool ok = GetForegroundWindow() == attached_hwnd;
+  write_log(true,
+    "[OpenOFC FOCUS] source=OPENOFC_UI requested=%d result=%s attached=%p\n",
+    requested ? 1 : 0, ok ? "FOREGROUND" : "FAILED", attached_hwnd);
+  return ok;
+}
+
 CCasinoInterface::CCasinoInterface() {
 	// dummy point for mouse and keyboard DLL
 	p_null.x = kUndefined;
@@ -158,12 +196,14 @@ bool CCasinoInterface::DragRectToRect(RECT source_rect, RECT target_rect, int du
     return false;
   }
 
-  // Unlike legacy button clicks, an OFC drag can mutate a multi-card
-  // arrangement. Never steal focus and drag if the connected table is not
-  // already the foreground window; the higher transaction layer will stop.
-  if (TableLostFocus()) {
+  // A click on the OpenOFC toolbar is a benign focus transition. Hand the
+  // foreground back to the attached simulator only when OpenOFC itself owns
+  // the foreground; unrelated applications remain a hard stop.
+  if (GetForegroundWindow() != hwnd
+      && !OpenOFCEnsureAttachedTableForeground(hwnd)) {
+    TableLostFocus();  // durable diagnostic with both window titles
     write_log(k_always_log_errors,
-      "[DeepOFC R10] Refusing drag because attached table lost focus\n");
+      "[DeepOFC R10] Refusing drag because attached table focus could not be recovered safely\n");
     return false;
   }
 
@@ -191,9 +231,16 @@ bool CCasinoInterface::ClickRectSafely(RECT rect) {
   const bool rect_ok = rect.right > rect.left && rect.bottom > rect.top
     && rect.left >= client.left && rect.top >= client.top
     && rect.right <= client.right && rect.bottom <= client.bottom;
-  if (!rect_ok || TableLostFocus()) {
+  if (!rect_ok) {
     write_log(k_always_log_errors,
-      "[DeepOFC FP0] Refusing Confirm click outside client bounds or without focus\n");
+      "[DeepOFC FP0] Refusing Confirm click outside attached client bounds\n");
+    return false;
+  }
+  if (GetForegroundWindow() != hwnd
+      && !OpenOFCEnsureAttachedTableForeground(hwnd)) {
+    TableLostFocus();
+    write_log(k_always_log_errors,
+      "[DeepOFC FP0] Refusing Confirm because attached table focus could not be recovered safely\n");
     return false;
   }
   (theApp._dll_mouse_click)(hwnd, rect, MouseLeft, 1);

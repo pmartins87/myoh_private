@@ -23,6 +23,7 @@
 #include "CHeartbeatThread.h"
 
 #include "CCasinoInterface.h"
+#include "COFCInspectorSnapshot.h"
 #include "CScraper.h"
 #include "CStringMatch.h"
 #include "CSymbolengineAutoplayer.h"
@@ -203,6 +204,93 @@ void COpenHoldemView::OnTimer(UINT_PTR nIDEvent) {
 void COpenHoldemView::UpdateDisplay(const bool update_all) {
 	bool		update_it = false;
 	CDC			*pDC = GetDC();
+
+  // OPENOFC_NATIVE_MAIN_VIEW: OFC mode never touches the legacy Hold'em table
+  // renderer. This branch executes before handnumber/blinds/pot/FCKRA/community
+  // card UI or Hold'em player-seat symbols are queried.
+  if (p_tablemap != NULL && p_tablemap->SupportsOFCJokerUltimate()) {
+    GetClientRect(&_client_rect);
+    const COFCVisualObservation *raw = p_table_state->OFCVisualObservation();
+    const COFCState *state = p_table_state->OFCState();
+    const int contract = p_tablemap->GetTMSymbol("openofc_contract", 0);
+
+    CString view;
+    CString line;
+    const char *read_text = (raw != NULL && raw->valid) ? "OK" : "REJECT";
+    const char *state_text = (state != NULL && state->valid) ? "OK" : "REJECT";
+    line.Format("OpenOFC  |  KKPoker Joker Ultimate  |  TMv%d\r\n", contract);
+    view += line;
+    line.Format("PERCEPTION  READ=%s  STATE=%s", read_text, state_text);
+    if (state != NULL && state->valid) {
+      CString action = state->action_required ? "HERO ACTION" : "WAIT";
+      line.AppendFormat("  |  Round %d/5  |  H%d A%d D%d  |  %s",
+        state->round_index + 1, state->hero_chair, state->acting_chair,
+        state->dealer_chair, action.GetString());
+    }
+    view += line + "\r\n\r\n";
+
+    if (raw != NULL && raw->valid) {
+      for (int p = 0; p < raw->player_count && p < kOFCMaxPlayers; ++p) {
+        const COFCPlayerBoard &board = raw->players[p].visual_board;
+        line.Format("P%d%s  TOP     %s\r\n",
+          p, p == raw->hero_chair ? " HERO" : "",
+          COFCInspectorSnapshot::CardsText(board.top, kOFCTopCards).GetString());
+        view += line;
+        line.Format("        MIDDLE  %s\r\n",
+          COFCInspectorSnapshot::CardsText(board.middle, kOFCMiddleCards).GetString());
+        view += line;
+        line.Format("        BOTTOM  %s\r\n",
+          COFCInspectorSnapshot::CardsText(board.bottom, kOFCBottomCards).GetString());
+        view += line;
+      }
+    }
+
+    if (state != NULL && state->valid) {
+      line.Format("\r\nINCOMING  %s\r\n",
+        COFCInspectorSnapshot::CardsText(
+          state->hero_incoming, state->hero_incoming_count).GetString());
+      view += line;
+      line.Format("DISCARDS  %s  |  prepare=%d confirm=%d pending=%d\r\n",
+        COFCInspectorSnapshot::CardsText(
+          state->hero_discards, state->hero_discard_count).GetString(),
+        state->hero_can_prepare ? 1 : 0, state->hero_can_confirm ? 1 : 0,
+        state->hero_incoming_count);
+      view += line;
+    }
+
+    static CString last_openofc_view;
+    if (!update_all && view == last_openofc_view) {
+      ReleaseDC(pDC);
+      return;
+    }
+    last_openofc_view = view;
+
+    CBrush backBrush(RGB(36, 39, 43));
+    CBrush *oldBrush = pDC->SelectObject(&backBrush);
+    pDC->PatBlt(_client_rect.left, _client_rect.top,
+      _client_rect.right - _client_rect.left,
+      _client_rect.bottom - _client_rect.top, PATCOPY);
+    pDC->SelectObject(oldBrush);
+    pDC->SetBkMode(TRANSPARENT);
+    pDC->SetTextColor(RGB(235, 238, 240));
+
+    LOGFONT ofc_font = _logfont;
+    ofc_font.lfHeight = -14;
+    ofc_font.lfWeight = FW_NORMAL;
+    strcpy_s(ofc_font.lfFaceName, 32, "Consolas");
+    CFont font;
+    font.CreateFontIndirect(&ofc_font);
+    CFont *oldFont = pDC->SelectObject(&font);
+    RECT text_rect = _client_rect;
+    text_rect.left += 12;
+    text_rect.top += 10;
+    text_rect.right -= 10;
+    text_rect.bottom -= 8;
+    pDC->DrawText(view, &text_rect, DT_LEFT | DT_TOP | DT_NOPREFIX);
+    pDC->SelectObject(oldFont);
+    ReleaseDC(pDC);
+    return;
+  }
 
 	CString sym_handnumber = p_handreset_detector->GetHandNumber();
 	double  sym_bblind = p_engine_container->symbol_engine_tablelimits()->bblind();
