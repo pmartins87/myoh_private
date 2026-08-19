@@ -48,12 +48,11 @@ def patch_turn_semantics_out_of_normal_authority():
     rel = "OpenHoldem/COFCScraper.cpp"
 
     # Normal OFC is simultaneous arrangement. A per-player Hold'em-style turn
-    # marker must not decide whether Hero may move cards. The only prerequisites
-    # for preparation are a valid current-card set and the normal OFC state.
-    # Keep acting_chair=Hero as a compatibility field so legacy metadata cannot
-    # drift during a fixed placement transaction. Timer/Confirm retain their
-    # distinct finalization meanings and are scraped separately.
-    pattern = r'''  int turn_flag_count = 0;\n  int turn_flag_chair = -1;\n  for \(int p = 0; p < player_count; \+\+p\) \{\n    CString region;\n    bool value = false;\n    region\.Format\("ofc_p%d_turn", p\);\n    if \(!DeepOFCReadMandatoryBoolean\(this, region, &value\)\) return false;\n    if \(value\) \{\n      turn_flag_chair = p;\n      \+\+turn_flag_count;\n    \}\n  \}\n\n  if \(obs->confirm_visible\) \{.*?\n  \} else \{\n    write_log\(k_always_log_errors,\n      "\[DeepOFC\] Ambiguous normal OFC action authority: confirm=%d turn_flags=%d\\\\n",\n      obs->confirm_visible \? 1 : 0, turn_flag_count\);\n    return false;\n  \}\n'''
+    # marker must not decide whether Hero may move cards. The v2 generator adds
+    # OPENOFC_SIMULTANEOUS_PREPARE immediately after the legacy authority block,
+    # so replace everything from turn_flag_count up to that stable semantic
+    # marker instead of depending on logging-string escaping details.
+    pattern = r'''  int turn_flag_count = 0;.*?(?=  // OPENOFC_SIMULTANEOUS_PREPARE:)'''
     replacement = r'''  // OPENOFC_TURN_SEMANTICS_DISABLED_V44: normal OFC does not have an
   // exclusive per-player action turn for card arrangement. If Hero has current
   // cards, Hero may arrange immediately, including while the opponent/dealer
@@ -63,6 +62,7 @@ def patch_turn_semantics_out_of_normal_authority():
   write_log(true,
     "[OpenOFC AUTHORITY] prepare_source=CARDS_AVAILABLE turn_semantics=IGNORED confirm_visible=%d\\n",
     obs->confirm_visible ? 1 : 0);
+
 '''
     regex_once(rel, pattern, replacement)
 
