@@ -47,13 +47,46 @@ def regex_once(rel: str, pattern: str, replacement: str, flags=re.S):
 def patch_turn_semantics_out_of_normal_authority():
     rel = "OpenHoldem/COFCScraper.cpp"
 
-    # Normal OFC is simultaneous arrangement. A per-player Hold'em-style turn
-    # marker must not decide whether Hero may move cards. The v2 generator adds
-    # OPENOFC_SIMULTANEOUS_PREPARE immediately after the legacy authority block,
-    # so replace everything from turn_flag_count up to that stable semantic
-    # marker instead of depending on logging-string escaping details.
-    pattern = r'''  int turn_flag_count = 0;.*?(?=  // OPENOFC_SIMULTANEOUS_PREPARE:)'''
-    replacement = r'''  // OPENOFC_TURN_SEMANTICS_DISABLED_V44: normal OFC does not have an
+    # This is the exact block emitted earlier by apply_openofc_log248_repair.py.
+    # Replace only this block. Do not span forward to another semantic marker,
+    # because later phase/round code must remain byte-for-byte intact.
+    old = '''  int turn_flag_count = 0;
+  int turn_flag_chair = -1;
+  for (int p = 0; p < player_count; ++p) {
+    CString region;
+    bool value = false;
+    region.Format("ofc_p%d_turn", p);
+    if (!DeepOFCReadMandatoryBoolean(this, region, &value)) return false;
+    if (value) {
+      turn_flag_chair = p;
+      ++turn_flag_count;
+    }
+  }
+
+  if (obs->confirm_visible) {
+    // The visible Hero Confirm is the strongest available proof that the Hero
+    // may arrange/submit this OFC decision, regardless of opponent timer UI.
+    obs->acting_chair = hero_chair;
+    write_log(true,
+      "[OpenOFC AUTHORITY] hero_actionable=1 source=CONFIRM_VISIBLE raw_turn_flags=%d raw_turn_chair=%d\\n",
+      turn_flag_count, turn_flag_chair);
+  } else if (turn_flag_count == 1) {
+    obs->acting_chair = turn_flag_chair;
+  } else if (player_count == 2 && turn_flag_count == 0) {
+    // HU wait-state fallback: when Hero has no Confirm and no calibrated turn
+    // marker is lit, the only safe canonical actor is the other chair. This
+    // keeps post-Confirm handoff observable without authorizing Hero input.
+    obs->acting_chair = 1 - hero_chair;
+    write_log(true,
+      "[OpenOFC AUTHORITY] hero_actionable=0 source=HU_WAIT_INFERENCE raw_turn_flags=0\\n");
+  } else {
+    write_log(k_always_log_errors,
+      "[DeepOFC] Ambiguous normal OFC action authority: confirm=%d turn_flags=%d\\n",
+      obs->confirm_visible ? 1 : 0, turn_flag_count);
+    return false;
+  }
+'''
+    new = '''  // OPENOFC_TURN_SEMANTICS_DISABLED_V44: normal OFC does not have an
   // exclusive per-player action turn for card arrangement. If Hero has current
   // cards, Hero may arrange immediately, including while the opponent/dealer
   // sequencing UI is still running. Keep actor=Hero only as a compatibility
@@ -62,9 +95,8 @@ def patch_turn_semantics_out_of_normal_authority():
   write_log(true,
     "[OpenOFC AUTHORITY] prepare_source=CARDS_AVAILABLE turn_semantics=IGNORED confirm_visible=%d\\n",
     obs->confirm_visible ? 1 : 0);
-
 '''
-    regex_once(rel, pattern, replacement)
+    replace_once(rel, old, new)
 
 
 def patch_prepare_vs_finalize_runtime():
