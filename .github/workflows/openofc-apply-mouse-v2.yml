@@ -21,6 +21,20 @@ jobs:
           ref: agent/openofc-foundation
           fetch-depth: 0
 
+      - name: Harden patch boundary
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tools/apply_openofc_mouse_v2.py')
+          s = p.read_text(encoding='utf-8')
+          old = 'end = text.find("const POINT RandomizeClickLocation", start)'
+          new = 'end = text.find("\\nMOUSEDLL_API void ProcessMessage", start)'
+          if old not in s:
+              raise SystemExit('mouse function boundary target missing')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply mouse v2 repair
         run: python tools/apply_openofc_mouse_v2.py
 
@@ -37,4 +51,4 @@ jobs:
           git commit -m "OpenOFC: restore legacy mouse arbitration and bound drag retries"
           git push origin HEAD:agent/openofc-foundation
 
-# trigger: mouse-v2-materialize
+# trigger: mouse-v2-materialize-hardened
