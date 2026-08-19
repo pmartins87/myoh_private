@@ -2,10 +2,8 @@
 //
 // DeepOFC R10 single-drag transaction executor.
 //
-// This class is intentionally NOT wired into CAutoplayer while the R9 hard
-// read-only guard is active. It defines the future runtime transaction boundary:
-// one physical drag, then mandatory fresh-scrape canonical verification before
-// any second drag is permitted.
+// Runtime transaction boundary: one physical drag, then mandatory fresh-scrape
+// canonical verification before any second drag is permitted.
 //
 //******************************************************************************
 

@@ -1,10 +1,10 @@
 //******************************************************************************
 //
-// DeepOFC read-only state scaffold.
+// DeepOFC canonical state.
 //
 // This file deliberately does NOT reuse Hold'em hole/community-card semantics.
-// It is isolated state storage for KKPoker Open Face Chinese Poker and is
-// currently inert unless an OFC-specific scraper path populates it.
+// It is isolated state storage for KKPoker Open Face Chinese Poker and never
+// reuses legacy Hold'em hole/community-card semantics.
 //
 //******************************************************************************
 
@@ -146,4 +146,4 @@ class COFCState {
   COFCPendingPlacement pending[kOFCMaxIncomingCards];
 };
 
-#endif INC_COFCSTATE_H
+#endif  // INC_COFCSTATE_H
