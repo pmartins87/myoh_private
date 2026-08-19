@@ -1,0 +1,227 @@
+name: OpenOFC phase-flow v4 build
+
+on:
+  push:
+    branches:
+      - deepofc
+      - 'agent/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build-package:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply OpenOFC source repairs through v4
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_log248_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_gameflow_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_flow_v3.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC normal-flow v3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v4.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4 repair failed: $LASTEXITCODE" }
+
+      - name: Assert OpenOFC v4 semantic phase contract
+        shell: pwsh
+        run: |
+          $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $visual = Get-Content -Raw 'OpenHoldem/COFCVisualObservation.h'
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $heartbeat = Get-Content -Raw 'OpenHoldem/CHeartbeatThread.cpp'
+
+          if ($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*4') {
+            throw 'Runtime contract is not v4'
+          }
+          if (($visual -notmatch 'result_screen_visible') -or
+              ($visual -notmatch 'hero_result_fantasy') -or
+              ($visual -notmatch 'opponent_result_fantasy')) {
+            throw 'Result/Fantasy phase marker state is missing'
+          }
+          if (($scraper -notmatch 'OPENOFC_PHASE_MARKERS_V4') -or
+              ($scraper -notmatch 'opponent_result_faceup_discards') -or
+              ($scraper -notmatch 'faceup >= 2') -or
+              ($scraper -notmatch 'hits >= 2')) {
+            throw 'Animation-independent result markers are missing'
+          }
+          if (($runtime -notmatch 'OPENOFC_PHASE_ENGINE_V4') -or
+              ($runtime -notmatch 'WAIT_INITIAL_5') -or
+              ($runtime -notmatch 'WAIT_NEXT_3') -or
+              ($runtime -notmatch 'WAIT_RESULT') -or
+              ($runtime -notmatch 'FANTASY_CONTINUATION')) {
+            throw 'Semantic phase engine is missing'
+          }
+          if (($runtime -notmatch 'hero_incoming_count != 3') -or
+              ($runtime -notmatch 'marker=ROUND_READY') -or
+              ($runtime -notmatch 'animation_ignored=1')) {
+            throw 'Three-card next-round edge contract is missing'
+          }
+          if (($runtime -notmatch 'openofc_stop_local_hhmm') -or
+              ($runtime -notmatch 'policy=FINISH_MATCH_CHAIN') -or
+              ($runtime -notmatch 'safe_end=1') -or
+              ($runtime -notmatch 'reason=FANTASY_CONTINUATION') -or
+              ($runtime -notmatch 'CloseWindow\(\)')) {
+            throw 'Scheduled safe-exit contract is missing'
+          }
+          if (($scraper -match 'p_auto_ocr|GetDetectTemplateResult|GetDetectTemplatesResult|get_ocr_result') -and
+              ($scraper -notmatch 'ScrapeOFCFantasyVisualObservation')) {
+            throw 'Unexpected OCR/template dependency in normal OpenOFC scraper'
+          }
+
+      - name: Materialize and validate canonical TableMap v4
+        shell: pwsh
+        run: |
+          $source = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4.tm.gz.b64'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4.tm'
+          $gz = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4.tm.gz'
+          if (-not (Test-Path $source)) { throw "Canonical TableMap source missing: $source" }
+          $bytes = [Convert]::FromBase64String((Get-Content -Raw $source).Trim())
+          [IO.File]::WriteAllBytes($gz, $bytes)
+          $input = [IO.File]::OpenRead($gz)
+          try {
+            $gzip = New-Object IO.Compression.GzipStream($input, [IO.Compression.CompressionMode]::Decompress)
+            try {
+              $output = [IO.File]::Create($canonical)
+              try { $gzip.CopyTo($output) } finally { $output.Dispose() }
+            } finally { $gzip.Dispose() }
+          } finally { $input.Dispose() }
+          Remove-Item $gz -Force
+
+          python tools/validate_openofc_tablemap.py $canonical --require-contract 4
+          if ($LASTEXITCODE -ne 0) { throw "Canonical TableMap v4 validation failed: $LASTEXITCODE" }
+
+          $text = Get-Content -Raw $canonical
+          if ($text -notmatch 's\$openofc_phase_contract\s+1') { throw 'TM v4 lacks phase contract marker' }
+          if ($text -notmatch 's\$openofc_safe_exit_calibrated\s+1') { throw 'TM v4 lacks safe-exit calibration marker' }
+          if ($text -notmatch 's\$openofc_stop_enabled\s+0') { throw 'Scheduled stop must default OFF' }
+          if ($text -notmatch 's\$openofc_result_debounce_frames\s+2') { throw 'TM v4 lacks result debounce' }
+          if (($text -notmatch 'r\$ofc_p0_result_fantasy0') -or
+              ($text -notmatch 'r\$ofc_p1_result_fantasy0')) {
+            throw 'TM v4 lacks both result-Fantasy marker banks'
+          }
+          if ($text -match 'r\$ofc_.*joker[12]') { throw 'Separate Joker identity regions returned' }
+
+          $expected = '09f5195ba710376142c6a59f1be80c0b93a35e44dfff995effb98dc8bb93df5b'
+          $actual = (Get-FileHash $canonical -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Canonical TableMap v4 SHA256 mismatch: expected=$expected actual=$actual"
+          }
+
+          @'
+          OpenOFC font-bank calibration status for this TableMap:
+          - T1 (Hero board): full A,K,Q,J,T,9..2 + c,d,h,s + X
+          - T5 (opponent board): full A,K,Q,J,T,9..2 + c,d,h,s + X
+          - T3 (Hero incoming): full A,K,Q,J,T,9..2 + c,d,h,s + X
+          - T2 (Hero discard tracker): missing only K and X
+
+          T2 K/X are local discard-identity gaps. They do not disable round
+          recognition or the result-screen marker, which uses face-up-vs-back
+          geometry rather than discard identity.
+          '@ | Set-Content -Encoding UTF8 'OpenOFC/TableMaps/FONT_GAPS_OPENOFC_v4.txt'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run deterministic policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Collect runtime package
+        shell: pwsh
+        run: |
+          $release = 'Release'
+          $out = 'artifact/OpenOFC_PhaseFlow_v4_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4.tm'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          if (-not (Test-Path "$release/OpenHoldem.exe")) { throw "Compiled OpenHoldem.exe not found" }
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
+
+          $scraperOut = Join-Path $out 'scraper'
+          New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v4.tm')
+          Copy-Item 'OpenOFC/TableMaps/FONT_GAPS_OPENOFC_v4.txt' $out
+          $tmFiles = @(Get-ChildItem $out -Recurse -Filter '*.tm')
+          if ($tmFiles.Count -ne 1) { throw "Runtime must contain exactly one TableMap; got $($tmFiles.Count)" }
+
+          @'
+          OpenOFC phase-flow v4 runtime
+
+          IMPORTANT: use this package as a unit. Do not copy this TableMap into
+          an older OpenHoldem.exe and do not copy an older executable into this
+          folder. Runtime and TableMap contract must both be 4.
+
+          Canonical TableMap:
+            scraper/KKPoker_OpenOFC_JokerUltimate_v4.tm
+          Contract: s$openofc_contract 4
+          SHA256: 09f5195ba710376142c6a59f1be80c0b93a35e44dfff995effb98dc8bb93df5b
+
+          Semantic phase boundaries:
+          - R0 starts only from a complete five-card Hero incoming set.
+          - After Confirm, transition/animation frames are ignored.
+          - R1..R4 start only from the next complete three-card Hero incoming set.
+          - After R4, result frames are recognized independently from card-state validity.
+          - Face-up opponent discards are the result-screen marker.
+          - A result FANTASY overlay means continuation, not a safe end.
+
+          Scheduled exit (disabled by default):
+            s$openofc_stop_enabled 1
+            s$openofc_stop_local_hhmm 300   # example: 03:00 local time
+          When the time is reached, OpenOFC only arms a stop request. It closes
+          the table after a debounced result screen with no Hero/opponent Fantasy.
+
+          Font status: T1/T3/T5 complete. T2 is missing only K and X.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_PhaseFlow_v4_Windows
+          path: artifact/OpenOFC_PhaseFlow_v4_Windows
+          if-no-files-found: error
