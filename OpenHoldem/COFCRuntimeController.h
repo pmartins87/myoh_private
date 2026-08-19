@@ -25,7 +25,8 @@ class COFCRuntimeController {
     kIdle,
     kArranging,
     kConfirmSent,
-    kBlocked
+    kBlocked,
+    kReplayProbeComplete
   };
 
   void ResetForKnownNewHand(const COFCState &state);

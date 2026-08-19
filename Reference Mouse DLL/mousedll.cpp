@@ -122,6 +122,13 @@ static bool IsUsableRect(const RECT &rect) {
     return rect.right > rect.left && rect.bottom > rect.top;
 }
 
+static bool IsOHReplayWindow(const HWND hwnd) {
+    if (hwnd == NULL || !IsWindow(hwnd)) return false;
+    char classname[64] = {0};
+    if (GetClassNameA(hwnd, classname, sizeof(classname)) <= 0) return false;
+    return strcmp(classname, "OHREPLAY") == 0;
+}
+
 // OFC cards can overlap other cards. Keep the randomized source/target point
 // away from rectangle edges so a drag never intentionally starts on a border.
 static POINT RandomizeInteriorLocation(const RECT &rect) {
@@ -329,7 +336,12 @@ MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
 
     POINT current;
     if (!GetCursorPos(&current)) return (int)false;
-    MoveMouseHuman(current, start, 200 + rand() % 100);
+    const bool replay_probe = IsOHReplayWindow(hwnd);
+    // Real tables preserve normal OH timing. OHReplay is static, so make the
+    // exact same physical path deliberately slow and unmistakable on screen.
+    const int approach_ms = replay_probe ? 1200 : (200 + rand() % 100);
+    MoveMouseHuman(current, start, approach_ms);
+    if (replay_probe) Sleep(700);  // visibly dwell over the source card
 
     SetFocus(hwnd);
     SetForegroundWindow(hwnd);
@@ -348,12 +360,14 @@ MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
     down.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN;
     if (SendInput(1, &down, sizeof(INPUT)) != 1) return (int)false;
 
-    Sleep(30 + rand() % 31);
+    Sleep(replay_probe ? 500 : (30 + rand() % 31));
     int held_duration = duration_ms;
     if (held_duration <= 0) held_duration = 350;
-    if (held_duration < 100) held_duration = 100;
-    if (held_duration > 1500) held_duration = 1500;
+    if (replay_probe && held_duration < 1600) held_duration = 1600;
+    if (!replay_probe && held_duration < 100) held_duration = 100;
+    if (held_duration > 2000) held_duration = 2000;
     MoveMouseHuman(start, end, held_duration);
+    if (replay_probe) Sleep(700);  // visibly dwell over destination before up
 
     INPUT move;
     ZeroMemory(&move, sizeof(INPUT));

@@ -209,8 +209,28 @@ bool COFCRuntimeController::StartDecision(
     Block("turn start failed: " + error);
     return false;
   }
+  // OHReplay is intentionally immutable. It is a perception/input diagnostic,
+  // not a transactional simulator. Dispatch exactly one slow physical drag so
+  // cursor motion can be observed, then stop without waiting for bitmap change.
+  if (p_casino_interface != NULL
+      && p_casino_interface->ConnectedToOHReplay()
+      && orchestrator_.awaiting_drag_verification()) {
+    phase_ = kReplayProbeComplete;
+    write_log(true,
+      "[OpenOFC REPLAY PROBE] physical_drag_dispatched=1 verification=SKIPPED reason=STATIC_OHREPLAY\n");
+    return true;
+  }
+
   phase_ = kArranging;
-  if (complete && ready) return SendConfirm(state);
+  if (complete && ready) {
+    if (p_casino_interface != NULL && p_casino_interface->ConnectedToOHReplay()) {
+      phase_ = kReplayProbeComplete;
+      write_log(true,
+        "[OpenOFC REPLAY PROBE] no_drag_required=1 confirm=SKIPPED reason=STATIC_OHREPLAY\n");
+      return true;
+    }
+    return SendConfirm(state);
+  }
   return true;
 }
 
@@ -311,6 +331,11 @@ void COFCRuntimeController::Tick(
   if (IsKnownNewHand(state)) ResetForKnownNewHand(state);
   if (phase_ == kBlocked) {
     write_log(true, "[DeepOFC TICK] action=NONE reason=RUNTIME_BLOCKED\n");
+    return;
+  }
+  if (phase_ == kReplayProbeComplete) {
+    // A static OHReplay can never verify a drag. One visible probe per attached
+    // replay state is sufficient; do not retry and do not call it a runtime error.
     return;
   }
   if (phase_ == kConfirmSent) {
