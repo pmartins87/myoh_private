@@ -192,7 +192,7 @@ time_t g_openofc_stop_deadline = 0;
 ''',
         '''  const int hhmm = p_tablemap->GetTMSymbol("openofc_stop_local_hhmm", -1);
   if (hhmm < 0) {
-    write_log(true, "[OpenOFC SESSION] stop_schedule=DISABLED hhmm=%d\n", hhmm);
+    write_log(true, "[OpenOFC SESSION] stop_schedule=DISABLED hhmm=%d\\n", hhmm);
     return;
   }
   const int hh = hhmm / 100;
