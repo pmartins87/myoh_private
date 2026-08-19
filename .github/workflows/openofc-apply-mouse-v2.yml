@@ -36,3 +36,5 @@ jobs:
           fi
           git commit -m "OpenOFC: restore legacy mouse arbitration and bound drag retries"
           git push origin HEAD:agent/openofc-foundation
+
+# trigger: mouse-v2-materialize
