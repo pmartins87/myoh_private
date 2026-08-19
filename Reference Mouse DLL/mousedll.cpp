@@ -313,26 +313,22 @@ MOUSEDLL_API int MouseClickDrag(const HWND hwnd, const RECT rect, bool is_horizo
 
 MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
                                        const RECT target_rect, const int duration_ms) {
+    // OPENOFC_LEGACY_DRAG_ARBITRATION: arbitrary-card drag follows the same
+    // arbitration used by the proven MouseClickDrag path.
     if (hwnd == NULL || !IsUsableRect(source_rect) || !IsUsableRect(target_rect)) {
         return (int)false;
     }
-
     POINT start = RandomizeInteriorLocation(source_rect);
     POINT end = RandomizeInteriorLocation(target_rect);
     if (!ClientToScreen(hwnd, &start) || !ClientToScreen(hwnd, &end)) {
         return (int)false;
     }
-
     const double screen_width = ::GetSystemMetrics(SM_CXSCREEN) - 1;
     const double screen_height = ::GetSystemMetrics(SM_CYSCREEN) - 1;
-    if (screen_width <= 0 || screen_height <= 0) {
-        return (int)false;
-    }
+    if (screen_width <= 0 || screen_height <= 0) return (int)false;
 
     POINT current;
-    if (!GetCursorPos(&current)) {
-        return (int)false;
-    }
+    if (!GetCursorPos(&current)) return (int)false;
     MoveMouseHuman(current, start, 200 + rand() % 100);
 
     SetFocus(hwnd);
@@ -350,12 +346,14 @@ MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
     down.mi.dx = start_x;
     down.mi.dy = start_y;
     down.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN;
-    if (SendInput(1, &down, sizeof(INPUT)) != 1) {
-        return (int)false;
-    }
+    if (SendInput(1, &down, sizeof(INPUT)) != 1) return (int)false;
 
-    Sleep(25);
-    MoveMouseHeldButton(start, end, duration_ms);
+    Sleep(30 + rand() % 31);
+    int held_duration = duration_ms;
+    if (held_duration <= 0) held_duration = 350;
+    if (held_duration < 100) held_duration = 100;
+    if (held_duration > 1500) held_duration = 1500;
+    MoveMouseHuman(start, end, held_duration);
 
     INPUT move;
     ZeroMemory(&move, sizeof(INPUT));
@@ -365,9 +363,6 @@ MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
     move.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
     const bool move_ok = (SendInput(1, &move, sizeof(INPUT)) == 1);
 
-    // Always attempt LEFTUP once LEFTDOWN has succeeded, even when the final
-    // move event failed, so this low-level primitive does not intentionally
-    // leave the mouse button held.
     INPUT up;
     ZeroMemory(&up, sizeof(INPUT));
     up.type = INPUT_MOUSE;
@@ -375,7 +370,6 @@ MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
     up.mi.dy = end_y;
     up.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP;
     const bool up_ok = (SendInput(1, &up, sizeof(INPUT)) == 1);
-
     return (int)(move_ok && up_ok);
 }
 

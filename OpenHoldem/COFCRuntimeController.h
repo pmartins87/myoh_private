@@ -50,6 +50,8 @@ class COFCRuntimeController {
   COFCState confirm_before_;
   int pending_before_drag_;
   std::string pending_signature_before_drag_;
+  int drag_wait_cycles_;
+  int drag_retry_count_;
   std::string hand_signature_;
 };
 

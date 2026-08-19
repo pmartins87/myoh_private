@@ -75,7 +75,8 @@ void LogStrategyAction(const COFCStrategyAction &action) {
 }  // namespace
 
 COFCRuntimeController::COFCRuntimeController()
-    : phase_(kIdle), pending_before_drag_(0) {}
+    : phase_(kIdle), pending_before_drag_(0), drag_wait_cycles_(0),
+      drag_retry_count_(0) {}
 
 int COFCRuntimeController::PendingCount(const COFCState &state) {
   int count = 0;
@@ -132,6 +133,8 @@ void COFCRuntimeController::ResetForKnownNewHand(const COFCState &state) {
   confirm_before_.Reset();
   pending_before_drag_ = 0;
   pending_signature_before_drag_.clear();
+  drag_wait_cycles_ = 0;
+  drag_retry_count_ = 0;
   hand_signature_ = IncomingSignature(state);
   phase_ = kIdle;
   write_log(true, "[DeepOFC FP0] known new hand; runtime reset\n");
@@ -199,6 +202,7 @@ bool COFCRuntimeController::StartDecision(
     p_tablemap->GetTMSymbol("ofc_drag_duration_ms", 350));
   pending_before_drag_ = PendingCount(state);
   pending_signature_before_drag_ = PendingSignature(state);
+  drag_wait_cycles_ = 0;
   if (!orchestrator_.StartTurn(
         state, observation, plan_, duration,
         &complete, &ready, &error)) {
@@ -216,10 +220,30 @@ bool COFCRuntimeController::AdvanceArrangement(
   const int current_pending = PendingCount(state);
   if (orchestrator_.awaiting_drag_verification()
       && PendingSignature(state) == pending_signature_before_drag_) {
+    ++drag_wait_cycles_;
+    const int kOpenOFCDragObservationWaitCycles = 8;
     write_log(true,
-      "[DeepOFC WAIT] drag not visible yet pending_signature=\"%s\"\n",
-      pending_signature_before_drag_.c_str());
-    return true;  // Current frame has not incorporated the drag yet.
+      "[DeepOFC WAIT] drag not visible yet pending_signature=\"%s\" wait=%d/%d retry=%d\n",
+      pending_signature_before_drag_.c_str(), drag_wait_cycles_,
+      kOpenOFCDragObservationWaitCycles, drag_retry_count_);
+    if (drag_wait_cycles_ < kOpenOFCDragObservationWaitCycles) return true;
+
+    // OPENOFC_DRAG_RETRY: API success is not proof that the simulator accepted
+    // the gesture. Retry the exact fixed strategic action once, then fail with
+    // a bounded durable reason instead of hanging indefinitely.
+    if (drag_retry_count_ < 1) {
+      ++drag_retry_count_;
+      drag_wait_cycles_ = 0;
+      write_log(k_always_log_errors,
+        "[OpenOFC DRAG RETRY] reason=NOT_OBSERVED attempt=%d pending_signature=\"%s\"\n",
+        drag_retry_count_ + 1, pending_signature_before_drag_.c_str());
+      orchestrator_.ResetForKnownNewHand();
+      plan_.Reset();
+      phase_ = kIdle;
+      return StartDecision(state, observation);
+    }
+    Block("DRAG_NOT_OBSERVED_AFTER_RETRY");
+    return false;
   }
   bool complete = false;
   bool ready = false;
@@ -233,6 +257,8 @@ bool COFCRuntimeController::AdvanceArrangement(
   }
   pending_before_drag_ = current_pending;
   pending_signature_before_drag_ = PendingSignature(state);
+  drag_wait_cycles_ = 0;
+  drag_retry_count_ = 0;
   if (complete && ready) return SendConfirm(state);
   return true;
 }

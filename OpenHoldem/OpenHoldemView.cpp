@@ -220,14 +220,20 @@ void COpenHoldemView::UpdateDisplay(const bool update_all) {
     const char *state_text = (state != NULL && state->valid) ? "OK" : "REJECT";
     line.Format("OpenOFC  |  KKPoker Joker Ultimate  |  TMv%d\r\n", contract);
     view += line;
-    line.Format("PERCEPTION  READ=%s  STATE=%s", read_text, state_text);
+    line.Format("PERCEPTION  READ=%s  STATE=%s\r\n", read_text, state_text);
+    view += line;
     if (state != NULL && state->valid) {
-      CString action = state->action_required ? "HERO ACTION" : "WAIT";
-      line.AppendFormat("  |  Round %d/5  |  H%d A%d D%d  |  %s",
+      line.Format("ROUND %d/5  |  HERO=P%d  |  ACTOR=P%d  |  DEALER=P%d\r\n",
         state->round_index + 1, state->hero_chair, state->acting_chair,
-        state->dealer_chair, action.GetString());
+        state->dealer_chair);
+      view += line;
+      line.Format("ACTION=%s  |  prepare=%d  |  confirm=%d\r\n\r\n",
+        state->action_required ? "HERO" : "WAIT",
+        state->hero_can_prepare ? 1 : 0, state->hero_can_confirm ? 1 : 0);
+      view += line;
+    } else {
+      view += "\r\n";
     }
-    view += line + "\r\n\r\n";
 
     if (raw != NULL && raw->valid) {
       for (int p = 0; p < raw->player_count && p < kOFCMaxPlayers; ++p) {
