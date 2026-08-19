@@ -46,3 +46,11 @@ T1, T3 and T5 are complete for A,K,Q,J,T,9..2, c/d/h/s and X. T2 is missing only
 ## Field test
 
 Use the packaged v4 executable and packaged v4 TableMap without replacing either file. The first line-level acceptance check is contract 4 ACTIVE with no contract suppression. Then prove autonomous R0 -> R1 -> R2 -> R3 -> R4 and result detection.
+
+## Green artifact
+
+Run `32269502427`, job `96122186347`, passed source repair, v4 semantic assertions, canonical TableMap validation, policy selftest, dependency build, OpenHoldem Win32 build, package collection and upload.
+
+Artifact: `OpenOFC_PhaseFlow_v4_Windows`, ID `9371656233`, digest `sha256:a20a7457c6b66bd7760d69fcf49a1f40d0b678c82133ebc7bba06b2aec1fe299`.
+
+The package contains exactly one TableMap. Its SHA256 is `09f5195ba710376142c6a59f1be80c0b93a35e44dfff995effb98dc8bb93df5b`.
