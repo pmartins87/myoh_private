@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import tools.apply_openofc_field_recovery_v54 as v54
+import apply_openofc_field_recovery_v54 as v54
 
 
 _original_replace_once = v54.replace_once
