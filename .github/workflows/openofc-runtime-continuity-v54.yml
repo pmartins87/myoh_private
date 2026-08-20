@@ -1,0 +1,151 @@
+name: OpenOFC v5.4 runtime continuity gate
+
+on:
+  push:
+    branches:
+      - 'openofc-v54-runtime-continuity'
+  pull_request:
+    branches:
+      - 'openofc-v53-build'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-native-continuity:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4 never-terminal continuity patch
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4 continuity patch failed: $LASTEXITCODE" }
+
+      - name: Assert native v5.4 source contract
+        shell: pwsh
+        run: |
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $runtimeHeader = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.h'
+          $lazy = Get-Content -Raw 'OpenHoldem/CLazyScraper.cpp'
+          $reconstructor = Get-Content -Raw 'OpenHoldem/COFCReconstructor.cpp'
+          $reconstructorHeader = Get-Content -Raw 'OpenHoldem/COFCReconstructor.h'
+          $heartbeat = Get-Content -Raw 'OpenHoldem/CHeartbeatThread.cpp'
+
+          foreach ($needle in @(
+            'OPENOFC_NEVER_TERMINAL_RUNTIME_V54',
+            '[OpenOFC REACQUIRE_ACCEPT]',
+            'ofc_fantasy_confirm_button',
+            'state.hero_incoming_count >= 14',
+            'state.hero_incoming_count <= 17')) {
+            if (-not $runtime.Contains($needle)) { throw "runtime continuity marker missing: $needle" }
+          }
+          if ($runtime.Contains('kBlocked') -or $runtimeHeader.Contains('kBlocked')) {
+            throw 'absorbing COFCRuntimeController kBlocked phase survived v5.4'
+          }
+          if ($runtime.Contains('AUTOMATION BLOCKED until a known new hand')) {
+            throw 'terminal runtime-block log survived v5.4'
+          }
+          foreach ($needle in @(
+            'OPENOFC_REACQUIRE_DEBOUNCE_V54',
+            'COFCReconstructor::ReconstructCurrentScreen',
+            '[OpenOFC REACQUIRE_CANDIDATE]',
+            '[OpenOFC REACQUIRE_REJECT]',
+            'terminal=0')) {
+            if (-not $lazy.Contains($needle)) { throw "lazy-scraper recovery marker missing: $needle" }
+          }
+          if (-not $reconstructor.Contains('COFCReconstructor::ReconstructCurrentScreen')) {
+            throw 'current-screen reconstructor implementation missing'
+          }
+          if (-not $reconstructorHeader.Contains('ReconstructCurrentScreen')) {
+            throw 'current-screen reconstructor API missing'
+          }
+          if (-not $heartbeat.Contains('const int kOpenOFCContractVersion = 5;')) {
+            throw 'OpenOFC v5.4 runtime contract version is not 5'
+          }
+          Write-Host 'PASS: v5.4 has no absorbing runtime-controller failure state.'
+          Write-Host 'PASS: current-screen recovery is explicit and debounced.'
+          Write-Host 'PASS: Fantasy runtime new-hand count is generic 14..17.'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run current-screen continuity selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRuntimeContinuitySelftest.cpp /Fe:COFCRuntimeContinuitySelftest.exe && COFCRuntimeContinuitySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Continuity selftest failed: $LASTEXITCODE" }
+
+      - name: Compile and run smart-policy selftest
+        shell: pwsh
+        run: |
+          python tools/instrument_openofc_policy_selftest_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest instrumentation failed: $LASTEXITCODE" }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Freeze gate result (no field artifact)
+        shell: pwsh
+        run: |
+          Write-Host 'OpenOFC v5.4.2A native continuity gate completed.'
+          Write-Host 'No runtime ZIP is uploaded by this workflow.'
+          Write-Host 'Partially arranged normal reconnect (loose=1/2) remains v5.4.2B.'
+          Write-Host 'Native generic Fantasy pixel routing remains v5.4.3.'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
