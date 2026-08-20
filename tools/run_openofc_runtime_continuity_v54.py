@@ -53,6 +53,28 @@ def normalize_v53_shape() -> None:
     )
 
 
+def assert_post_chain_liveness() -> None:
+    lazy = (ROOT / "OpenHoldem/CLazyScraper.cpp").read_text(
+        encoding="utf-8-sig", errors="strict"
+    )
+    required = (
+        "OPENOFC_IDENTICAL_FAULT_RETRY_V541",
+        "deepofc_cached_snapshot_safe",
+        "[OpenOFC FAULT_RETRY]",
+        "continue_scraping=1",
+    )
+    missing = [needle for needle in required if needle not in lazy]
+    if missing:
+        raise RuntimeError(
+            "post-v5.4 liveness contract missing from CLazyScraper: "
+            + ", ".join(missing)
+        )
+    print(
+        "OpenOFC v5.4 post-chain liveness contract passed: "
+        "invalid byte-identical frames are re-scraped, never cached forever"
+    )
+
+
 if __name__ == "__main__":
     normalize_v53_shape()
     v54.main()
@@ -61,3 +83,4 @@ if __name__ == "__main__":
     # again on future heartbeats, which is essential when the client is waiting
     # for Hero and the pixels themselves remain unchanged.
     import apply_openofc_identical_fault_retry_v541  # noqa: F401,E402
+    assert_post_chain_liveness()
