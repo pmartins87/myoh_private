@@ -96,7 +96,6 @@ COFCVisualObservation Round3Loose2() {
 
 COFCVisualObservation Round3Loose1() {
   COFCVisualObservation obs = Round3Loose2();
-  PutFirstFree(&obs.players[1].visual_board.middle, kOFCRowUndefined, 0);
   // Add a second pre-attach current placement to make 11 visible board cards.
   Put(&obs.players[1].visual_board.middle[2], 20);
   Put(&obs.hero_loose_cards[0], 21);
