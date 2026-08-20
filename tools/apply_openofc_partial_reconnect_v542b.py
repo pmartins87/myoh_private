@@ -57,10 +57,11 @@ def patch_reconstructor():
         '''  int expected_incoming = observation.round_index == 0 ? 5 : 3;\n  if (static_cast<int>(current_incoming.size()) != expected_incoming) {\n''',
         '''  const bool partial_same_round = previous != NULL && previous->valid\n    && previous->partial_turn_recovery\n    && observation.round_index == previous->round_index;\n  int expected_incoming = observation.round_index == 0 ? 5 : 3;\n  if (partial_same_round) expected_incoming = previous->hero_incoming_count;\n  if (static_cast<int>(current_incoming.size()) != expected_incoming) {\n''')
 
+    # This anchor is normal-flow-specific (Fantasy writes round_index=-1).
     replace_once(
         rel,
-        '''  out->action_required = out->hero_can_confirm;\n\n  for (int p = 0; p < observation.player_count; ++p) {\n''',
-        '''  out->action_required = out->hero_can_confirm;\n  out->partial_turn_recovery = partial_same_round;\n\n  for (int p = 0; p < observation.player_count; ++p) {\n''')
+        '''  out->round_index = observation.round_index;\n  out->hero_can_prepare = observation.hero_can_prepare;\n''',
+        '''  out->round_index = observation.round_index;\n  out->partial_turn_recovery = partial_same_round;\n  out->hero_can_prepare = observation.hero_can_prepare;\n''')
 
     # On the transition after Confirm, cards already on the table when this
     # process attached were folded into the fixed baseline board. Only pending
