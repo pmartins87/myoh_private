@@ -54,14 +54,14 @@ if text.count(old) != 1:
 text = text.replace(old, new, 1)
 
 old_main = '''  if (!Fantasy15() || !Fantasy15DualJoker() || !NormalOpening()
-      || !NormalRoundPreservesJoker()) return 1;
+      || !NormalRoundPreservesJoker() || !UnavoidableFoulStillActs()) return 1;
 '''
 new_main = '''  if (!Fantasy15() || !Fantasy15DualJoker() || !NormalOpening()
       || !SmartOpeningUsesQQFantasyGateway()
-      || !NormalRoundPreservesJoker()) return 1;
+      || !NormalRoundPreservesJoker() || !UnavoidableFoulStillActs()) return 1;
 '''
 if text.count(old_main) != 1:
-    raise RuntimeError(f"expected one baseline main chain, got {text.count(old_main)}")
+    raise RuntimeError(f"expected one v4.3 main chain, got {text.count(old_main)}")
 text = text.replace(old_main, new_main, 1)
 
 out = text if eol == "\n" else text.replace("\n", "\r\n")
