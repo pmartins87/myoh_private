@@ -8,14 +8,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def normalize_v53_shape() -> None:
-    """Normalize one already-fixed v5.3 source fragment for the v5.4 upgrader.
+    """Normalize known v5.3 generated-source shapes for the v5.4 upgrader.
 
-    `run_openofc_gameflow_v2.py` already generalized the new-hand Fantasy count
-    from exactly 15 to 14..17. The v5.4 patch was intentionally written as an
-    upgrader from the older literal source shape so it can assert the change.
-    Recreate that one precondition in the ephemeral Actions workspace; the v5.4
-    patch immediately writes the generic 14..17 form back. No committed/runtime
-    source is downgraded and the final source contract asserts the generic form.
+    The frozen v5.3 chain already generalized the new-hand Fantasy count from
+    exactly 15 to 14..17, while the v5.4 upgrader retains an assertion that it
+    performed that migration. Also, the controller enum token appears both in
+    the header and in the generated implementation; v5.4 owns the rename to
+    `kReacquire` in both locations. These normalizations occur only in the
+    ephemeral Actions workspace before the v5.4 patch finishes and its final
+    source-contract assertions run.
     """
     path = ROOT / "OpenHoldem/COFCRuntimeController.cpp"
     raw = path.read_bytes()
@@ -36,12 +37,20 @@ def normalize_v53_shape() -> None:
     elif legacy not in text:
         raise RuntimeError("v5.3 initial_fantasy source shape is unknown")
 
+    blocked_count = text.count("kBlocked")
+    if blocked_count < 1:
+        raise RuntimeError("v5.3 controller implementation has no kBlocked token to migrate")
+    text = text.replace("kBlocked", "kReacquire")
+
     out = text if eol == "\n" else text.replace("\n", "\r\n")
     data = out.encode("utf-8")
     if bom:
         data = b"\xef\xbb\xbf" + data
     path.write_bytes(data)
-    print("normalized v5.3 initial_fantasy source shape for v5.4 upgrader")
+    print(
+        "normalized v5.3 source shape for v5.4 upgrader: "
+        f"fantasy-precondition=legacy-for-assertion blocked_tokens={blocked_count}->kReacquire"
+    )
 
 
 if __name__ == "__main__":
