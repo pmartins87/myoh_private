@@ -66,8 +66,24 @@ def regex_once_contextual(rel: str, pattern: str, replacement: str):
     return _original_regex_once(rel, pattern, replacement)
 
 
+def ensure_native_mode_definition():
+    rel = "OpenHoldem/COFCFantasy15PixelRecognizer.cpp"
+    path, text, eol, bom = v54.read_source(rel)
+    if "COFCFantasy15PixelRecognizer::DetectFantasyMode" in text:
+        return
+    anchor = "bool COFCFantasy15PixelRecognizer::RecognizeCurrentLooseObjects("
+    pos = text.find(anchor)
+    if pos < 0:
+        raise RuntimeError("v5.4 could not locate RecognizeCurrentLooseObjects for native mode definition")
+    method = '''bool COFCFantasy15PixelRecognizer::DetectFantasyMode(\n    HBITMAP table_bitmap, bool *active, std::string *error) {\n  if (error != NULL) error->clear();\n  if (active == NULL) return Fail(error, "Fantasy mode output is null");\n  *active = false;\n  Image image;\n  if (!ReadTopDownRgb(table_bitmap, &image, error)) return false;\n  const int points[4][2] = {\n    {225, 740}, {225, 760}, {170, 780}, {280, 780}\n  };\n  int brown = 0;\n  for (int i = 0; i < 4; ++i) {\n    const Pixel p = image.At(points[i][0], points[i][1]);\n    if (std::abs(static_cast<int>(p.r) - 135) <= 28\n        && std::abs(static_cast<int>(p.g) - 76) <= 24\n        && p.b <= 35) {\n      ++brown;\n    }\n  }\n  *active = brown >= 3;\n  return true;\n}\n\n'''
+    text = text[:pos] + method + text[pos:]
+    v54.write_source(path, text, eol, bom)
+    print(f"patched {rel}: ensured DetectFantasyMode definition")
+
+
 v54.replace_once = replace_once_contextual
 v54.regex_once = regex_once_contextual
 
 if __name__ == "__main__":
     v54.main()
+    ensure_native_mode_definition()
