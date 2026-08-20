@@ -1,0 +1,84 @@
+name: OpenOFC v5.3 isolated build
+
+on:
+  push:
+    branches: ['openofc-v53-build']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply repair chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture()"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "patch chain failed $LASTEXITCODE" }
+      - name: Assert contracts
+        shell: pwsh
+        run: |
+          $p=Get-Content -Raw OpenHoldem/COFCBaselinePolicy.cpp
+          $r=Get-Content -Raw OpenHoldem/COFCRuntimeController.cpp
+          foreach($x in @('OPENOFC_SMART_BASELINE_V53','NormalFantasyEntryValue','FantasyContinuationValue','OpeningStructureAdjustment','FiveCardPotential','TopPotential')){if(-not $p.Contains($x)){throw "missing $x"}}
+          if(-not $r.Contains('engine=SMART_BASELINE_V53')){throw 'runtime marker missing'}
+          if($p.Contains('deviation) * 1000000LL')){throw 'old opening dominance remains'}
+          python tools/materialize_openofc_fantasy_v52_history_tablemap.py
+      - uses: microsoft/setup-msbuild@v2
+      - name: Policy selftest
+        shell: pwsh
+        run: |
+          $vs=& "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd=Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $cmd='"'+$devcmd+'" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $cmd
+          if($LASTEXITCODE -ne 0){throw "policy selftest failed $LASTEXITCODE"}
+      - name: Build dependencies
+        shell: pwsh
+        run: |
+          $root=(Resolve-Path '.').Path+'\'
+          $common=@('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects=@('DLLs/Files_DLL/Files.vcxproj','DLLs/WindowFunctions_DLL/window_functions.vcxproj','DLLs/StringFunctions_DLL/string_functions.vcxproj','DLLs/Debug_DLL/Debug.vcxproj','DLLs/Preferences_DLL/Preferences.vcxproj','DLLs/Globals_DLL/globals.vcxproj','DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj','DLLs/User_DLL/user.vcxproj','PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj','Reference Mouse DLL/Reference Mouse DLL.vcxproj','Reference Keyboard DLL/Reference Keyboard DLL.vcxproj')
+          foreach($project in $projects){& msbuild $project @common; if($LASTEXITCODE -ne 0){throw "build failed $project"}}
+      - name: Build OpenHoldem
+        shell: pwsh
+        run: |
+          $root=(Resolve-Path '.').Path+'\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if($LASTEXITCODE -ne 0){throw "OpenHoldem build failed $LASTEXITCODE"}
+      - name: Package
+        shell: pwsh
+        run: |
+          $out='artifact/OpenOFC_v5_3_SmartBaseline_OpponentHistory_Windows'
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item Release/OpenHoldem.exe $out
+          Get-ChildItem Release -Filter '*.dll' | Copy-Item -Destination $out
+          if(Test-Path Release/tessdata){Copy-Item Release/tessdata "$out/tessdata" -Recurse}
+          New-Item -ItemType Directory -Force "$out/scraper" | Out-Null
+          Copy-Item OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_2.tm "$out/scraper/KKPoker_OpenOFC_JokerUltimate_v5_2.tm"
+          New-Item -ItemType Directory -Force "$out/tools" | Out-Null
+          Copy-Item tools/import_openofc_opponent_hands.py "$out/tools/"
+          Copy-Item tools/openofc_opponent_history_schema.sql "$out/tools/"
+          @'
+          OpenOFC v5.3 Smart Baseline + Opponent History
+          Rules-aware interim policy; v5.2 opponent-history collector retained.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v5_3_SmartBaseline_OpponentHistory_Windows
+          path: artifact/OpenOFC_v5_3_SmartBaseline_OpponentHistory_Windows
+          if-no-files-found: error
