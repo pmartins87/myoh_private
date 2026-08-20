@@ -1,6 +1,6 @@
 //******************************************************************************
-// OpenOFC v5.4 runtime-continuity current-screen reconstruction self-test.
-// Built only by the dedicated v5.4 CI workflow.
+// OpenOFC v5.4.2B runtime-continuity current-screen reconstruction self-test.
+// Built only by the dedicated v5.4.2B CI workflow.
 //******************************************************************************
 
 #include "COFCReconstructor.h"
@@ -85,6 +85,8 @@ int main() {
   }
   if (!Require(state.valid && state.round_index == 1,
         "R1 recovery produced canonical round 1")) return 1;
+  if (!Require(!state.partial_turn_recovery,
+        "all-loose recovery remains ordinary normal semantics")) return 1;
   if (!Require(state.players[state.hero_chair].board.CountKnownCards() == 5,
         "R1 recovery preserved five committed Hero cards")) return 1;
   if (!Require(state.hero_incoming_count == 3,
@@ -112,8 +114,10 @@ int main() {
     return 1;
   }
 
-  // A partially arranged normal later round is genuinely ambiguous in one
-  // frame. v5.4.2A must keep reading rather than guess which row card is current.
+  // v5.4.2B extends the current-screen contract: once one card has already
+  // been placed before process attachment, the whole visible Hero board is the
+  // fixed continuation baseline and the remaining two loose cards are the only
+  // live decision set. No historical tentative-card identity is guessed.
   COFCVisualObservation partial = r1;
   Put(&partial.players[1].visual_board.top[1], 5);
   Put(&partial.hero_loose_cards[0], 6);
@@ -121,14 +125,21 @@ int main() {
   partial.hero_loose_cards[2].Clear();
   partial.hero_loose_count = 2;
   error.clear();
-  if (!Require(!COFCReconstructor::ReconstructCurrentScreen(
+  if (!Require(COFCReconstructor::ReconstructCurrentScreen(
         partial, &state, &error),
-        "partial later-round screen must not be guessed")) return 1;
-  if (!Require(error.find("partially arranged") != std::string::npos,
-        "partial-screen rejection is explicit/recoverable")) return 1;
+        "partial later-round screen is recoverable without history guessing")) {
+    std::cerr << error << "\n";
+    return 1;
+  }
+  if (!Require(state.valid && state.partial_turn_recovery,
+        "partial-screen recovery is explicitly marked")) return 1;
+  if (!Require(state.players[state.hero_chair].board.CountKnownCards() == 6,
+        "partial-screen visible Hero board becomes fixed baseline")) return 1;
+  if (!Require(state.hero_incoming_count == 2,
+        "partial-screen recovery exposes only remaining live cards")) return 1;
 
-  // Fantasy is one generic runtime mode. Canonical recovery is count-agnostic
-  // across every legal 14..17-card deal size.
+  // Fantasy remains one generic runtime mode. Canonical recovery is count-
+  // agnostic across every legal 14..17-card deal size.
   for (int count = 14; count <= 17; ++count) {
     COFCVisualObservation fantasy = FantasyLoose(count);
     error.clear();
@@ -140,13 +151,15 @@ int main() {
     }
     if (!Require(state.valid && state.round_index == -1,
           "Fantasy recovery produced one-shot canonical state")) return 1;
+    if (!Require(!state.partial_turn_recovery,
+          "Fantasy never inherits normal partial-reconnect semantics")) return 1;
     if (!Require(state.hero_incoming_count == count,
           "Fantasy recovery preserved dynamic card count")) return 1;
   }
 
   std::cout
-    << "PASS OpenOFC v5.4 current-screen continuity: "
-    << "R1 all-loose bootstrap, identity-drift recovery candidate, "
-    << "partial-round fail-without-terminal-state, Fantasy 14..17\n";
+    << "PASS OpenOFC v5.4.2B current-screen continuity: "
+    << "all-loose bootstrap, identity-drift reacquire, partial loose=2 baseline, "
+    << "Fantasy 14..17\n";
   return 0;
 }
