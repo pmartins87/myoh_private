@@ -20,12 +20,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Materialize initial real-pixel crop
+      - name: Diagnose and materialize initial real-pixel crop
         shell: pwsh
         run: |
           $parts = Get-ChildItem 'tests/fixtures/openofc_v543_hbitmap/b64/initial_*.txt' | Sort-Object Name
           if ($parts.Count -ne 4) { throw "Expected 4 initial fixture chunks, got $($parts.Count)" }
-          $b64 = ($parts | ForEach-Object { (Get-Content -Raw $_.FullName).Trim() }) -join ''
+          $pieces = @()
+          foreach ($part in $parts) {
+            $raw = (Get-Content -Raw $part.FullName).Trim()
+            $bad = [regex]::Match($raw, '[^A-Za-z0-9+/=]')
+            if ($bad.Success) {
+              $code = [int][char]$bad.Value[0]
+              Write-Host "INVALID_BASE64_CHUNK name=$($part.Name) length=$($raw.Length) index=$($bad.Index) codepoint=$code char=[$($bad.Value)]"
+              throw "Invalid base64 character in $($part.Name)"
+            }
+            Write-Host "BASE64_CHUNK name=$($part.Name) length=$($raw.Length) mod4=$($raw.Length % 4)"
+            $pieces += $raw
+          }
+          $b64 = $pieces -join ''
+          Write-Host "BASE64_TOTAL length=$($b64.Length) mod4=$($b64.Length % 4)"
           $bytes = [Convert]::FromBase64String($b64)
           $out = 'tests/fixtures/openofc_v543_hbitmap/field_frame000000_loose.png'
           [IO.File]::WriteAllBytes($out, $bytes)
