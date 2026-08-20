@@ -44,6 +44,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC opponent-history v5.2 repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_smart_policy_v53.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC smart baseline v5.3 patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_smart_policy_v53_forward.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC smart baseline v5.3 declaration fix failed: $LASTEXITCODE" }
 
       - name: Assert smart policy contract
         shell: pwsh
