@@ -17,16 +17,24 @@ def replace_once_contextual(rel: str, old: str, new: str):
     if not recognizer_tail:
         return _original_replace_once(rel, old, new)
 
-    pattern = (
-        r"  std::string identity_error;\n"
-        r"  if \(!COFCFantasyDynamicGeometry::RequireUniquePhysicalCards\(\n"
-        r"        labels, &identity_error\).*?"
-        r"  return true;\n"
-        r"\}\n\n"
-        r"bool COFCFantasy15PixelRecognizer::RecognizeUprightCard\("
-    )
-    replacement = '''  std::string identity_error;\n  if (!COFCFantasyDynamicGeometry::RequireUniquePhysicalCards(\n        labels, &identity_error)) {\n    objects_left_to_right->clear();\n    return Fail(error, identity_error);\n  }\n  if (original_fantasy_cards.empty()) {\n    // OPENOFC_FANTASY_UNBOUND_RECONNECT_V54: used for a fresh attachment or\n    // initial 14..17 fan. Total-card validation remains in the OFC scraper,\n    // where tentative board cards and loose cards can be counted together.\n    return true;\n  }\n  if (!COFCFantasyDynamicGeometry::RequirePhysicalCardLineage(\n        labels, original_fantasy_cards, &identity_error)) {\n    objects_left_to_right->clear();\n    return Fail(error, identity_error);\n  }\n  return true;\n}\n\nbool COFCFantasy15PixelRecognizer::RecognizeUprightCard('''
-    _original_regex_once(rel, pattern, replacement)
+    path, text, eol, bom = v54.read_source(rel)
+    function_start = text.find(
+        "bool COFCFantasy15PixelRecognizer::RecognizeCurrentLooseObjects(")
+    function_end = text.find(
+        "bool COFCFantasy15PixelRecognizer::RecognizeUprightCard(",
+        function_start + 1)
+    if function_start < 0 or function_end < 0:
+        raise RuntimeError("v5.4 current-loose function boundary missing")
+    segment = text[function_start:function_end]
+    tail = '''  std::string identity_error;\n  if (!COFCFantasyDynamicGeometry::RequireUniquePhysicalCards(\n        labels, &identity_error)\n      || !COFCFantasyDynamicGeometry::RequirePhysicalCardLineage(\n        labels, original_fantasy_cards, &identity_error)) {\n    objects_left_to_right->clear();\n    return Fail(error, identity_error);\n  }\n  return true;\n}\n\n'''
+    replacement = '''  std::string identity_error;\n  if (!COFCFantasyDynamicGeometry::RequireUniquePhysicalCards(\n        labels, &identity_error)) {\n    objects_left_to_right->clear();\n    return Fail(error, identity_error);\n  }\n  if (original_fantasy_cards.empty()) {\n    // OPENOFC_FANTASY_UNBOUND_RECONNECT_V54: used for a fresh attachment or\n    // initial 14..17 fan. Total-card validation remains in the OFC scraper,\n    // where tentative board cards and loose cards can be counted together.\n    return true;\n  }\n  if (!COFCFantasyDynamicGeometry::RequirePhysicalCardLineage(\n        labels, original_fantasy_cards, &identity_error)) {\n    objects_left_to_right->clear();\n    return Fail(error, identity_error);\n  }\n  return true;\n}\n\n'''
+    if segment.count(tail) != 1:
+        raise RuntimeError(
+            f"v5.4 expected one lineage tail inside current-loose function, got {segment.count(tail)}")
+    segment = segment.replace(tail, replacement, 1)
+    text = text[:function_start] + segment + text[function_end:]
+    v54.write_source(path, text, eol, bom)
+    print(f"patched {rel}: scoped current-loose lineage")
 
 
 def _replace_span(rel: str, start_marker: str, end_marker: str, replacement: str):
