@@ -44,7 +44,7 @@ jobs:
           }
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
 
-      - name: Verify transported Git blobs and materialize verified coverage
+      - name: Verify transported Git blobs and export verified PNG prefix
         shell: pwsh
         run: |
           $expected = @(
@@ -65,10 +65,19 @@ jobs:
             $raw = (Get-Content -Raw $parts[$i].FullName).Trim()
             $bad = [regex]::Match($raw, '[^A-Za-z0-9+/=]')
             if ($bad.Success) { throw "Invalid base64 character in $($parts[$i].Name) at $($bad.Index)" }
-            Write-Host "BASE64_CHUNK name=$($parts[$i].Name) length=$($raw.Length) mod4=$($raw.Length % 4)"
             $pieces += $raw
           }
           $b64 = $pieces -join ''
-          Write-Host "VERIFIED_COVERAGE chars=$($b64.Length) decoded_bytes_if_complete=$([Math]::Floor($b64.Length*3/4))"
+          $bytes = [Convert]::FromBase64String($b64)
+          New-Item -ItemType Directory -Force -Path hbitmap-prefix | Out-Null
+          [IO.File]::WriteAllBytes('hbitmap-prefix/field_frame000000_loose.prefix.png', $bytes)
+          Write-Host "VERIFIED_COVERAGE chars=$($b64.Length) decoded_bytes=$($bytes.Length)"
           Write-Host 'PASS verified Git blob identities; fixture still incomplete until canonical SHA-256 matches'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Upload verified prefix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openofc-v543-hbitmap-verified-prefix
+          path: hbitmap-prefix/field_frame000000_loose.prefix.png
+          if-no-files-found: error
