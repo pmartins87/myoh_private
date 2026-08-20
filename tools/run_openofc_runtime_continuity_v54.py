@@ -56,3 +56,8 @@ def normalize_v53_shape() -> None:
 if __name__ == "__main__":
     normalize_v53_shape()
     v54.main()
+    # Invalid observations are never cacheable terminal results. Importing this
+    # narrow follow-up patch forces byte-identical invalid frames to be scraped
+    # again on future heartbeats, which is essential when the client is waiting
+    # for Hero and the pixels themselves remain unchanged.
+    import apply_openofc_identical_fault_retry_v541  # noqa: F401,E402
