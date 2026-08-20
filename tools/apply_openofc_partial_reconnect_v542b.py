@@ -63,14 +63,14 @@ def patch_reconstructor():
         '''  out->round_index = observation.round_index;\n  out->hero_can_prepare = observation.hero_can_prepare;\n''',
         '''  out->round_index = observation.round_index;\n  out->partial_turn_recovery = partial_same_round;\n  out->hero_can_prepare = observation.hero_can_prepare;\n''')
 
-    # On the transition after Confirm, cards already on the table when this
-    # process attached were folded into the fixed baseline board. Only pending
-    # placements created after bootstrap still need to be promoted from the
-    # reduced incoming set into committed membership.
+    # v4.2 derives discards from visibility instead of trusting tiny tracker OCR.
+    # During partial recovery prior_incoming is intentionally reduced, therefore
+    # only post-attach pending placements are expected to appear as newly
+    # committed. The one absent reduced incoming card remains the derived discard.
     replace_once(
         rel,
-        '''      int expected_commit_count = previous->round_index == 0 ? 5 : 2;\n      if (static_cast<int>(committed_from_prior.size()) != expected_commit_count) {\n''',
-        '''      int expected_commit_count = previous->round_index == 0 ? 5 : 2;\n      if (previous->partial_turn_recovery) {\n        expected_commit_count = 0;\n        for (int i = 0; i < kOFCMaxIncomingCards; ++i)\n          if (previous->pending[i].active) ++expected_commit_count;\n      }\n      if (static_cast<int>(committed_from_prior.size()) != expected_commit_count) {\n''')
+        '''      const int expected_commit_count = previous->round_index == 0 ? 5 : 2;\n      const int expected_discard_count = previous->round_index == 0 ? 0 : 1;\n      if (static_cast<int>(committed_from_prior.size()) != expected_commit_count\n          || static_cast<int>(discard_delta.size()) != expected_discard_count) {\n''',
+        '''      int expected_commit_count = previous->round_index == 0 ? 5 : 2;\n      const int expected_discard_count = previous->round_index == 0 ? 0 : 1;\n      if (previous->partial_turn_recovery) {\n        expected_commit_count = 0;\n        for (int i = 0; i < kOFCMaxIncomingCards; ++i)\n          if (previous->pending[i].active) ++expected_commit_count;\n      }\n      if (static_cast<int>(committed_from_prior.size()) != expected_commit_count\n          || static_cast<int>(discard_delta.size()) != expected_discard_count) {\n''')
 
     # Generalize v5.4 current-screen recovery from all-three-loose only to the
     # two partial shapes that are physically actionable in KKPoker: loose=2
