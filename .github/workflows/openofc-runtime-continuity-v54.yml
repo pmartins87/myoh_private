@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - 'openofc-v54-runtime-continuity'
+  pull_request:
+    branches:
+      - 'openofc-v53-build'
   workflow_dispatch:
 
 permissions:
