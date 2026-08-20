@@ -20,21 +20,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Diagnose and materialize initial real-pixel crop
+      - name: Verify transported Git blobs and materialize initial crop
         shell: pwsh
         run: |
-          $parts = Get-ChildItem 'tests/fixtures/openofc_v543_hbitmap/b64/initial_*.txt' | Sort-Object Name
-          if ($parts.Count -ne 4) { throw "Expected 4 initial fixture chunks, got $($parts.Count)" }
+          $expected = @(
+            '03caef68a84c3ab66f3be3e86e930a33dcce3c00',
+            '61ba62951ba8fae7f7b9fab35a7cfb0332b2d057',
+            '0b0d5af3385400eb8413bab13fbf52c4585df552',
+            'e2781d04969c4c4531df31bbbc051713f26c615e',
+            'e3f43ac34096365daebde5e289c0aed3b9cbca8d',
+            '70a25546a42e1fd769354f6e1d50391a00e22afe'
+          )
+          $parts = Get-ChildItem 'tests/fixtures/openofc_v543_hbitmap/b64/verified_initial_*.txt' | Sort-Object Name
+          if ($parts.Count -ne $expected.Count) { throw "Expected $($expected.Count) verified chunks, got $($parts.Count)" }
           $pieces = @()
-          foreach ($part in $parts) {
-            $raw = (Get-Content -Raw $part.FullName).Trim()
+          for ($i=0; $i -lt $parts.Count; $i++) {
+            $actualBlob = (git hash-object -- $parts[$i].FullName).Trim().ToLowerInvariant()
+            Write-Host "GIT_BLOB_VERIFY name=$($parts[$i].Name) expected=$($expected[$i]) actual=$actualBlob"
+            if ($actualBlob -ne $expected[$i]) { throw "Git blob SHA mismatch for $($parts[$i].Name)" }
+            $raw = (Get-Content -Raw $parts[$i].FullName).Trim()
             $bad = [regex]::Match($raw, '[^A-Za-z0-9+/=]')
-            if ($bad.Success) {
-              $code = [int][char]$bad.Value[0]
-              Write-Host "INVALID_BASE64_CHUNK name=$($part.Name) length=$($raw.Length) index=$($bad.Index) codepoint=$code char=[$($bad.Value)]"
-              throw "Invalid base64 character in $($part.Name)"
-            }
-            Write-Host "BASE64_CHUNK name=$($part.Name) length=$($raw.Length) mod4=$($raw.Length % 4)"
+            if ($bad.Success) { throw "Invalid base64 character in $($parts[$i].Name) at $($bad.Index)" }
+            Write-Host "BASE64_CHUNK name=$($parts[$i].Name) length=$($raw.Length) mod4=$($raw.Length % 4)"
             $pieces += $raw
           }
           $b64 = $pieces -join ''
@@ -45,8 +52,6 @@ jobs:
           $sha = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLowerInvariant()
           $size = (Get-Item $out).Length
           Write-Host "INITIAL_FIXTURE bytes=$size sha256=$sha"
-          if ($sha -ne '0da9c2a507071eab052f78f88c1f376be88005c5894976f26628964e960cd729') {
-            throw "Initial fixture SHA-256 mismatch: $sha"
-          }
+          if ($sha -ne '0da9c2a507071eab052f78f88c1f376be88005c5894976f26628964e960cd729') { throw "Initial fixture SHA-256 mismatch: $sha" }
           Write-Host 'PASS initial real-pixel fixture integrity'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
