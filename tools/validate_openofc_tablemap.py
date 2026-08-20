@@ -39,6 +39,13 @@ def parse_tm(path: Path):
     return target_size, symbols, regions
 
 
+def is_ofc_identity_region(name: str) -> bool:
+    # OpenOFC card perception is deliberately Tn-only, but player identity is a
+    # separate passive evidence channel. Explicit OFC-native name regions may
+    # therefore use AutoOCR without weakening the card-recognition contract.
+    return re.fullmatch(r"ofc_p\d+_name", name) is not None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate OpenOFC TableMap perception contract")
     ap.add_argument("tablemap", type=Path)
@@ -70,7 +77,8 @@ def main() -> int:
             errors.append(f"s$openofc_contract must be {args.require_contract}, got {symbols.get('openofc_contract')!r}")
 
     ofc_text = []
-    ofc_autoocr = []
+    ofc_autoocr_forbidden = []
+    ofc_identity_autoocr = []
     legacy_autoocr = []
     for lineno, name, transform, raw in regions:
         is_ofc = name.startswith("ofc_")
@@ -80,17 +88,31 @@ def main() -> int:
             if not re.fullmatch(r"T\d+", transform):
                 errors.append(f"line {lineno}: {name} must use Tn text transform, got {transform}")
         if is_ofc and transform.startswith("A"):
-            ofc_autoocr.append((lineno, name, transform))
+            if is_ofc_identity_region(name):
+                ofc_identity_autoocr.append((lineno, name, transform))
+            else:
+                ofc_autoocr_forbidden.append((lineno, name, transform))
         if not is_ofc and transform.startswith("A"):
             legacy_autoocr.append((lineno, name, transform))
 
-    if ofc_autoocr:
-        errors.append("OFC-specific regions contain AutoOCR transforms: " + ", ".join(f"{n}:{t}" for _, n, t in ofc_autoocr))
+    if ofc_autoocr_forbidden:
+        errors.append(
+            "OFC card/gameplay regions contain AutoOCR transforms: "
+            + ", ".join(f"{n}:{t}" for _, n, t in ofc_autoocr_forbidden)
+        )
     if not ofc_text:
         errors.append("no OFC rank/suit text-transform regions found")
 
+    if ofc_identity_autoocr:
+        notes.append(
+            "OFC-native identity OCR regions are passive history evidence: "
+            + ", ".join(f"{n}:{t}" for _, n, t in ofc_identity_autoocr)
+        )
     if legacy_autoocr:
-        notes.append("legacy non-OFC AutoOCR regions exist but are outside the OpenOFC path: " + ", ".join(f"{n}:{t}" for _, n, t in legacy_autoocr))
+        notes.append(
+            "legacy non-OFC AutoOCR regions exist but are outside the OpenOFC path: "
+            + ", ".join(f"{n}:{t}" for _, n, t in legacy_autoocr)
+        )
 
     print(f"TableMap: {args.tablemap}")
     print(f"target={target} variant={symbols.get('ofc_variant')} OFC rank/suit regions={len(ofc_text)}")
@@ -102,7 +124,7 @@ def main() -> int:
         for e in errors:
             print("ERROR:", e)
         return 1
-    print("PASS: normal OpenOFC card recognition is TableMap text-transform based; no OFC AutoOCR transform found.")
+    print("PASS: OpenOFC card recognition is Tn text-transform based; only explicit OFC identity regions may use AutoOCR.")
     return 0
 
 
