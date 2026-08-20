@@ -90,9 +90,93 @@ def ensure_native_mode_definition():
     print(f"patched {rel}: ensured DetectFantasyMode definition")
 
 
+def ensure_phase_marker_helpers():
+    rel = "OpenHoldem/COFCScraper.cpp"
+    path, text, eol, bom = v54.read_source(rel)
+    if "static void OpenOFCScrapePhaseMarkers(" in text:
+        return
+    anchor = "bool CScraper::ScrapeOFCVisualObservation() {"
+    pos = text.find(anchor)
+    if pos < 0:
+        raise RuntimeError("v5.4 could not locate ScrapeOFCVisualObservation for phase helpers")
+    helper = r'''
+static bool OpenOFCReadOptionalBoolean(
+    CScraper *scraper, const CString &region, bool *value) {
+  if (scraper == NULL || value == NULL) return false;
+  *value = false;
+  if (!DeepOFCRegionExists(region)) return false;
+  scraper->EvaluateTrueFalseRegion(value, region);
+  return true;
+}
+
+static void OpenOFCScrapePhaseMarkers(
+    CScraper *scraper,
+    COFCVisualObservation *obs,
+    int player_count,
+    int hero_chair) {
+  if (scraper == NULL || obs == NULL) return;
+
+  if (player_count == 2 && hero_chair >= 0 && hero_chair < 2) {
+    const int opponent = 1 - hero_chair;
+    int faceup = 0;
+    for (int i = 0; i < 3; ++i) {
+      CString empty_region, back_region;
+      empty_region.Format("ofc_p%d_discard%dempty", opponent, i);
+      back_region.Format("ofc_p%d_discard%dback", opponent, i);
+      bool empty = true;
+      bool back = false;
+      const bool have_empty =
+        OpenOFCReadOptionalBoolean(scraper, empty_region, &empty);
+      const bool have_back =
+        OpenOFCReadOptionalBoolean(scraper, back_region, &back);
+      if (have_empty && have_back && !empty && !back) ++faceup;
+    }
+    obs->opponent_result_faceup_discards = faceup;
+    obs->result_screen_visible = faceup >= 2;
+  }
+
+  bool per_player_fantasy[kOFCMaxPlayers] = {false, false, false};
+  for (int p = 0; p < player_count; ++p) {
+    int hits = 0;
+    for (int i = 0; i < 3; ++i) {
+      CString region;
+      region.Format("ofc_p%d_result_fantasy%d", p, i);
+      bool value = false;
+      if (OpenOFCReadOptionalBoolean(scraper, region, &value) && value) {
+        ++hits;
+      }
+    }
+    per_player_fantasy[p] = hits >= 2;
+  }
+  if (hero_chair >= 0 && hero_chair < player_count) {
+    obs->hero_result_fantasy = per_player_fantasy[hero_chair];
+    if (player_count == 2) {
+      obs->opponent_result_fantasy = per_player_fantasy[1 - hero_chair];
+    }
+  }
+
+  if (obs->result_screen_visible
+      || obs->hero_result_fantasy
+      || obs->opponent_result_fantasy) {
+    write_log(true,
+      "[OpenOFC PHASE] result=%d opp_faceup_discards=%d hero_fantasy=%d opponent_fantasy=%d\n",
+      obs->result_screen_visible ? 1 : 0,
+      obs->opponent_result_faceup_discards,
+      obs->hero_result_fantasy ? 1 : 0,
+      obs->opponent_result_fantasy ? 1 : 0);
+  }
+}
+
+'''
+    text = text[:pos] + helper + text[pos:]
+    v54.write_source(path, text, eol, bom)
+    print(f"patched {rel}: restored phase-marker helpers")
+
+
 v54.replace_once = replace_once_contextual
 v54.regex_once = regex_once_contextual
 
 if __name__ == "__main__":
     v54.main()
     ensure_native_mode_definition()
+    ensure_phase_marker_helpers()
