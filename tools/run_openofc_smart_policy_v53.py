@@ -19,6 +19,9 @@ try:
     subprocess.run(
         [sys.executable, str(ROOT / "tools/apply_openofc_smart_policy_v53_forward.py")],
         cwd=str(ROOT), check=True)
+    subprocess.run(
+        [sys.executable, str(ROOT / "tools/apply_openofc_smart_policy_v53_selftest.py")],
+        cwd=str(ROOT), check=True)
 finally:
     temp.unlink(missing_ok=True)
 print("OpenOFC smart baseline v5.3 wrapper applied successfully")
