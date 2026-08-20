@@ -32,7 +32,7 @@ jobs:
           python tools/run_openofc_fantasy_v5.py
           python tools/apply_openofc_opponent_history_v52.py
           python tools/run_openofc_smart_policy_v53.py
-          python tools/apply_openofc_field_recovery_v54.py
+          python tools/run_openofc_field_recovery_v54.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4 patch chain failed: $LASTEXITCODE" }
 
       - name: Assert v5.4 source contract
