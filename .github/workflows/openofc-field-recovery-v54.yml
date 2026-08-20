@@ -1,0 +1,158 @@
+name: OpenOFC v5.4 Fantasy-first + Joker persistence
+
+on:
+  push:
+    branches:
+      - 'agent/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build-package:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply OpenOFC repairs through v5.4 field recovery
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          python tools/run_openofc_field_recovery_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4 patch chain failed: $LASTEXITCODE" }
+
+      - name: Assert v5.4 source contract
+        shell: pwsh
+        run: |
+          $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $recognizer = Get-Content -Raw 'OpenHoldem/COFCFantasy15PixelRecognizer.cpp'
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $policy = Get-Content -Raw 'OpenHoldem/COFCBaselinePolicy.cpp'
+          foreach ($needle in @(
+            'OPENOFC_FANTASY_FIRST_ROUTING_V54',
+            'route=FANTASY_FIRST',
+            'FANTASY_DYNAMIC',
+            'Fantasy v5.4 requires 14..17 total Hero cards',
+            'OPENOFC_PERSISTENT_JOKER_BOARD_V54',
+            'NATIVE_PERSISTENT_JOKER',
+            'gold_card_marker_precedes_nominal_rank'
+          )) {
+            if (-not $scraper.Contains($needle)) { throw "v5.4 scraper marker missing: $needle" }
+          }
+          foreach ($needle in @('DetectFantasyMode','OPENOFC_FANTASY_UNBOUND_RECONNECT_V54')) {
+            if (-not $recognizer.Contains($needle)) { throw "v5.4 recognizer marker missing: $needle" }
+          }
+          if (-not $runtime.Contains('OPENOFC_FANTASY_DYNAMIC_NEW_HAND_V54')) { throw 'dynamic Fantasy new-hand marker missing' }
+          if ($runtime -match 'hero_incoming_count\s*==\s*15') { throw 'runtime still hard-codes 15-card Fantasy new hand' }
+          if ($policy -notmatch 'fantasy_count\s*<\s*14.*fantasy_count\s*>\s*17') { throw 'Fantasy policy lost 14..17 support' }
+          if ($scraper -match 'name.Format\("ofc_p%d_turn"') { throw 'Fantasy scraper still requires removed turn regions' }
+          if ($scraper -match 'Operational Fantasy15 requires exactly 15 cards') { throw 'old fixed-15 Fantasy scraper remains' }
+
+      - name: Materialize v5.4 TableMap
+        shell: pwsh
+        run: |
+          $tm = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_4.tm'
+          python tools/materialize_openofc_fantasy_v52_history_tablemap.py $tm
+          if ($LASTEXITCODE -ne 0) { throw "TableMap base materialization failed: $LASTEXITCODE" }
+          $text = Get-Content -Raw $tm
+          $text = $text -replace 's\$openofc_field_revision\s+\d+', 's$openofc_field_revision 54'
+          $text = $text -replace 's\$ofc_tablemap_stage\s+\S+', 's$ofc_tablemap_stage        openofc_v5_4_fantasy_first'
+          $text += "s`$openofc_fantasy_mode_native 1`r`n"
+          $text += "s`$openofc_persistent_joker_native 1`r`n"
+          [IO.File]::WriteAllText((Resolve-Path $tm), $text, (New-Object Text.UTF8Encoding($false)))
+          python tools/validate_openofc_tablemap.py $tm --require-contract 4
+          if ($LASTEXITCODE -ne 0) { throw "v5.4 TableMap validation failed: $LASTEXITCODE" }
+          $verify = Get-Content -Raw $tm
+          foreach ($needle in @('s$openofc_field_revision 54','s$openofc_fantasy_mode_native 1','s$openofc_persistent_joker_native 1','r$ofc_fantasy_row_action_top','r$ofc_fantasy_row_action_middle','r$ofc_fantasy_row_action_bottom')) {
+            if (-not $verify.Contains($needle)) { throw "v5.4 TableMap marker missing: $needle" }
+          }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run deterministic policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Collect runtime package
+        shell: pwsh
+        run: |
+          $release = 'Release'
+          $out = 'artifact/OpenOFC_v5_4_FantasyFirst_JokerPersistence_Windows'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
+          New-Item -ItemType Directory -Force -Path "$out/scraper" | Out-Null
+          Copy-Item 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_4.tm' "$out/scraper/KKPoker_OpenOFC_JokerUltimate_v5_4.tm"
+          New-Item -ItemType Directory -Force -Path "$out/tools" | Out-Null
+          Copy-Item 'tools/import_openofc_opponent_hands.py' "$out/tools/"
+          Copy-Item 'tools/openofc_opponent_history_schema.sql' "$out/tools/"
+          @'
+          OpenOFC v5.4 Fantasy-first + Joker persistence
+
+          Field repairs from the 19/08 test:
+          - native Fantasy mode boundary before any normal-state recovery;
+          - dynamic 14..17 initial/reconnect loose-card recognition;
+          - reconnect during partial Fantasy can rebuild state without prior lineage;
+          - opponent BACK cards are legal while Hero arranges Fantasy;
+          - Fantasy no longer depends on removed normal turn regions;
+          - committed gold substituted Jokers are identified by their persistent colored marker before nominal rank/suit text;
+          - Smart Baseline v5.3 and opponent-history collection remain enabled.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v5_4_FantasyFirst_JokerPersistence_Windows
+          path: artifact/OpenOFC_v5_4_FantasyFirst_JokerPersistence_Windows
+          if-no-files-found: error

@@ -122,6 +122,13 @@ static bool IsUsableRect(const RECT &rect) {
     return rect.right > rect.left && rect.bottom > rect.top;
 }
 
+static bool IsOHReplayWindow(const HWND hwnd) {
+    if (hwnd == NULL || !IsWindow(hwnd)) return false;
+    char classname[64] = {0};
+    if (GetClassNameA(hwnd, classname, sizeof(classname)) <= 0) return false;
+    return strcmp(classname, "OHREPLAY") == 0;
+}
+
 // OFC cards can overlap other cards. Keep the randomized source/target point
 // away from rectangle edges so a drag never intentionally starts on a border.
 static POINT RandomizeInteriorLocation(const RECT &rect) {
@@ -313,27 +320,28 @@ MOUSEDLL_API int MouseClickDrag(const HWND hwnd, const RECT rect, bool is_horizo
 
 MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
                                        const RECT target_rect, const int duration_ms) {
+    // OPENOFC_LEGACY_DRAG_ARBITRATION: arbitrary-card drag follows the same
+    // arbitration used by the proven MouseClickDrag path.
     if (hwnd == NULL || !IsUsableRect(source_rect) || !IsUsableRect(target_rect)) {
         return (int)false;
     }
-
     POINT start = RandomizeInteriorLocation(source_rect);
     POINT end = RandomizeInteriorLocation(target_rect);
     if (!ClientToScreen(hwnd, &start) || !ClientToScreen(hwnd, &end)) {
         return (int)false;
     }
-
     const double screen_width = ::GetSystemMetrics(SM_CXSCREEN) - 1;
     const double screen_height = ::GetSystemMetrics(SM_CYSCREEN) - 1;
-    if (screen_width <= 0 || screen_height <= 0) {
-        return (int)false;
-    }
+    if (screen_width <= 0 || screen_height <= 0) return (int)false;
 
     POINT current;
-    if (!GetCursorPos(&current)) {
-        return (int)false;
-    }
-    MoveMouseHuman(current, start, 200 + rand() % 100);
+    if (!GetCursorPos(&current)) return (int)false;
+    const bool replay_probe = IsOHReplayWindow(hwnd);
+    // Real tables preserve normal OH timing. OHReplay is static, so make the
+    // exact same physical path deliberately slow and unmistakable on screen.
+    const int approach_ms = replay_probe ? 1200 : (200 + rand() % 100);
+    MoveMouseHuman(current, start, approach_ms);
+    if (replay_probe) Sleep(700);  // visibly dwell over the source card
 
     SetFocus(hwnd);
     SetForegroundWindow(hwnd);
@@ -350,12 +358,16 @@ MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
     down.mi.dx = start_x;
     down.mi.dy = start_y;
     down.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTDOWN;
-    if (SendInput(1, &down, sizeof(INPUT)) != 1) {
-        return (int)false;
-    }
+    if (SendInput(1, &down, sizeof(INPUT)) != 1) return (int)false;
 
-    Sleep(25);
-    MoveMouseHeldButton(start, end, duration_ms);
+    Sleep(replay_probe ? 500 : (30 + rand() % 31));
+    int held_duration = duration_ms;
+    if (held_duration <= 0) held_duration = 350;
+    if (replay_probe && held_duration < 1600) held_duration = 1600;
+    if (!replay_probe && held_duration < 100) held_duration = 100;
+    if (held_duration > 2000) held_duration = 2000;
+    MoveMouseHuman(start, end, held_duration);
+    if (replay_probe) Sleep(700);  // visibly dwell over destination before up
 
     INPUT move;
     ZeroMemory(&move, sizeof(INPUT));
@@ -365,9 +377,6 @@ MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
     move.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
     const bool move_ok = (SendInput(1, &move, sizeof(INPUT)) == 1);
 
-    // Always attempt LEFTUP once LEFTDOWN has succeeded, even when the final
-    // move event failed, so this low-level primitive does not intentionally
-    // leave the mouse button held.
     INPUT up;
     ZeroMemory(&up, sizeof(INPUT));
     up.type = INPUT_MOUSE;
@@ -375,7 +384,6 @@ MOUSEDLL_API int MouseDragBetweenRects(const HWND hwnd, const RECT source_rect,
     up.mi.dy = end_y;
     up.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_LEFTUP;
     const bool up_ok = (SendInput(1, &up, sizeof(INPUT)) == 1);
-
     return (int)(move_ok && up_ok);
 }
 

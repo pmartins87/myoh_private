@@ -71,7 +71,8 @@ class COFCActionPlanner {
       int card_value,
       RECT *out,
       std::string *error);
-  static bool ResolveDropTarget(EOFCRow row, RECT *out, std::string *error);
+  static bool ResolveDropTarget(
+      const COFCState &state, EOFCRow row, RECT *out, std::string *error);
   static int FindIncomingIndex(const COFCState &state, int card_value);
   static bool PendingContains(const COFCState &state, int incoming_index, EOFCRow row);
   static bool IsUsableRect(const RECT &rect);

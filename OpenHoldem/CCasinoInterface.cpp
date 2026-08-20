@@ -44,6 +44,7 @@
 
 CCasinoInterface *p_casino_interface = NULL;
 
+
 CCasinoInterface::CCasinoInterface() {
 	// dummy point for mouse and keyboard DLL
 	p_null.x = kUndefined;
@@ -98,6 +99,15 @@ void CCasinoInterface::Reset() {
     _technical_i86X_spam_buttons[i].SetTechnicalName(button_name);
   }
   _next_i86_starting_button = 0;
+}
+
+bool CCasinoInterface::ConnectedToOHReplay() const {
+  if (p_autoconnector == NULL) return false;
+  HWND hwnd = p_autoconnector->attached_hwnd();
+  if (hwnd == NULL || !IsWindow(hwnd)) return false;
+  char classname[64] = {0};
+  if (GetClassNameA(hwnd, classname, sizeof(classname)) <= 0) return false;
+  return strcmp(classname, "OHREPLAY") == 0;
 }
 
 bool CCasinoInterface::TableLostFocus() {
@@ -158,21 +168,33 @@ bool CCasinoInterface::DragRectToRect(RECT source_rect, RECT target_rect, int du
     return false;
   }
 
-  // Unlike legacy button clicks, an OFC drag can mutate a multi-card
-  // arrangement. Never steal focus and drag if the connected table is not
-  // already the foreground window; the higher transaction layer will stop.
-  if (TableLostFocus()) {
+  // OPENOFC_LEGACY_MOUSE_ARBITRATION: preserve the same named mutex used by
+  // normal OpenHoldem before taking ownership of the shared physical cursor.
+  CMyMutex mouse_mutex;
+  if (!mouse_mutex.IsLocked()) {
     write_log(k_always_log_errors,
-      "[DeepOFC R10] Refusing drag because attached table lost focus\n");
+      "[OpenOFC MOUSE] arbitration=LEGACY result=MUTEX_TIMEOUT\n");
     return false;
   }
 
+  const bool replay_probe = ConnectedToOHReplay();
+  const int physical_duration = replay_probe ? max(duration_ms, 1600) : duration_ms;
+  POINT cursor_before = {0};
+  POINT cursor_after = {0};
+  const bool have_before = GetCursorPos(&cursor_before) != FALSE;
   write_log(true,
-    "[DeepOFC R10] physical drag src=%d,%d,%d,%d dst=%d,%d,%d,%d duration=%d\n",
+    "[DeepOFC R10] physical drag src=%d,%d,%d,%d dst=%d,%d,%d,%d duration=%d replay_probe=%d\n",
     source_rect.left, source_rect.top, source_rect.right, source_rect.bottom,
-    target_rect.left, target_rect.top, target_rect.right, target_rect.bottom, duration_ms);
+    target_rect.left, target_rect.top, target_rect.right, target_rect.bottom,
+    physical_duration, replay_probe ? 1 : 0);
   const bool ok = (theApp._dll_mouse_drag_between)(
-    hwnd, source_rect, target_rect, duration_ms) != 0;
+    hwnd, source_rect, target_rect, physical_duration) != 0;
+  const bool have_after = GetCursorPos(&cursor_after) != FALSE;
+  write_log(true,
+    "[OpenOFC MOUSE] arbitration=LEGACY before=(%ld,%ld) after=(%ld,%ld) dll_result=%d sampled=%d/%d replay_probe=%d\n",
+    cursor_before.x, cursor_before.y, cursor_after.x, cursor_after.y,
+    ok ? 1 : 0, have_before ? 1 : 0, have_after ? 1 : 0,
+    replay_probe ? 1 : 0);
   if (ok) {
     p_engine_container->symbol_engine_time()->UpdateOnAutoPlayerAction();
   } else {
@@ -180,6 +202,31 @@ bool CCasinoInterface::DragRectToRect(RECT source_rect, RECT target_rect, int du
       "[DeepOFC R10] MouseDragBetweenRects returned failure; transaction must fail closed\n");
   }
   return ok;
+}
+
+bool CCasinoInterface::ClickRectSafely(RECT rect) {
+  if (theApp._dll_mouse_click == NULL || p_autoconnector == NULL) return false;
+  HWND hwnd = p_autoconnector->attached_hwnd();
+  if (hwnd == NULL || !IsWindow(hwnd)) return false;
+  RECT client;
+  if (!GetClientRect(hwnd, &client)) return false;
+  const bool rect_ok = rect.right > rect.left && rect.bottom > rect.top
+    && rect.left >= client.left && rect.top >= client.top
+    && rect.right <= client.right && rect.bottom <= client.bottom;
+  if (!rect_ok) {
+    write_log(k_always_log_errors,
+      "[DeepOFC FP0] Refusing Confirm click outside attached client bounds\n");
+    return false;
+  }
+  CMyMutex mouse_mutex;
+  if (!mouse_mutex.IsLocked()) {
+    write_log(k_always_log_errors,
+      "[OpenOFC MOUSE] confirm arbitration=LEGACY result=MUTEX_TIMEOUT\n");
+    return false;
+  }
+  (theApp._dll_mouse_click)(hwnd, rect, MouseLeft, 1);
+  p_engine_container->symbol_engine_time()->UpdateOnAutoPlayerAction();
+  return true;
 }
 
 bool CCasinoInterface::ClickButtonSequence(int first_button, int second_button, int delay_in_milli_seconds) {

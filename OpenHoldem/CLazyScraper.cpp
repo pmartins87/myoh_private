@@ -79,19 +79,51 @@ CLazyScraper::~CLazyScraper() {
 // If in doubt be conservative.
 
 void CLazyScraper::DoScrape() {
-	if (p_scraper->IsIdenticalScrape())	{
-		_is_identical_scrape = true;
+  const bool identical_bitmap = p_scraper->IsIdenticalScrape();
+  const bool openofc_mode = p_tablemap->SupportsOFCJokerUltimate();
+  _is_identical_scrape = identical_bitmap;
+
+  static unsigned long deepofc_cycle = 0;
+  if (openofc_mode) {
+    ++deepofc_cycle;
+    if (identical_bitmap) {
+      // Recognition is a pure function of this captured bitmap plus the
+      // active TableMap. Re-running the complete OFC OCR/classifier stack on
+      // byte-identical pixels can only reproduce the same result, while it
+      // burns CPU, floods the log and can make the attached table appear to
+      // blink. Reuse the last raw/canonical snapshot until capture changes.
+      // The runtime still receives its heartbeat; while verifying a drag it
+      // sees the unchanged pending signature and waits for a genuinely fresh
+      // frame instead of treating repeated OCR as fresh evidence.
+      write_log(true,
+        "[OpenOFC CACHE] cycle=%lu bitmap=IDENTICAL reused_raw_valid=%d reused_canonical_valid=%d\n",
+        deepofc_cycle,
+        p_table_state->OFCVisualObservation()->valid ? 1 : 0,
+        p_table_state->OFCState()->valid ? 1 : 0);
+      return;
+    }
+    write_log(true,
+      "[DeepOFC CYCLE] id=%lu bitmap=CHANGED previous_canonical_valid=%d\n",
+      deepofc_cycle, p_table_state->OFCState()->valid ? 1 : 0);
+  } else if (identical_bitmap) {
     return;
-	}
-  _is_identical_scrape = false;
+  }
+
   // DeepOFC R9 canonical reconstruction path. Joker Ultimate never falls
   // through to legacy Hold'em hole/community/betting semantics.
-  if (p_tablemap->SupportsOFCJokerUltimate()) {
+  if (openofc_mode) {
     COFCState previous_state = *p_table_state->OFCState();
     if (!p_scraper->ScrapeOFCVisualObservation()) {
-      p_table_state->OFCState()->Reset();
+      // A drag animation may legitimately produce one ambiguous intermediate
+      // bitmap. Keep the last valid canonical lineage for the next settled
+      // scrape, but the current raw observation remains invalid so the FP0
+      // controller cannot act on stale state.
+      *p_table_state->OFCState() = previous_state;
       write_log(k_always_log_errors,
-        "[DeepOFC] R9 raw OFC scrape rejected; canonical state invalid\n");
+        "[DeepOFC CYCLE] id=%lu result=RAW_REJECTED action=NONE lineage=%s\n",
+        deepofc_cycle, previous_state.valid ? "PRESERVED" : "EMPTY");
+      write_log(k_always_log_errors,
+        "[DeepOFC] raw OFC scrape rejected; no action, last canonical lineage preserved\n");
       return;
     }
 
@@ -111,15 +143,19 @@ void CLazyScraper::DoScrape() {
     std::string reconstruction_error;
     if (!COFCReconstructor::Reconstruct(
           *raw, previous, &rebuilt, &reconstruction_error)) {
-      p_table_state->OFCState()->Reset();
+      // Never expose a fresh raw bitmap together with a stale canonical state
+      // to the controller. Preserve lineage only for the next reconstruction.
+      p_table_state->OFCVisualObservation()->valid = false;
+      *p_table_state->OFCState() = previous_state;
       write_log(k_always_log_errors,
-        "[DeepOFC] canonical reconstruction rejected: %s\n",
+        "[DeepOFC] canonical reconstruction rejected; no action, last lineage preserved: %s\n",
         reconstruction_error.c_str());
       return;
     }
 
     *p_table_state->OFCState() = rebuilt;
     std::string snapshot = COFCReconstructor::DiagnosticSnapshot(rebuilt);
+    write_log(true, "[DeepOFC CYCLE] id=%lu result=CANONICAL_VALID\n", deepofc_cycle);
     write_log(true, "[DeepOFC SNAPSHOT v1] %s\n", snapshot.c_str());
     return;
   }

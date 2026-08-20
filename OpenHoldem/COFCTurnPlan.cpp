@@ -4,7 +4,9 @@
 //
 //******************************************************************************
 
+#ifndef DEEPOFC_TURNPLAN_STANDALONE
 #include "StdAfx.h"
+#endif
 #include "COFCTurnPlan.h"
 
 #include <algorithm>
@@ -194,9 +196,11 @@ bool COFCTurnPlanBuilder::Build(
     return Fail(out, error, "Fantasy strategy target must fill rows exactly 3/5/5");
   }
 
-  // Existing tentative placements are UI progress, not strategy. Preserve only
-  // those that already match the solver target. A mismatch would require
-  // picking up/re-routing a board card, which current R10 has not certified.
+  // Existing tentative placements are UI progress, not strategy. KKPoker's
+  // first normal round initially displays all five cards in the bottom row;
+  // cards whose solver target differs must therefore be re-routed from their
+  // current visual rectangle. The transactional executor certifies one such
+  // relocation at a time with a fresh rescrape.
   for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
     if (!state.pending[i].active) continue;
     const int incoming_index = state.pending[i].incoming_index;
@@ -210,21 +214,29 @@ bool COFCTurnPlanBuilder::Build(
     pending_present[card] = true;
     if (!target_present[card]) {
       return Fail(out, error,
-        "currently pending card must be unused by solver action; rearrangement is not certified");
+        "currently pending card is unused by solver action; moving back to loose is unsupported");
     }
-    if (target_row[card] != state.pending[i].row) {
-      return Fail(out, error,
-        "currently pending card is in a different row than solver target; rearrangement is not certified");
+    if (target_row[card] == state.pending[i].row) {
+      COFCStrategyPlacement matched;
+      matched.card_value = card;
+      matched.row = state.pending[i].row;
+      out->already_correct[out->already_correct_count++] = matched;
     }
-    COFCStrategyPlacement matched;
-    matched.card_value = card;
-    matched.row = state.pending[i].row;
-    out->already_correct[out->already_correct_count++] = matched;
   }
 
   for (int i = 0; i < action.placement_count; ++i) {
     const int card = action.placements[i].card_value;
-    if (!pending_present[card]) {
+    bool correct = false;
+    for (int p = 0; p < kOFCMaxIncomingCards; ++p) {
+      if (!state.pending[p].active) continue;
+      const int incoming_index = state.pending[p].incoming_index;
+      if (incoming_index >= 0 && incoming_index < state.hero_incoming_count
+          && state.hero_incoming[incoming_index].value == card
+          && state.pending[p].row == action.placements[i].row) {
+        correct = true;
+      }
+    }
+    if (!correct) {
       out->to_add[out->to_add_count++] = action.placements[i];
     }
   }

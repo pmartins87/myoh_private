@@ -46,11 +46,13 @@ class CCasinoInterface: public CSpaceOptimizedGlobalObject {
   bool TableLostFocus();
   void ClickRect(RECT rect); 
   void DoubleClickRect(RECT rect);
-  // DeepOFC R10 low-level client-coordinate drag wrapper. This method performs
-  // only physical-window sanity checks and invokes the already-loaded mouse
-  // DLL primitive; OFC semantic authorization and post-drag verification stay
-  // in the dedicated transaction layer. It is not wired into the live R9 path.
+  // OpenOFC physical primitives. They preserve the named OpenHoldem mouse
+  // mutex so multiple OH/OpenOFC instances serialize real cursor ownership.
   bool DragRectToRect(RECT source_rect, RECT target_rect, int duration_ms);
+  bool ClickRectSafely(RECT rect);
+  // Legacy OHReplay is a static bitmap target. OpenOFC uses this only to make
+  // input diagnostics visible; it must never expect a board-state transition.
+  bool ConnectedToOHReplay() const;
   void SendKey(const char ascii_key);
   void SendHotKey(const char * hot_key);
  private:

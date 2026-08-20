@@ -19,6 +19,7 @@
 #include "CEngineContainer.h"
 #include "CFunctionCollection.h"
 #include "CIteratorThread.h"
+#include "COFCInspectorSnapshot.h"
 #include "CScraper.h"
 #include "CSymbolEngineAutoplayer.h"
 #include "CSymbolEngineHandrank.h"
@@ -28,6 +29,7 @@
 #include "CSymbolEngineUserchair.h"
 #include "CTableState.h"
 #include "resource.h"
+#include "..\CTablemap\CTablemap.h"
 #include "..\DLLs\StringFunctions_DLL\string_functions.h"
 
 COpenHoldemStatusbar *p_openholdem_statusbar = NULL;
@@ -68,6 +70,60 @@ void COpenHoldemStatusbar::GetWindowRect(RECT *statusbar_position) {
 }
 
 void COpenHoldemStatusbar::OnUpdateStatusbar() {
+  if (p_tablemap != NULL && p_tablemap->SupportsOFCJokerUltimate()) {
+    const COFCState *state = p_table_state == NULL ? NULL : p_table_state->OFCState();
+    const COFCVisualObservation *raw = p_table_state == NULL
+      ? NULL : p_table_state->OFCVisualObservation();
+    const int contract = p_tablemap->GetTMSymbol("openofc_contract", 0);
+    const bool contract_ok = contract == 1;
+
+    CString round = "Round: ?";
+    CString actor = contract_ok ? "Actor: ?" : "TM BLOCKED";
+    CString action = contract_ok ? "OpenOFC" : "OFC BLOCKED";
+
+    const bool canonical_ready = state != NULL && state->valid
+      && state->hero_chair >= 0 && state->hero_chair < state->player_count;
+    if (canonical_ready) {
+      if (state->players[state->hero_chair].fantasy) {
+        round.Format("Fantasy | in=%d", state->hero_incoming_count);
+      } else {
+        round.Format("Round %d/5 | in=%d", state->round_index + 1,
+          state->hero_incoming_count);
+      }
+      if (contract_ok) {
+        if (state->acting_chair == state->hero_chair) {
+          actor = state->hero_can_confirm ? "Hero: CONFIRM" : "Hero: ARRANGE";
+        } else if (state->acting_chair >= 0) {
+          actor.Format("Waiting P%d", state->acting_chair);
+        } else {
+          actor = "Waiting actor";
+        }
+        if (!state->action_required) actor = "Waiting transition";
+      }
+    }
+
+    // The inspector has two views over one source of truth. Compact goes to the
+    // visible status bar. Full is logged only when something changes, making a
+    // diagnostic capture readable while preserving exact rows/incoming/discards.
+    const CString compact = COFCInspectorSnapshot::Compact(raw, state, contract);
+    const CString full = COFCInspectorSnapshot::Full(raw, state, contract);
+    static CString last_full_snapshot;
+    if (full != last_full_snapshot) {
+      write_log(true, "[OpenOFC INSPECTOR] %s\n", full.GetString());
+      last_full_snapshot = full;
+    }
+
+    _status_bar.SetPaneText(
+      _status_bar.CommandToIndex(ID_INDICATOR_STATUS_ACTION), action);
+    _status_bar.SetPaneText(
+      _status_bar.CommandToIndex(ID_INDICATOR_STATUS_HANDRANK), round);
+    _status_bar.SetPaneText(
+      _status_bar.CommandToIndex(ID_INDICATOR_STATUS_PRWIN), actor);
+    _status_bar.SetPaneText(
+      _status_bar.CommandToIndex(ID_INDICATOR_STATUS_DUMMY), compact);
+    return;
+  }
+
   if (p_table_state->User()->HasKnownCards()){
     // Format data for display
     // Handrank
@@ -93,6 +149,9 @@ void COpenHoldemStatusbar::OnUpdateStatusbar() {
 }
 
 CString COpenHoldemStatusbar::LastAction() {
+  if (p_tablemap != NULL && p_tablemap->SupportsOFCJokerUltimate()) {
+    return "OpenOFC";
+  }
   if (p_engine_container->symbol_engine_userchair() == NULL)	{
 		// Very early phase of initialization
 		// Can't continue here.

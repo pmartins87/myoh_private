@@ -3,7 +3,7 @@
 // DeepOFC R10 physical-placement planner.
 //
 // No mouse input is sent here. This file only prepares and verifies one drag
-// transaction. Live execution remains blocked by the R9 hard read-only guard.
+// transaction for the dedicated FP0 runtime controller.
 //
 //******************************************************************************
 
@@ -23,13 +23,36 @@ bool Fail(string *error, const string &message) {
   return false;
 }
 
-const char *DropRegionName(EOFCRow row) {
+const char *RowName(EOFCRow row) {
   switch (row) {
-    case kOFCRowTop: return "ofc_drop_top";
-    case kOFCRowMiddle: return "ofc_drop_middle";
-    case kOFCRowBottom: return "ofc_drop_bottom";
+    case kOFCRowTop: return "top";
+    case kOFCRowMiddle: return "middle";
+    case kOFCRowBottom: return "bottom";
     default: return NULL;
   }
+}
+
+int KnownInRow(const COFCPlayerBoard &board, EOFCRow row) {
+  int count = 0;
+  if (row == kOFCRowTop) {
+    for (int i = 0; i < kOFCTopCards; ++i)
+      if (board.top[i].IsKnownPhysicalCard()) ++count;
+  } else if (row == kOFCRowMiddle) {
+    for (int i = 0; i < kOFCMiddleCards; ++i)
+      if (board.middle[i].IsKnownPhysicalCard()) ++count;
+  } else if (row == kOFCRowBottom) {
+    for (int i = 0; i < kOFCBottomCards; ++i)
+      if (board.bottom[i].IsKnownPhysicalCard()) ++count;
+  }
+  return count;
+}
+
+int PendingInRow(const COFCState &state, EOFCRow row) {
+  int count = 0;
+  for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
+    if (state.pending[i].active && state.pending[i].row == row) ++count;
+  }
+  return count;
 }
 
 bool DragTargetsExplicitlyCalibrated() {
@@ -90,7 +113,45 @@ bool COFCActionPlanner::ResolveLooseSource(
     found = i;
   }
   if (found < 0) {
-    return Fail(error, "requested physical card is not currently loose in the raw observation");
+    // A pending card can also be a movable source. This is required for the
+    // normal five-card opening layout, where KKPoker initially draws all five
+    // cards in the bottom row before the player redistributes them.
+    int source_row = -1;
+    int source_slot = -1;
+    const COFCPlayerBoard &board =
+      observation.players[observation.hero_chair].visual_board;
+    for (int i = 0; i < kOFCTopCards; ++i) {
+      if (board.top[i].value == card_value) { source_row = kOFCRowTop; source_slot = i; }
+    }
+    for (int i = 0; i < kOFCMiddleCards; ++i) {
+      if (board.middle[i].value == card_value) { source_row = kOFCRowMiddle; source_slot = i; }
+    }
+    for (int i = 0; i < kOFCBottomCards; ++i) {
+      if (board.bottom[i].value == card_value) { source_row = kOFCRowBottom; source_slot = i; }
+    }
+    if (source_row < 0 || source_slot < 0) {
+      return Fail(error,
+        "requested physical card is neither loose nor a current visual-board source");
+    }
+    const char *row_name = RowName(static_cast<EOFCRow>(source_row));
+    CString region;
+    if (observation.players[observation.hero_chair].fantasy) {
+      region.Format("ofc_fantasy15_drop_%s%d", row_name, source_slot);
+    } else {
+      region.Format("ofc_drop_%s%d", row_name, source_slot);
+    }
+    RMapCI it = p_tablemap->r$()->find(region);
+    if (it == p_tablemap->r$()->end()) {
+      return Fail(error, "pending physical card has no calibrated source rectangle");
+    }
+    out->left = static_cast<LONG>(it->second.left);
+    out->top = static_cast<LONG>(it->second.top);
+    out->right = static_cast<LONG>(it->second.right);
+    out->bottom = static_cast<LONG>(it->second.bottom);
+    if (!IsUsableRect(*out)) {
+      return Fail(error, "pending physical-card source rectangle is unusable");
+    }
+    return true;
   }
 
   const COFCVisualCardSource &source = observation.hero_loose_sources[found];
@@ -102,7 +163,7 @@ bool COFCActionPlanner::ResolveLooseSource(
 }
 
 bool COFCActionPlanner::ResolveDropTarget(
-    EOFCRow row, RECT *out, string *error) {
+    const COFCState &state, EOFCRow row, RECT *out, string *error) {
   if (out == NULL) return Fail(error, "drop-target output is null");
   SetRectEmpty(out);
   if (p_tablemap == NULL) return Fail(error, "tablemap is not available");
@@ -117,13 +178,26 @@ bool COFCActionPlanner::ResolveDropTarget(
       "OFC drag targets are not explicitly calibrated (s$ofc_drag_targets_calibrated != 1)");
   }
 
-  const char *name = DropRegionName(row);
-  if (name == NULL) return Fail(error, "invalid OFC destination row");
+  const char *row_name = RowName(row);
+  if (row_name == NULL) return Fail(error, "invalid OFC destination row");
+  const int slot = KnownInRow(state.players[state.hero_chair].board, row)
+    + PendingInRow(state, row);
+  const int capacity = row == kOFCRowTop ? kOFCTopCards : kOFCMiddleCards;
+  if (slot < 0 || slot >= capacity) {
+    return Fail(error, "destination row has no free calibrated slot");
+  }
+  CString region_name;
+  if (state.players[state.hero_chair].fantasy) {
+    region_name.Format("ofc_fantasy15_drop_%s%d", row_name, slot);
+  } else {
+    region_name.Format("ofc_drop_%s%d", row_name, slot);
+  }
 
-  RMapCI it = p_tablemap->r$()->find(CString(name));
+  RMapCI it = p_tablemap->r$()->find(region_name);
   if (it == p_tablemap->r$()->end()) {
     ostringstream oss;
-    oss << "missing calibrated tablemap drop region: " << name;
+    oss << "missing calibrated tablemap drop region: "
+        << region_name.GetString();
     return Fail(error, oss.str());
   }
 
@@ -134,7 +208,8 @@ bool COFCActionPlanner::ResolveDropTarget(
   rect.bottom = static_cast<LONG>(it->second.bottom);
   if (!IsUsableRect(rect)) {
     ostringstream oss;
-    oss << "invalid/empty tablemap drop region: " << name;
+    oss << "invalid/empty tablemap drop region: "
+        << region_name.GetString();
     return Fail(error, oss.str());
   }
   *out = rect;
@@ -191,12 +266,15 @@ bool COFCActionPlanner::BuildPlacementStep(
   for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
     if (!state.pending[i].active) continue;
     if (state.pending[i].incoming_index == incoming_index) {
-      return Fail(error, "requested physical card is already tentatively placed");
+      if (state.pending[i].row == row) {
+        return Fail(error, "requested physical card is already in its target row");
+      }
+      // A different current row is a certified relocation transaction.
     }
   }
 
   RECT target;
-  if (!ResolveDropTarget(row, &target, error)) return false;
+  if (!ResolveDropTarget(state, row, &target, error)) return false;
 
   out->card_value = card_value;
   out->row = row;
@@ -241,8 +319,19 @@ bool COFCActionPlanner::VerifyPendingTransition(
     if (before.pending[i].active) ++before_pending;
     if (after.pending[i].active) ++after_pending;
   }
-  if (after_pending != before_pending + 1) {
-    return Fail(error, "one drag did not produce exactly one additional pending placement");
+  bool relocated = false;
+  for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
+    if (before.pending[i].active
+        && before.pending[i].incoming_index == before_index) {
+      relocated = true;
+    }
+  }
+  const int expected_after = relocated ? before_pending : before_pending + 1;
+  if (after_pending != expected_after) {
+    return Fail(error,
+      relocated
+        ? "one relocation drag changed pending cardinality"
+        : "one drag did not produce exactly one additional pending placement");
   }
 
   for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
@@ -252,6 +341,7 @@ bool COFCActionPlanner::VerifyPendingTransition(
       return Fail(error, "pre-drag pending placement has invalid incoming index");
     }
     int old_card = before.hero_incoming[old_index].value;
+    if (relocated && old_card == card_value) continue;
     int new_index = FindIncomingIndex(after, old_card);
     if (new_index < 0 || !PendingContains(after, new_index, before.pending[i].row)) {
       return Fail(error, "pre-existing tentative placement changed during drag");

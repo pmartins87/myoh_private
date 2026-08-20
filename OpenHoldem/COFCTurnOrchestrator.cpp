@@ -135,8 +135,12 @@ bool COFCTurnOrchestrator::ValidateProgress(
 
   bool target_present[54] = {false};
   bool pending_present[54] = {false};
+  EOFCRow pending_row[54];
   EOFCRow target_row[54];
-  for (int i = 0; i < 54; ++i) target_row[i] = kOFCRowUndefined;
+  for (int i = 0; i < 54; ++i) {
+    target_row[i] = kOFCRowUndefined;
+    pending_row[i] = kOFCRowUndefined;
+  }
 
   for (int i = 0; i < plan_.target_count; ++i) {
     const int card = plan_.target[i].card_value;
@@ -165,15 +169,11 @@ bool COFCTurnOrchestrator::ValidateProgress(
       return false;
     }
     pending_present[card] = true;
+    pending_row[card] = state.pending[i].row;
     ++pending_count;
     if (!target_present[card]) {
       if (error != NULL) *error =
         "fresh pending card is not a solver target; rearrangement is not certified";
-      return false;
-    }
-    if (target_row[card] != state.pending[i].row) {
-      if (error != NULL) *error =
-        "fresh pending card row disagrees with fixed solver target; rearrangement is not certified";
       return false;
     }
   }
@@ -182,7 +182,7 @@ bool COFCTurnOrchestrator::ValidateProgress(
   COFCStrategyPlacement candidate;
   for (int i = 0; i < plan_.target_count; ++i) {
     const int card = plan_.target[i].card_value;
-    if (!pending_present[card]) {
+    if (!pending_present[card] || pending_row[card] != target_row[card]) {
       candidate = plan_.target[i];
       found_next = true;
       break;

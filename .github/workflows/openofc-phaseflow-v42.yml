@@ -1,0 +1,206 @@
+name: OpenOFC phase-flow v4.2 round-discard-exit repair
+
+on:
+  push:
+    branches:
+      - 'agent/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build-package:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply OpenOFC source repairs through v4.2
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_log248_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_gameflow_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_flow_v3.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC normal-flow v3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v4.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v41.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.1 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_round_discard_exit_v42.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.2 repair failed: $LASTEXITCODE" }
+
+      - name: Assert v4.2 field contract
+        shell: pwsh
+        run: |
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $recon = Get-Content -Raw 'OpenHoldem/COFCReconstructor.cpp'
+          $heartbeat = Get-Content -Raw 'OpenHoldem/CHeartbeatThread.cpp'
+
+          if ($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*4') { throw 'Runtime contract is not 4' }
+          if ($scraper -notmatch 'OPENOFC_ROUND_FROM_BOARD_AND_CURRENT_V42') { throw 'Board/current round inference missing' }
+          if ($scraper -notmatch 'case 10: obs->round_index = 2') { throw 'R2 board/current mapping missing' }
+          if ($scraper -notmatch 'case 12: obs->round_index = 3') { throw 'R3 board/current mapping missing' }
+          if ($scraper -notmatch 'case 14: obs->round_index = 4') { throw 'R4 board/current mapping missing' }
+          if ($scraper -match 'hero_loose_count \+ obs->hero_discard_tracker_count') { throw 'Historical discard tracker still controls round inference' }
+
+          if ($recon -notmatch 'OPENOFC_DERIVED_DISCARD_HISTORY_V42') { throw 'Derived canonical discard history missing' }
+          if ($recon -notmatch 'source=DERIVED_FROM_PRIOR_INCOMING') { throw 'Derived-discard trace missing' }
+          if ($recon -notmatch 'set<int> discards = canonical_discards') { throw 'Canonical discard output still depends on tracker OCR' }
+          if ($recon -match 'Hero discard tracker lost a previously known discard') { throw 'Strict historical tracker gate survived v4.2' }
+
+          if ($runtime -notmatch 'policy=LEAVE_NEXT_HAND') { throw 'Leave Next Hand stop policy missing' }
+          if ($runtime -notmatch 'OpenOFCRequestLeaveNextHand') { throw 'Leave Next Hand executor missing' }
+          if ($runtime -notmatch 'ofc_menu_button') { throw 'Menu region lookup missing' }
+          if ($runtime -notmatch 'ofc_leave_next_hand_menu_item') { throw 'Leave Next Hand menu-item lookup missing' }
+          if ($runtime -notmatch 'leave_next_hand_requested=1') { throw 'Leave Next Hand one-shot trace missing' }
+          if ($runtime -match 'p_casino_interface->CloseWindow\(\)') { throw 'Direct scheduled CloseWindow survived v4.2' }
+
+      - name: Materialize TableMap v4.2 package copy
+        shell: pwsh
+        run: |
+          $source = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4.tm.gz.b64'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4_2.tm'
+          $gz = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4_2.tm.gz'
+          $bytes = [Convert]::FromBase64String((Get-Content -Raw $source).Trim())
+          [IO.File]::WriteAllBytes($gz, $bytes)
+          $input = [IO.File]::OpenRead($gz)
+          try {
+            $gzip = New-Object IO.Compression.GzipStream($input, [IO.Compression.CompressionMode]::Decompress)
+            try {
+              $output = [IO.File]::Create($canonical)
+              try { $gzip.CopyTo($output) } finally { $output.Dispose() }
+            } finally { $gzip.Dispose() }
+          } finally { $input.Dispose() }
+          Remove-Item $gz -Force
+
+          $text = Get-Content -Raw $canonical
+          $text = $text -replace 's\$openofc_safe_exit_calibrated\s+1', 's$openofc_safe_exit_calibrated 0'
+          $text = $text -replace 's\$openofc_stop_enabled\s+0', 's$openofc_stop_enabled       1'
+          $text = $text -replace 's\$openofc_stop_local_hhmm\s+0', 's$openofc_stop_local_hhmm    -1'
+          if ($text -notmatch 's\$openofc_result_marker_calibrated') {
+            $text = $text -replace 's\$openofc_phase_contract\s+1', "s`$openofc_phase_contract 1`r`ns`$openofc_result_marker_calibrated 0`r`ns`$openofc_field_revision 42`r`ns`$openofc_exit_mode_leave_next_hand 1"
+          } else {
+            $text = $text -replace 's\$openofc_field_revision\s+\d+', 's$openofc_field_revision 42'
+            if ($text -notmatch 's\$openofc_exit_mode_leave_next_hand') {
+              $text += "`r`ns`$openofc_exit_mode_leave_next_hand 1`r`n"
+            }
+          }
+          if ($text -notmatch 'r\$ofc_menu_button') {
+            $text += "`r`nr`$ofc_menu_button 15 55 45 90 ff000000 0 N 1 0 0 0 -1`r`n"
+          }
+          if ($text -notmatch 'r\$ofc_leave_next_hand_menu_item') {
+            $text += "r`$ofc_leave_next_hand_menu_item 12 252 237 306 ff000000 0 N 1 0 0 0 -1`r`n"
+          }
+          [IO.File]::WriteAllText((Resolve-Path $canonical), $text, (New-Object Text.UTF8Encoding($false)))
+
+          python tools/validate_openofc_tablemap.py $canonical --require-contract 4
+          if ($LASTEXITCODE -ne 0) { throw "TableMap v4.2 validation failed: $LASTEXITCODE" }
+          $verify = Get-Content -Raw $canonical
+          if ($verify -notmatch 's\$openofc_result_marker_calibrated\s+0') { throw 'Result marker must remain uncalibrated' }
+          if ($verify -notmatch 's\$openofc_safe_exit_calibrated\s+0') { throw 'Legacy direct safe-exit must remain disabled' }
+          if ($verify -notmatch 's\$openofc_stop_enabled\s+1') { throw 'TableMap scheduled Leave Next Hand gate must be enabled' }
+          if ($verify -notmatch 's\$openofc_stop_local_hhmm\s+-1') { throw 'Default stop HHMM sentinel must be -1' }
+          if ($verify -notmatch 's\$openofc_field_revision\s+42') { throw 'v4.2 field revision missing' }
+          if ($verify -notmatch 's\$openofc_exit_mode_leave_next_hand\s+1') { throw 'Leave Next Hand mode marker missing' }
+          if ($verify -notmatch 'r\$ofc_menu_button') { throw 'Menu click region missing' }
+          if ($verify -notmatch 'r\$ofc_leave_next_hand_menu_item') { throw 'Leave Next Hand click region missing' }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run deterministic policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Collect runtime package
+        shell: pwsh
+        run: |
+          $release = 'Release'
+          $out = 'artifact/OpenOFC_PhaseFlow_v4_2_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4_2.tm'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
+          $scraperOut = Join-Path $out 'scraper'
+          New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v4_2.tm')
+
+          @'
+          OpenOFC phase-flow v4.2
+
+          Field failure fixed from the 19/08 11:08 session:
+          - R0, R1 and R2 were played autonomously.
+          - The next incoming was 7d/4c/2d.
+          - historical discard 8c lost its tiny suit glyph in T2;
+          - old round inference counted historical discard OCR, got 13 instead
+            of 14 and stayed in WAIT_NEXT_3.
+
+          v4.2 changes:
+          - normal round inference uses Hero board + CURRENT cards only;
+          - historical discard OCR has no round authority;
+          - each later discard is derived from the previous 3-card incoming set:
+            the two cards now visible on the board are committed, the absent one
+            is the canonical discard;
+          - discard tracker remains diagnostic only;
+          - scheduled exit uses KKPoker Leave Next Hand, never direct CloseWindow.
+
+          Scheduled exit:
+          - s$openofc_stop_local_hhmm -1 disables scheduling (default).
+          - Before a session, edit only that value to local HHMM, e.g. 230 for
+            02:30 or 1530 for 15:30.
+          - At the deadline OpenOFC clicks the green top-left menu and then
+            Leave Next Hand once; normal OFC play continues until KKPoker exits
+            after the current hand.
+
+          Primary acceptance target: autonomous R0 -> R1 -> R2 -> R3 -> R4.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_PhaseFlow_v4_2_Windows
+          path: artifact/OpenOFC_PhaseFlow_v4_2_Windows
+          if-no-files-found: error

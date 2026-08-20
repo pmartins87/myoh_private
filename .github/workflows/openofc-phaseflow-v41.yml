@@ -1,0 +1,165 @@
+name: OpenOFC phase-flow v4.1 field repair
+
+on:
+  push:
+    branches:
+      - 'agent/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build-package:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply OpenOFC source repairs through v4.1
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_log248_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_gameflow_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_flow_v3.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC normal-flow v3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v4.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v41.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.1 repair failed: $LASTEXITCODE" }
+
+      - name: Assert v4.1 field regression contract
+        shell: pwsh
+        run: |
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $inspector = Get-Content -Raw 'OpenHoldem/COFCInspectorSnapshot.h'
+          $statusbar = Get-Content -Raw 'OpenHoldem/COpenHoldemStatusbar.cpp'
+          $heartbeat = Get-Content -Raw 'OpenHoldem/CHeartbeatThread.cpp'
+
+          if ($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*4') { throw 'Runtime contract is not 4' }
+          if ($runtime -notmatch 'OPENOFC_RESULT_PHASE_SCOPE_V41') { throw 'Result phase scope repair missing' }
+          if ($runtime -notmatch 'openofc_result_marker_calibrated') { throw 'Result calibration gate missing in runtime' }
+          if ($scraper -notmatch 'OPENOFC_RESULT_MARKER_CALIBRATION_V41') { throw 'Scraper result calibration gate missing' }
+          if ($inspector -notmatch 'OPENOFC_JOKER_PRESENTATION_V41') { throw 'Generic Joker presentation repair missing' }
+          if ($inspector -notmatch 'IN=%s') { throw 'Incoming cards are not exposed in compact UI' }
+          if ($statusbar -notmatch 'OPENOFC_STATUSBAR_CONTRACT_V41') { throw 'Statusbar contract repair missing' }
+          if ($statusbar -notmatch 'contract == 4') { throw 'Statusbar is not aligned to runtime contract 4' }
+
+      - name: Materialize TableMap v4.1 package copy
+        shell: pwsh
+        run: |
+          $source = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4.tm.gz.b64'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4_1.tm'
+          $gz = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4_1.tm.gz'
+          $bytes = [Convert]::FromBase64String((Get-Content -Raw $source).Trim())
+          [IO.File]::WriteAllBytes($gz, $bytes)
+          $input = [IO.File]::OpenRead($gz)
+          try {
+            $gzip = New-Object IO.Compression.GzipStream($input, [IO.Compression.CompressionMode]::Decompress)
+            try {
+              $output = [IO.File]::Create($canonical)
+              try { $gzip.CopyTo($output) } finally { $output.Dispose() }
+            } finally { $gzip.Dispose() }
+          } finally { $input.Dispose() }
+          Remove-Item $gz -Force
+
+          $text = Get-Content -Raw $canonical
+          $text = $text -replace 's\$openofc_safe_exit_calibrated\s+1', 's$openofc_safe_exit_calibrated 0'
+          if ($text -notmatch 's\$openofc_result_marker_calibrated') {
+            $text = $text -replace 's\$openofc_phase_contract\s+1', "s`$openofc_phase_contract 1`r`ns`$openofc_result_marker_calibrated 0`r`ns`$openofc_field_revision 41"
+          }
+          [IO.File]::WriteAllText((Resolve-Path $canonical), $text, (New-Object Text.UTF8Encoding($false)))
+
+          python tools/validate_openofc_tablemap.py $canonical --require-contract 4
+          if ($LASTEXITCODE -ne 0) { throw "TableMap v4.1 validation failed: $LASTEXITCODE" }
+          $verify = Get-Content -Raw $canonical
+          if ($verify -notmatch 's\$openofc_result_marker_calibrated\s+0') { throw 'Result marker must stay uncalibrated in v4.1' }
+          if ($verify -notmatch 's\$openofc_safe_exit_calibrated\s+0') { throw 'Safe exit must be disabled until result geometry is recalibrated' }
+          if ($verify -notmatch 's\$openofc_field_revision\s+41') { throw 'v4.1 field revision missing' }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run deterministic policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Collect runtime package
+        shell: pwsh
+        run: |
+          $release = 'Release'
+          $out = 'artifact/OpenOFC_PhaseFlow_v4_1_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v4_1.tm'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
+          $scraperOut = Join-Path $out 'scraper'
+          New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v4_1.tm')
+
+          @'
+          OpenOFC phase-flow v4.1 field repair
+
+          This build is intentionally narrower than v4.
+          Field evidence proved the v4 result detector was a false-positive gate:
+          it reported RESULT throughout R0/R1 and returned before StartDecision.
+
+          v4.1 changes:
+          - result/Fantasy markers have no authority during R0..R4;
+          - current result geometry is explicitly UNCALIBRATED and safe-exit is OFF;
+          - generic Joker X is displayed as JK instead of INVALID;
+          - compact status UI shows the actual incoming cards, not only the count;
+          - statusbar contract gate is aligned with runtime contract 4.
+
+          Primary acceptance target: autonomous normal R0 -> R1 -> R2 -> R3 -> R4.
+          Do not evaluate scheduled safe-exit or Fantasy result continuation with this build.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_PhaseFlow_v4_1_Windows
+          path: artifact/OpenOFC_PhaseFlow_v4_1_Windows
+          if-no-files-found: error

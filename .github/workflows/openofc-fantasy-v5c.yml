@@ -1,0 +1,139 @@
+name: OpenOFC Fantasy v5c field candidate
+
+on:
+  push:
+    branches:
+      - 'agent/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build-package:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply OpenOFC repairs through Fantasy v5
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_log248_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_gameflow_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_flow_v3.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC normal-flow v3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v4.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v41.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.1 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_round_discard_exit_v42.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_completion_v43.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.4 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_fantasy_v5.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC Fantasy v5 repair failed: $LASTEXITCODE" }
+
+      - name: Assert Fantasy v5 source contract
+        shell: pwsh
+        run: |
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $casino = Get-Content -Raw 'OpenHoldem/CCasinoInterface.cpp'
+          $recognizer = Get-Content -Raw 'OpenHoldem/COFCFantasy15PixelRecognizer.cpp'
+          $executor = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          $project = Get-Content -Raw 'OpenHoldem/OpenHoldem.vcxproj'
+          $policy = Get-Content -Raw 'OpenHoldem/COFCBaselinePolicy.cpp'
+          $heartbeat = Get-Content -Raw 'OpenHoldem/CHeartbeatThread.cpp'
+          if ($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*4') { throw 'Runtime contract is not 4' }
+          if ($runtime -notmatch 'OPENOFC_FANTASY_ROW_BATCH_V5') { throw 'Fantasy v5 runtime branch missing' }
+          if ($runtime -notmatch 'final_board_verified=1') { throw 'Fantasy final-board confirmation gate missing' }
+          if ($casino -notmatch 'ClickRectsSafely') { throw 'atomic Fantasy click sequence missing' }
+          if ($recognizer -notmatch 'OPENOFC_FANTASY_SINGLE_LOOSE_V5') { throw 'single-loose support missing' }
+          if ($executor -notmatch 'action=SELECT_AND_CHECK') { throw 'row-batch executor missing' }
+          if ($executor -notmatch 'action=CLEAR_ROW') { throw 'row-clear recovery missing' }
+          if ($project -notmatch 'COFCFantasyBatchExecutor.cpp') { throw 'Fantasy executor not compiled' }
+          if ($policy -notmatch 'fantasy_count\s*<\s*14') { throw 'Fantasy minimum 14 missing' }
+          if ($policy -notmatch 'fantasy_count\s*>\s*17') { throw 'Fantasy maximum 17 missing' }
+
+      - name: Materialize measured TableMap v5
+        shell: pwsh
+        run: |
+          python tools/materialize_openofc_fantasy_v5_tablemap.py
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy v5 TableMap materialization failed: $LASTEXITCODE" }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run deterministic policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Collect runtime package
+        shell: pwsh
+        run: |
+          $release = 'Release'
+          $out = 'artifact/OpenOFC_Fantasy_v5_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5.tm'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
+          $scraperOut = Join-Path $out 'scraper'
+          New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v5.tm')
+          @'
+          OpenOFC Fantasy v5 field candidate
+
+          Normal v4.4 semantics are retained.
+          Fantasy: dynamic 14..17-card recognition; multi-select cards for one row; contextual yellow row-check; fresh rescrape/reflow after each row; red-X row-clear recovery; existing Confirm after exact 3/5/5 verification.
+          Hand-strength helper buttons are intentionally ignored.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_Fantasy_v5_Windows
+          path: artifact/OpenOFC_Fantasy_v5_Windows
+          if-no-files-found: error

@@ -1,0 +1,177 @@
+name: OpenOFC v5.2 opponent-history candidate
+
+on:
+  push:
+    branches:
+      - 'agent/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build-package:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply OpenOFC repairs through Fantasy v5.2 history
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_log248_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_gameflow_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_flow_v3.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC normal-flow v3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v4.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v41.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.1 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_round_discard_exit_v42.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_completion_v43.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.4 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_fantasy_v5.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC Fantasy v5 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_opponent_history_v52.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC opponent-history v5.2 repair failed: $LASTEXITCODE" }
+
+      - name: Assert opponent-history source contract
+        shell: pwsh
+        run: |
+          $obs = Get-Content -Raw 'OpenHoldem/COFCVisualObservation.h'
+          $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $lazy = Get-Content -Raw 'OpenHoldem/CLazyScraper.cpp'
+          $recorder = Get-Content -Raw 'OpenHoldem/COFCOpponentHistoryRecorder.cpp'
+          $project = Get-Content -Raw 'OpenHoldem/OpenHoldem.vcxproj'
+          foreach ($needle in @('revealed_discard_mask','raw_name[64]')) {
+            if (-not $obs.Contains($needle)) { throw "visual history field missing: $needle" }
+          }
+          foreach ($needle in @('OPENOFC_OPPONENT_HISTORY_V52','reveal_scrape','passive=1')) {
+            if (-not $scraper.Contains($needle)) { throw "passive opponent scrape missing: $needle" }
+          }
+          if (-not $lazy.Contains('ObserveTerminalReveal')) { throw 'terminal reveal hook missing' }
+          if (-not $lazy.Contains('ObserveCanonical')) { throw 'round history hook missing' }
+          foreach ($needle in @('REVEAL_EDGE_PARTIAL','COMPLETE_REVEAL','opponent_hands.jsonl','result_frame_saved=1')) {
+            if (-not $recorder.Contains($needle)) { throw "history recorder marker missing: $needle" }
+          }
+          if (-not $project.Contains('COFCOpponentHistoryRecorder.cpp')) { throw 'history recorder not compiled' }
+
+      - name: Materialize history-aware clean TableMap v5.2
+        shell: pwsh
+        run: |
+          python tools/materialize_openofc_fantasy_v52_history_tablemap.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.2 TableMap materialization failed: $LASTEXITCODE" }
+          $tm = Get-Content -Raw 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_2.tm'
+          foreach ($required in @('r$ofc_p0_discard0rank','r$ofc_p0_discard3suit','r$ofc_p0_name','t2$','t4$','s$openofc_opponent_history 1')) {
+            if (-not $tm.Contains($required)) { throw "history TableMap field missing: $required" }
+          }
+          foreach ($forbidden in @('r$ofc_hero_discard','r$ofc_fantasy15_src','r$ofc_p0_turn','r$p0name')) {
+            if ($tm.Contains($forbidden)) { throw "stale TableMap field remains: $forbidden" }
+          }
+
+      - name: SQLite importer deterministic selftest
+        shell: pwsh
+        run: |
+          python -m py_compile tools/import_openofc_opponent_hands.py
+          @'
+          {"schema":"openofc_opponent_hand_v1","hand_id":"selftest_hand","emitted_local":"2026-08-19T19:00:00.000","status":"COMPLETE_REVEAL","terminal_record":1,"hero_chair":1,"opponent_chair":0,"dealer_chair":0,"opponent_raw_name":"Villain","name_quality":"SCRAPED","highest_round_seen":4,"reveal_mask":15,"reveal_count":4,"hero_result_fantasy":0,"opponent_result_fantasy":0,"result_frame":"frame.bmp","revealed_discards":[20,21,22,23],"rounds":[{"round":0,"seen":1,"opponent_known":5,"hero_known":5,"opponent_board":{"top":[0,1,-2],"middle":[2,3,-2,-2,-2],"bottom":[4,-2,-2,-2,-2]},"hero_board":{"top":[30,-2,-2],"middle":[31,32,-2,-2,-2],"bottom":[33,34,-2,-2,-2]}},{"round":1,"seen":1,"opponent_known":7,"hero_known":7,"opponent_board":{"top":[0,1,-2],"middle":[2,3,5,-2,-2],"bottom":[4,6,-2,-2,-2]},"hero_board":{"top":[30,-2,-2],"middle":[31,32,35,-2,-2],"bottom":[33,34,36,-2,-2]}},{"round":2,"seen":1,"opponent_known":9,"hero_known":9,"opponent_board":{"top":[0,1,7],"middle":[2,3,5,8,-2],"bottom":[4,6,-2,-2,-2]},"hero_board":{"top":[30,37,-2],"middle":[31,32,35,38,-2],"bottom":[33,34,36,-2,-2]}},{"round":3,"seen":1,"opponent_known":11,"hero_known":11,"opponent_board":{"top":[0,1,7],"middle":[2,3,5,8,9],"bottom":[4,6,10,-2,-2]},"hero_board":{"top":[30,37,-2],"middle":[31,32,35,38,39],"bottom":[33,34,36,40,-2]}},{"round":4,"seen":1,"opponent_known":13,"hero_known":13,"opponent_board":{"top":[0,1,7],"middle":[2,3,5,8,9],"bottom":[4,6,10,11,12]},"hero_board":{"top":[30,37,41],"middle":[31,32,35,38,39],"bottom":[33,34,36,40,42]}}]}
+          '@ | Set-Content -Encoding UTF8 selftest_openofc_history.jsonl
+          python tools/import_openofc_opponent_hands.py --jsonl selftest_openofc_history.jsonl --db selftest_openofc_history.db
+          python -c "import sqlite3; c=sqlite3.connect('selftest_openofc_history.db'); assert c.execute('select Status from OFCHandAudit where HandID=?',('selftest_hand',)).fetchone()[0]=='OK'; assert c.execute('select count(*) from OFCReconstructedActions where HandID=?',('selftest_hand',)).fetchone()[0]==5; assert c.execute('select sum(ActionStatsEligible) from OFCReconstructedActions where HandID=?',('selftest_hand',)).fetchone()[0]==5; print('OpenOFC SQLite history selftest: PASS')"
+          if ($LASTEXITCODE -ne 0) { throw "SQLite history selftest failed: $LASTEXITCODE" }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run deterministic policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Collect runtime package
+        shell: pwsh
+        run: |
+          $release = 'Release'
+          $out = 'artifact/OpenOFC_v5_2_OpponentHistory_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_2.tm'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
+          $scraperOut = Join-Path $out 'scraper'
+          New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v5_2.tm')
+          New-Item -ItemType Directory -Force -Path "$out/tools" | Out-Null
+          Copy-Item 'tools/import_openofc_opponent_hands.py' "$out/tools/"
+          Copy-Item 'tools/openofc_opponent_history_schema.sql' "$out/tools/"
+          @'
+          OpenOFC v5.2 opponent-history field candidate
+
+          Runtime:
+          - normal v4.4 + Fantasy v5 retained;
+          - opponent result-discard strip restored as passive evidence;
+          - opponent name OCR restored under OFC-native region names;
+          - latest complete opponent/Hero public board snapshot is buffered for R0..R4;
+          - first face-up opponent discard edge saves a BMP evidence frame and JSONL record;
+          - complete four-discard reveal upgrades the same hand to COMPLETE_REVEAL when all five round snapshots exist;
+          - evidence OCR never gates gameplay.
+
+          Data path while OpenHoldem runs:
+            OpenOFC_Data\opponent_hands.jsonl
+            OpenOFC_Data\opponent_frames\*.bmp
+
+          Import into the same oppdb.db family used by the AoF tooling:
+            python tools\import_openofc_opponent_hands.py --jsonl OpenOFC_Data\opponent_hands.jsonl --db oppdb.db
+
+          OFC tables are namespaced: OFCHandAudit, OFCReconstructedActions, OFCOpponentCoverage.
+          Existing PlayerAliases is reused when present.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v5_2_OpponentHistory_Windows
+          path: artifact/OpenOFC_v5_2_OpponentHistory_Windows
+          if-no-files-found: error
