@@ -34,6 +34,18 @@ def replace_once(rel: str, old: str, new: str):
     print(f"patched {rel}")
 
 
+def replace_exact_count(rel: str, old: str, new: str, expected: int):
+    path, text, eol, bom = read_source(rel)
+    count = text.count(old)
+    if count != expected:
+        raise RuntimeError(
+            f"{rel}: expected {expected} targets, got {count}: {old[:140]!r}"
+        )
+    text = text.replace(old, new)
+    write_source(path, text, eol, bom)
+    print(f"patched {rel}: {count} sites")
+
+
 def patch_state_contract():
     rel = "OpenHoldem/COFCState.h"
     replace_once(
@@ -100,10 +112,14 @@ def patch_policy():
         '''  const int expected = state.round_index == 0 ? 5 : 3;\n  if (state.hero_incoming_count != expected) {\n    return Fail(action, error, "normal incoming count disagrees with round");\n  }\n''',
         '''  const bool partial_recovery = state.partial_turn_recovery;\n  const int expected = state.round_index == 0\n    ? 5 : (partial_recovery ? state.hero_incoming_count : 3);\n  if (partial_recovery\n      && (state.round_index < 1 || expected < 1 || expected > 2)) {\n    return Fail(action, error, "partial reconnect requires 1..2 live incoming cards");\n  }\n  if (state.hero_incoming_count != expected) {\n    return Fail(action, error, "normal incoming count disagrees with round");\n  }\n''')
 
-    replace_once(
+    # v4.3 has both the strict and unavoidable-foul enumeration passes. In a
+    # partial reconnect the client may already have forced Joker to be the only
+    # remaining discard candidate, so continuity must permit that shape in both.
+    replace_exact_count(
         rel,
         '''    if (unused >= 0 && incoming[unused].joker != 0) continue;\n''',
-        '''    if (unused >= 0 && incoming[unused].joker != 0\n        && !partial_recovery) continue;\n''')
+        '''    if (unused >= 0 && incoming[unused].joker != 0\n        && !partial_recovery) continue;\n''',
+        2)
 
     replace_once(
         rel,
