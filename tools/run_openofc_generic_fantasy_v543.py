@@ -74,14 +74,21 @@ text, log_count = re.subn(log_pattern, lambda _m: log_replacement, text, count=1
 if log_count != 1:
     raise RuntimeError(f"v5.4.3 wrapper could not replace raw-log patch: {log_count}")
 
-# Later patches leave comments/blank lines between the isolated Fantasy scraper
-# and the normal scraper. The semantic boundary is the next function signature,
-# not exact whitespace.
 old_boundary = r'''bool CScraper::ScrapeOFCFantasyVisualObservation\(int player_count, int hero_chair\) \{.*?\n\}\nbool CScraper::ScrapeOFCVisualObservation\(\) \{'''
 new_boundary = r'''bool CScraper::ScrapeOFCFantasyVisualObservation\(int player_count, int hero_chair\) \{.*?\n\}\s*\nbool CScraper::ScrapeOFCVisualObservation\(\) \{'''
 if old_boundary not in text:
     raise RuntimeError("v5.4.3 wrapper could not find Fantasy scraper boundary regex")
 text = text.replace(old_boundary, new_boundary, 1)
+
+# Keep a literal source marker for source-contract auditing. It describes the
+# actual argument passed to DeepOFCLogRawObservation; it is not a second mode.
+route_line = '  DeepOFCLogRawObservation(*obs, "FANTASY");\n'
+if text.count(route_line) != 1:
+    raise RuntimeError("v5.4.3 wrapper could not find generic Fantasy raw-log call")
+text = text.replace(
+    route_line,
+    '  // Generic raw logger emits route=FANTASY for this observation.\n' + route_line,
+    1)
 
 temp = ROOT / "tools/_apply_openofc_generic_fantasy_v543_runtime.py"
 temp.write_text(text, encoding="utf-8")
