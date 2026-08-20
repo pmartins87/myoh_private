@@ -39,10 +39,7 @@ std::string JsonEscape(const std::string &value) {
   return out.str();
 }
 
-void AppendCardArray(
-    std::ostringstream &out,
-    const COFCCard *cards,
-    int count) {
+void AppendCardArray(std::ostringstream &out, const COFCCard *cards, int count) {
   out << "[";
   for (int i = 0; i < count; ++i) {
     if (i != 0) out << ",";
@@ -117,6 +114,10 @@ bool SaveBitmap(HBITMAP h_bitmap, const char *filename) {
   bool ok = false;
   LPBYTE bits = NULL;
   HANDLE file = INVALID_HANDLE_VALUE;
+  BITMAPFILEHEADER header;
+  DWORD written = 0;
+  memset(&header, 0, sizeof(header));
+
   if (!GetDIBits(hdc_compatible, h_bitmap, 0, bmp.bmHeight,
       NULL, info, DIB_RGB_COLORS)) goto cleanup;
   info->bmiHeader.biCompression = BI_RGB;
@@ -130,15 +131,12 @@ bool SaveBitmap(HBITMAP h_bitmap, const char *filename) {
     CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
   if (file == INVALID_HANDLE_VALUE) goto cleanup;
 
-  BITMAPFILEHEADER header;
-  memset(&header, 0, sizeof(header));
   header.bfType = 0x4d42;
   header.bfOffBits = static_cast<DWORD>(sizeof(BITMAPFILEHEADER)
     + info->bmiHeader.biSize
     + info->bmiHeader.biClrUsed * sizeof(RGBQUAD));
   header.bfSize = header.bfOffBits + info->bmiHeader.biSizeImage;
 
-  DWORD written = 0;
   if (!WriteFile(file, &header, sizeof(header), &written, NULL)) goto cleanup;
   if (!WriteFile(file, &info->bmiHeader,
       sizeof(BITMAPINFOHEADER)
@@ -243,8 +241,7 @@ void COFCOpponentHistoryRecorder::UpdateIdentity(
   if (raw != NULL && *raw != 0) opponent_raw_name_ = raw;
 }
 
-void COFCOpponentHistoryRecorder::UpdateRoundSnapshot(
-    const COFCState &state) {
+void COFCOpponentHistoryRecorder::UpdateRoundSnapshot(const COFCState &state) {
   if (!hand_active_ || opponent_chair_ < 0
       || opponent_chair_ >= state.player_count
       || hero_chair_ < 0 || hero_chair_ >= state.player_count) return;
@@ -283,8 +280,7 @@ void COFCOpponentHistoryRecorder::MergeReveal(
   opponent_fantasy_result_ = observation.opponent_result_fantasy;
 }
 
-bool COFCOpponentHistoryRecorder::SaveEvidenceBitmap(
-    std::string *relative_path) {
+bool COFCOpponentHistoryRecorder::SaveEvidenceBitmap(std::string *relative_path) {
   if (relative_path == NULL || p_scraper == NULL || hand_id_.empty()) return false;
   CString root;
   root.Format("%s\\OpenOFC_Data", OpenHoldemDirectory());
@@ -304,8 +300,7 @@ bool COFCOpponentHistoryRecorder::SaveEvidenceBitmap(
     return false;
   }
   std::ostringstream rel;
-  rel << "OpenOFC_Data\\opponent_frames\\"
-      << hand_id_ << "_reveal_";
+  rel << "OpenOFC_Data\\opponent_frames\\" << hand_id_ << "_reveal_";
   char suffix[32] = {0};
   sprintf_s(suffix, "%06lu.bmp", result_frame_sequence_);
   rel << suffix;
@@ -405,7 +400,7 @@ void COFCOpponentHistoryRecorder::ObserveCanonical(
   dealer_chair_ = state.dealer_chair;
   UpdateIdentity(observation);
   UpdateRoundSnapshot(state);
-  if (observation.result_screen_visible) {
+  if (observation.opponent_result_faceup_discards > 0) {
     ObserveTerminalReveal(observation, &state);
   }
 }
@@ -413,7 +408,7 @@ void COFCOpponentHistoryRecorder::ObserveCanonical(
 void COFCOpponentHistoryRecorder::ObserveTerminalReveal(
     const COFCVisualObservation &observation,
     const COFCState *last_canonical_state) {
-  if (!observation.result_screen_visible) return;
+  if (observation.opponent_result_faceup_discards <= 0) return;
   if (!hand_active_) {
     if (last_canonical_state == NULL || !last_canonical_state->valid) return;
     StartHand(*last_canonical_state, observation);
@@ -424,9 +419,7 @@ void COFCOpponentHistoryRecorder::ObserveTerminalReveal(
 
   if (!reveal_edge_seen_) {
     reveal_edge_seen_ = true;
-    if (result_frame_relative_path_.empty()) {
-      SaveEvidenceBitmap(&result_frame_relative_path_);
-    }
+    if (result_frame_relative_path_.empty()) SaveEvidenceBitmap(&result_frame_relative_path_);
     Flush("REVEAL_EDGE_PARTIAL",
       "opponent discard face-up edge captured; waiting for complete identities",
       false);
