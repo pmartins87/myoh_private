@@ -52,7 +52,7 @@ jobs:
       - name: Apply v5.4.3 generic Fantasy patch
         shell: pwsh
         run: |
-          python tools/apply_openofc_generic_fantasy_v543.py
+          python tools/run_openofc_generic_fantasy_v543.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 generic Fantasy patch failed: $LASTEXITCODE" }
           python tools/normalize_openofc_generic_fantasy_v543.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 normalization failed: $LASTEXITCODE" }
