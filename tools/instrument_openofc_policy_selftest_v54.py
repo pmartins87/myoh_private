@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# Import executes the narrow v5.3 selftest-contract repair in the ephemeral
+# Actions workspace before we instrument per-case output.
+import apply_openofc_policy_selftest_contract_v54  # noqa: F401
+
 ROOT = Path(__file__).resolve().parents[1]
 PATH = ROOT / "OpenHoldem/COFCBaselinePolicySelftest.cpp"
 
@@ -20,10 +24,10 @@ old = '''int main() {
 new = '''int main() {
   bool ok = true;
   const bool fantasy15 = Fantasy15();
-  std::cout << "POLICY_CASE Fantasy15=" << (fantasy15 ? "PASS" : "FAIL") << "\\n";
+  std::cout << "POLICY_CASE FantasyFixture15=" << (fantasy15 ? "PASS" : "FAIL") << "\\n";
   ok = fantasy15 && ok;
   const bool fantasy15_dual = Fantasy15DualJoker();
-  std::cout << "POLICY_CASE Fantasy15DualJoker=" << (fantasy15_dual ? "PASS" : "FAIL") << "\\n";
+  std::cout << "POLICY_CASE FantasyFixture15DualJoker=" << (fantasy15_dual ? "PASS" : "FAIL") << "\\n";
   ok = fantasy15_dual && ok;
   const bool opening = NormalOpening();
   std::cout << "POLICY_CASE NormalOpening=" << (opening ? "PASS" : "FAIL") << "\\n";
