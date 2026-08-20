@@ -103,6 +103,8 @@ jobs:
       - name: Compile and run smart-policy selftest
         shell: pwsh
         run: |
+          python tools/instrument_openofc_policy_selftest_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest instrumentation failed: $LASTEXITCODE" }
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
           $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
