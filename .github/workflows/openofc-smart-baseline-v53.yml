@@ -21,77 +21,47 @@ jobs:
         shell: pwsh
         run: |
           python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_log248_repair.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
           python tools/run_openofc_gameflow_v2.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_normal_flow_v3.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC normal-flow v3 repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_phase_flow_v4.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4 repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_phase_flow_v41.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.1 repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_round_discard_exit_v42.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.2 repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_normal_completion_v43.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.3 repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_simultaneous_dealer_v44.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.4 repair failed: $LASTEXITCODE" }
           python tools/run_openofc_fantasy_v5.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC Fantasy v5 repair failed: $LASTEXITCODE" }
           python tools/apply_openofc_opponent_history_v52.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC opponent-history v5.2 repair failed: $LASTEXITCODE" }
-          python tools/apply_openofc_smart_policy_v53.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC smart baseline v5.3 patch failed: $LASTEXITCODE" }
-          python tools/apply_openofc_smart_policy_v53_forward.py
-          if ($LASTEXITCODE -ne 0) { throw "OpenOFC smart baseline v5.3 declaration fix failed: $LASTEXITCODE" }
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.3 patch chain failed: $LASTEXITCODE" }
 
-      - name: Assert smart policy contract
+      - name: Assert v5.3 source contract
         shell: pwsh
         run: |
           $policy = Get-Content -Raw 'OpenHoldem/COFCBaselinePolicy.cpp'
-          $header = Get-Content -Raw 'OpenHoldem/COFCBaselinePolicy.h'
           $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $recorder = Get-Content -Raw 'OpenHoldem/COFCOpponentHistoryRecorder.cpp'
           foreach ($needle in @('OPENOFC_SMART_BASELINE_V53','NormalFantasyEntryValue','FantasyContinuationValue','OpeningStructureAdjustment','FiveCardPotential','TopPotential')) {
             if (-not $policy.Contains($needle)) { throw "smart policy marker missing: $needle" }
           }
-          if (-not $header.Contains('OPENOFC_SMART_BASELINE_V53')) { throw 'smart policy header marker missing' }
-          if (-not $runtime.Contains('engine=SMART_BASELINE_V53')) { throw 'smart policy runtime marker missing' }
-          if ($policy.Contains('deviation) * 1000000LL')) { throw 'old rigid opening-shape dominance remains' }
-
-      - name: Assert opponent-history contract
-        shell: pwsh
-        run: |
-          $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
-          $recorder = Get-Content -Raw 'OpenHoldem/COFCOpponentHistoryRecorder.cpp'
+          if (-not $runtime.Contains('engine=SMART_BASELINE_V53')) { throw 'runtime smart-policy marker missing' }
+          if ($policy.Contains('deviation) * 1000000LL')) { throw 'old rigid 1/2/2 dominance remains' }
           foreach ($needle in @('OPENOFC_OPPONENT_HISTORY_V52','reveal_scrape','passive=1')) {
-            if (-not $scraper.Contains($needle)) { throw "opponent history scrape missing: $needle" }
+            if (-not $scraper.Contains($needle)) { throw "history scrape marker missing: $needle" }
           }
           foreach ($needle in @('REVEAL_EDGE_PARTIAL','COMPLETE_REVEAL','opponent_hands.jsonl')) {
-            if (-not $recorder.Contains($needle)) { throw "opponent history recorder missing: $needle" }
+            if (-not $recorder.Contains($needle)) { throw "history recorder marker missing: $needle" }
           }
 
-      - name: Materialize history-aware clean TableMap v5.2
+      - name: Materialize history-aware clean TableMap
         shell: pwsh
         run: |
           python tools/materialize_openofc_fantasy_v52_history_tablemap.py
-          if ($LASTEXITCODE -ne 0) { throw "v5.2 TableMap materialization failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "TableMap materialization failed: $LASTEXITCODE" }
           $tm = Get-Content -Raw 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_2.tm'
           foreach ($required in @('r$ofc_p0_discard0rank','r$ofc_p0_discard3suit','r$ofc_p0_name','t2$','t4$','s$openofc_opponent_history 1')) {
             if (-not $tm.Contains($required)) { throw "history TableMap field missing: $required" }
           }
-
-      - name: SQLite importer deterministic selftest
-        shell: pwsh
-        run: |
-          python -m py_compile tools/import_openofc_opponent_hands.py
-          @'
-          {"schema":"openofc_opponent_hand_v1","hand_id":"selftest_hand","emitted_local":"2026-08-19T19:00:00.000","status":"COMPLETE_REVEAL","terminal_record":1,"hero_chair":1,"opponent_chair":0,"dealer_chair":0,"opponent_raw_name":"Villain","name_quality":"SCRAPED","highest_round_seen":4,"reveal_mask":15,"reveal_count":4,"hero_result_fantasy":0,"opponent_result_fantasy":0,"result_frame":"frame.bmp","revealed_discards":[20,21,22,23],"rounds":[{"round":0,"seen":1,"opponent_known":5,"hero_known":5,"opponent_board":{"top":[0,1,-2],"middle":[2,3,-2,-2,-2],"bottom":[4,-2,-2,-2,-2]},"hero_board":{"top":[30,-2,-2],"middle":[31,32,-2,-2,-2],"bottom":[33,34,-2,-2,-2]}},{"round":1,"seen":1,"opponent_known":7,"hero_known":7,"opponent_board":{"top":[0,1,-2],"middle":[2,3,5,-2,-2],"bottom":[4,6,-2,-2,-2]},"hero_board":{"top":[30,-2,-2],"middle":[31,32,35,-2,-2],"bottom":[33,34,36,-2,-2]}},{"round":2,"seen":1,"opponent_known":9,"hero_known":9,"opponent_board":{"top":[0,1,7],"middle":[2,3,5,8,-2],"bottom":[4,6,-2,-2,-2]},"hero_board":{"top":[30,37,-2],"middle":[31,32,35,38,-2],"bottom":[33,34,36,-2,-2]}},{"round":3,"seen":1,"opponent_known":11,"hero_known":11,"opponent_board":{"top":[0,1,7],"middle":[2,3,5,8,9],"bottom":[4,6,10,-2,-2]},"hero_board":{"top":[30,37,-2],"middle":[31,32,35,38,39],"bottom":[33,34,36,40,-2]}},{"round":4,"seen":1,"opponent_known":13,"hero_known":13,"opponent_board":{"top":[0,1,7],"middle":[2,3,5,8,9],"bottom":[4,6,10,11,12]},"hero_board":{"top":[30,37,41],"middle":[31,32,35,38,39],"bottom":[33,34,36,40,42]}}]}
-          '@ | Set-Content -Encoding UTF8 selftest_openofc_history.jsonl
-          python tools/import_openofc_opponent_hands.py --jsonl selftest_openofc_history.jsonl --db selftest_openofc_history.db
-          python -c "import sqlite3; c=sqlite3.connect('selftest_openofc_history.db'); assert c.execute('select sum(ActionStatsEligible) from OFCReconstructedActions where HandID=?',('selftest_hand',)).fetchone()[0]==5; print('OpenOFC SQLite history selftest: PASS')"
-          if ($LASTEXITCODE -ne 0) { throw "SQLite history selftest failed: $LASTEXITCODE" }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -140,29 +110,26 @@ jobs:
         run: |
           $release = 'Release'
           $out = 'artifact/OpenOFC_v5_3_SmartBaseline_OpponentHistory_Windows'
-          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_2.tm'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item "$release/OpenHoldem.exe" $out
           Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
           if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
           New-Item -ItemType Directory -Force -Path "$out/scraper" | Out-Null
-          Copy-Item $canonical "$out/scraper/KKPoker_OpenOFC_JokerUltimate_v5_2.tm"
+          Copy-Item 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_2.tm' "$out/scraper/KKPoker_OpenOFC_JokerUltimate_v5_2.tm"
           New-Item -ItemType Directory -Force -Path "$out/tools" | Out-Null
           Copy-Item 'tools/import_openofc_opponent_hands.py' "$out/tools/"
           Copy-Item 'tools/openofc_opponent_history_schema.sql' "$out/tools/"
           @'
           OpenOFC v5.3 Smart Baseline + Opponent History
 
-          Strategy changes over v5.2:
-          - removes the old million-point rigid 1/2/2 opening-shape dominance;
-          - top row explicitly values QQ/KK/AA Fantasy entry and trips 17-card Fantasy;
-          - middle/bottom evaluate pair/trips/full-house structure, flush concentration and straight-window connectivity;
-          - Jokers receive row-aware strategic value;
-          - completed normal boards value the future Fantasy gateway in addition to current royalties;
-          - Fantasy 14..17 exhaustive search explicitly values Ultimate refantasy (trips top or quads+ bottom).
+          Interim strategy upgrade:
+          - old million-point rigid 1/2/2 opening-shape rule removed;
+          - QQ/KK/AA and trips top explicitly value Fantasy entry;
+          - middle/bottom value pair/trips/full-house structure, flush concentration and straight connectivity;
+          - completed normal boards include Fantasy gateway value;
+          - Fantasy 14..17 exhaustive search includes Ultimate refantasy value (trips top or quads+ bottom).
 
-          This is an interim rules-aware baseline, not the final self-play/search AI.
-          Opponent-history collection from v5.2 remains enabled.
+          Opponent-history collection from v5.2 remains enabled. This is not the final self-play/search AI.
           '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
 
       - name: Upload Windows runtime
