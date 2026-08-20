@@ -81,3 +81,10 @@ jobs:
           name: openofc-v543-hbitmap-verified-prefix
           path: hbitmap-prefix/field_frame000000_loose.prefix.png
           if-no-files-found: error
+
+      - name: Upload transport recovery corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: openofc-v543-hbitmap-transport-corpus
+          path: tests/fixtures/openofc_v543_hbitmap/b64/*.txt
+          if-no-files-found: error
