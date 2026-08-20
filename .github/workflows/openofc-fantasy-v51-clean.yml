@@ -123,7 +123,8 @@ jobs:
           OpenOFC Fantasy v5.1 clean TableMap candidate
 
           Same Fantasy v5 runtime. TableMap cleanup removes legacy Hold'em regions, all 0x0 placeholders, Hero/opponent discard identity regions, turn regions, fixed Fantasy srcXX/unused-span/drop targets, and now-unused T2/T4 font banks.
-          Geometry-only action targets intentionally use transform N: code reads only their rectangle and clicks it. Confirm visibility remains a separate calibrated C region. Leave Next Hand menu-item visibility is not yet separately calibrated; field testing of scheduled exit remains a later isolated gate.
+
+          Geometry-only action targets intentionally use transform N. N does not recognize visibility: OpenOFC reads only left/top/right/bottom and dispatches the click. The contextual Fantasy row control is validated indirectly by the resulting row contents after a fresh scrape; normal/Fantasy Confirm has a separate calibrated C visibility region. The Leave Next Hand menu item currently remains coordinate-driven after opening the menu and is therefore not yet held to the same pre-click visibility standard; scheduled-exit field testing stays a separate later gate.
           '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
 
       - name: Upload Windows runtime
