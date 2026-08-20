@@ -59,13 +59,14 @@ class COFCOpponentHistoryRecorder {
   void UpdateRoundSnapshot(const COFCState &state);
   void UpdateIdentity(const COFCVisualObservation &observation);
   void MergeReveal(const COFCVisualObservation &observation);
-  void Flush(const char *status, const char *reason);
+  void Flush(const char *status, const char *reason, bool terminal_record);
   bool SaveEvidenceBitmap(std::string *relative_path);
   std::string MakeHandId() const;
 
  private:
   bool hand_active_;
   bool reveal_edge_seen_;
+  bool partial_written_;
   bool flushed_;
   unsigned long hand_sequence_;
   unsigned long result_frame_sequence_;
@@ -77,6 +78,7 @@ class COFCOpponentHistoryRecorder {
   int reveal_count_;
   bool hero_fantasy_result_;
   bool opponent_fantasy_result_;
+  std::string hand_id_;
   std::string opponent_raw_name_;
   std::string result_frame_relative_path_;
   COFCCard revealed_discards_[kOFCMaxDiscards];
