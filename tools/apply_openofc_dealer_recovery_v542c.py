@@ -101,16 +101,11 @@ def patch_reconstructor():
         '''    if (previous->dealer_chair != observation.dealer_chair) {\n      return Fail(out, error, "dealer chair changed inside hand");\n    }\n''',
         '''    if (previous->dealer_known && observation.dealer_known\n        && previous->dealer_chair != observation.dealer_chair) {\n      return Fail(out, error, "dealer chair changed inside hand");\n    }\n''')
 
-    # Fantasy same-decision metadata has the same exact-vs-unknown rule. The raw
-    # Fantasy parser is still strict today, but keeping this canonical rule
-    # symmetric prevents the field addition from creating a hidden assumption.
     replace_once(
         rel,
         '''          || previous->hero_chair != observation.hero_chair\n          || previous->dealer_chair != observation.dealer_chair) {\n        return Fail(out, error, "Fantasy hand metadata changed during arrangement");\n''',
         '''          || previous->hero_chair != observation.hero_chair\n          || (previous->dealer_known && observation.dealer_known\n              && previous->dealer_chair != observation.dealer_chair)) {\n        return Fail(out, error, "Fantasy hand metadata changed during arrangement");\n''')
 
-    # Both Fantasy and normal output assignment blocks use the same metadata
-    # shape after the frozen patch chain. Patch both exact occurrences.
     path, text, eol, bom = read_source(rel)
     old = '''  out->hero_chair = observation.hero_chair;\n  out->dealer_chair = observation.dealer_chair;\n  out->acting_chair = observation.acting_chair;\n'''
     new = '''  out->hero_chair = observation.hero_chair;\n  out->dealer_chair = observation.dealer_chair;\n  out->dealer_known = observation.dealer_known;\n  out->dealer_carried = dealer_carried;\n  out->acting_chair = observation.acting_chair;\n'''
@@ -121,11 +116,12 @@ def patch_reconstructor():
     write_source(path, text, eol, bom)
     print(f"patched {rel}: 2 output metadata blocks")
 
-    # The v2 finalization rule otherwise interprets -1 != Hero as permission to
-    # Confirm. Dealer identity may authorize finalization only when certified.
+    # The opponent-reveal fallback was added after v2. Preserve it while making
+    # dealer-based finalization confidence-aware. Otherwise unknown -1 would
+    # incorrectly satisfy `dealer_chair != hero`.
     path, text, eol, bom = read_source(rel)
-    old = '''  out->decision_finalizable = hero_fantasy\n    || observation.dealer_chair != observation.hero_chair\n    || observation.hero_timer_active;\n'''
-    new = '''  out->decision_finalizable = hero_fantasy\n    || (observation.dealer_known\n        && observation.dealer_chair != observation.hero_chair)\n    || observation.hero_timer_active;\n'''
+    old = '''  out->decision_finalizable = hero_fantasy\n    || observation.dealer_chair != observation.hero_chair\n    || observation.hero_timer_active\n    || opponent_final_info_visible;\n'''
+    new = '''  out->decision_finalizable = hero_fantasy\n    || (observation.dealer_known\n        && observation.dealer_chair != observation.hero_chair)\n    || observation.hero_timer_active\n    || opponent_final_info_visible;\n'''
     count = text.count(old)
     if count != 2:
         raise RuntimeError(f"{rel}: expected 2 finalization blocks, got {count}")
@@ -133,15 +129,11 @@ def patch_reconstructor():
     write_source(path, text, eol, bom)
     print(f"patched {rel}: 2 dealer-safe finalization blocks")
 
-    # v5.4 current-screen synthetic lineage must preserve whether the dealer
-    # marker is actually known. Unknown stays unknown and therefore provisional.
     replace_once(
         rel,
         '''  seed.hero_chair = observation.hero_chair;\n  seed.dealer_chair = observation.dealer_chair;\n  seed.acting_chair = observation.acting_chair;\n''',
         '''  seed.hero_chair = observation.hero_chair;\n  seed.dealer_chair = observation.dealer_chair;\n  seed.dealer_known = observation.dealer_known;\n  seed.dealer_carried = false;\n  seed.acting_chair = observation.acting_chair;\n''')
 
-    # Diagnostic snapshots are used as v5.4 reacquire debounce fingerprints, so
-    # dealer confidence/source must be part of the semantic identity.
     replace_once(
         rel,
         '''      << ",\\\"dealer_chair\\\":" << state.dealer_chair\n      << ",\\\"acting_chair\\\":" << state.acting_chair\n''',
