@@ -1,0 +1,134 @@
+name: OpenOFC Fantasy v5.1 clean TableMap candidate
+
+on:
+  push:
+    branches:
+      - 'agent/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build-package:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply OpenOFC repairs through Fantasy v5
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC runtime repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_log248_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC log248 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_gameflow_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC gameflow v2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_flow_v3.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC normal-flow v3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v4.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v41.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.1 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_round_discard_exit_v42.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.2 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_completion_v43.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.3 repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC phase-flow v4.4 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_fantasy_v5.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC Fantasy v5 repair failed: $LASTEXITCODE" }
+
+      - name: Assert Fantasy runtime contract
+        shell: pwsh
+        run: |
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $casino = Get-Content -Raw 'OpenHoldem/CCasinoInterface.cpp'
+          $executor = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          $heartbeat = Get-Content -Raw 'OpenHoldem/CHeartbeatThread.cpp'
+          if ($heartbeat -notmatch 'kOpenOFCContractVersion\s*=\s*4') { throw 'Runtime contract is not 4' }
+          if ($runtime -notmatch 'OPENOFC_FANTASY_ROW_BATCH_V5') { throw 'Fantasy runtime branch missing' }
+          if ($casino -notmatch 'ClickRectsSafely') { throw 'Fantasy atomic click sequence missing' }
+          if ($executor -notmatch 'action=SELECT_AND_CHECK') { throw 'Fantasy row batch missing' }
+
+      - name: Materialize clean TableMap v5.1
+        shell: pwsh
+        run: |
+          python tools/materialize_openofc_fantasy_v51_tablemap.py
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy v5.1 TableMap materialization failed: $LASTEXITCODE" }
+          $tm = Get-Content -Raw 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_1.tm'
+          foreach ($forbidden in @('r$ofc_hero_discard','r$ofc_fantasy15_src','r$ofc_fantasy15_drop_','r$ofc_p0_turn','r$ofc_p1_turn','r$c0cardface','r$i0button','r$p0name')) {
+            if ($tm.Contains($forbidden)) { throw "stale TableMap field remains: $forbidden" }
+          }
+          if ($tm -notmatch 's\$openofc_tablemap_clean\s+1') { throw 'clean TableMap marker missing' }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run deterministic policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Collect runtime package
+        shell: pwsh
+        run: |
+          $release = 'Release'
+          $out = 'artifact/OpenOFC_Fantasy_v5_1_Clean_Windows'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v5_1.tm'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
+          $scraperOut = Join-Path $out 'scraper'
+          New-Item -ItemType Directory -Force -Path $scraperOut | Out-Null
+          Copy-Item $canonical (Join-Path $scraperOut 'KKPoker_OpenOFC_JokerUltimate_v5_1.tm')
+          @'
+          OpenOFC Fantasy v5.1 clean TableMap candidate
+
+          Same Fantasy v5 runtime. TableMap cleanup removes legacy Hold'em regions, all 0x0 placeholders, Hero/opponent discard identity regions, turn regions, fixed Fantasy srcXX/unused-span/drop targets, and now-unused T2/T4 font banks.
+          Geometry-only action targets intentionally use transform N: code reads only their rectangle and clicks it. Confirm visibility remains a separate calibrated C region. Leave Next Hand menu-item visibility is not yet separately calibrated; field testing of scheduled exit remains a later isolated gate.
+          '@ | Set-Content -Encoding UTF8 "$out/README_OPENOFC.txt"
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_Fantasy_v5_1_Clean_Windows
+          path: artifact/OpenOFC_Fantasy_v5_1_Clean_Windows
+          if-no-files-found: error
