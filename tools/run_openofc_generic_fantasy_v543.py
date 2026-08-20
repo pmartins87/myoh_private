@@ -37,8 +37,6 @@ if old_count not in text:
     raise RuntimeError("v5.4.3 wrapper could not find brittle count-contract patch")
 text = text.replace(old_count, new_count, 1)
 
-# v5 rewrites the dynamic recognizer around this clause. Patch only the lineage
-# predicate rather than depending on the complete surrounding if-block.
 pattern = r'''def patch_dynamic_recognizer_unbound_mode\(\):.*?\n\ndef patch_scraper_generic_fantasy\(\):'''
 replacement = '''def patch_dynamic_recognizer_unbound_mode():
     rel = "OpenHoldem/COFCFantasy15PixelRecognizer.cpp"
@@ -53,9 +51,6 @@ text, count = re.subn(pattern, lambda _m: replacement, text, count=1, flags=re.S
 if count != 1:
     raise RuntimeError(f"v5.4.3 wrapper could not replace dynamic recognizer patch: {count}")
 
-# Phase/dealer patches add fields to DeepOFCLogRawObservation. Make the count
-# insertion local to the stable round token and its argument instead of matching
-# the entire printf block.
 log_pattern = r'''    # Runtime-facing raw log now surfaces the generic count explicitly\..*?\n\n    helper_anchor ='''
 log_replacement = '''    # Runtime-facing raw log now surfaces the generic count explicitly.
     path, raw_text, raw_eol, raw_bom = read_source(rel)
@@ -78,6 +73,15 @@ log_replacement = '''    # Runtime-facing raw log now surfaces the generic count
 text, log_count = re.subn(log_pattern, lambda _m: log_replacement, text, count=1, flags=re.S)
 if log_count != 1:
     raise RuntimeError(f"v5.4.3 wrapper could not replace raw-log patch: {log_count}")
+
+# Later patches leave comments/blank lines between the isolated Fantasy scraper
+# and the normal scraper. The semantic boundary is the next function signature,
+# not exact whitespace.
+old_boundary = r'''bool CScraper::ScrapeOFCFantasyVisualObservation\(int player_count, int hero_chair\) \{.*?\n\}\nbool CScraper::ScrapeOFCVisualObservation\(\) \{'''
+new_boundary = r'''bool CScraper::ScrapeOFCFantasyVisualObservation\(int player_count, int hero_chair\) \{.*?\n\}\s*\nbool CScraper::ScrapeOFCVisualObservation\(\) \{'''
+if old_boundary not in text:
+    raise RuntimeError("v5.4.3 wrapper could not find Fantasy scraper boundary regex")
+text = text.replace(old_boundary, new_boundary, 1)
 
 temp = ROOT / "tools/_apply_openofc_generic_fantasy_v543_runtime.py"
 temp.write_text(text, encoding="utf-8")
