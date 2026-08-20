@@ -1,0 +1,36 @@
+name: OpenOFC v5.4.3 real HBITMAP fixture integrity
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-integrity:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Materialize initial real-pixel crop
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem 'tests/fixtures/openofc_v543_hbitmap/b64/initial_*.txt' | Sort-Object Name
+          if ($parts.Count -ne 4) { throw "Expected 4 initial fixture chunks, got $($parts.Count)" }
+          $b64 = ($parts | ForEach-Object { (Get-Content -Raw $_.FullName).Trim() }) -join ''
+          $bytes = [Convert]::FromBase64String($b64)
+          $out = 'tests/fixtures/openofc_v543_hbitmap/field_frame000000_loose.png'
+          [IO.File]::WriteAllBytes($out, $bytes)
+          $sha = (Get-FileHash -Algorithm SHA256 $out).Hash.ToLowerInvariant()
+          $size = (Get-Item $out).Length
+          Write-Host "INITIAL_FIXTURE bytes=$size sha256=$sha"
+          if ($sha -ne '0da9c2a507071eab052f78f88c1f376be88005c5894976f26628964e960cd729') {
+            throw "Initial fixture SHA-256 mismatch: $sha"
+          }
+          Write-Host 'PASS initial real-pixel fixture integrity'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
