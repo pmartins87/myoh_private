@@ -75,7 +75,7 @@ jobs:
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
           $fixture = (Resolve-Path 'tests/fixtures/openofc_v543_replay_corpus/materialized/frame000033_crop.png').Path
-          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCRealPixelCorpusSelftest.cpp /Fe:COFCRealPixelCorpusSelftest.exe && COFCRealPixelCorpusSelftest.exe "' + $fixture + '"'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCRealPixelCorpusSelftest.cpp user32.lib gdi32.lib gdiplus.lib /Fe:COFCRealPixelCorpusSelftest.exe && COFCRealPixelCorpusSelftest.exe "' + $fixture + '"'
           cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { throw "Real-pixel recognizer gate failed: $LASTEXITCODE" }
 
