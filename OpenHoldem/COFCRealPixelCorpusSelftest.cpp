@@ -121,6 +121,23 @@ std::string Join(const std::vector<std::string> &labels) {
   return result;
 }
 
+void DiagnoseFixedInitialPath(
+    HBITMAP bitmap,
+    const std::vector<std::string> &expected) {
+  std::vector<COFCFantasyPixelObject> fixed;
+  std::string error;
+  const bool ok = COFCFantasy15PixelRecognizer::RecognizeInitialFanObjects(
+      bitmap, &fixed, &error);
+  if (!ok) {
+    std::cout << "DIAG fixed_initial_path=FAIL error=" << error << "\n";
+    return;
+  }
+  const std::vector<std::string> labels = Labels(fixed);
+  std::cout << "DIAG fixed_initial_path="
+            << (labels == expected ? "PASS" : "MISMATCH")
+            << " cards=" << Join(labels) << "\n";
+}
+
 bool TestFrame000033(const std::wstring &fixture_path) {
   unsigned char *bits = NULL;
   HBITMAP bitmap = CreateBlankTable(&bits);
@@ -136,6 +153,10 @@ bool TestFrame000033(const std::wstring &fixture_path) {
     "Ah", "Ac", "Kh", "Js", "Jd", "Tc", "9s", "9c",
     "7s", "6s", "6h", "5h", "3s", "3c", "2s"
   };
+
+  // Differential diagnostic: the compatibility path uses the measured initial
+  // fan rectangles. The generic runtime path below must still pass independently.
+  DiagnoseFixedInitialPath(bitmap, expected);
 
   std::vector<COFCFantasyPixelObject> unbound;
   if (!COFCFantasyPixelRecognizer::RecognizeLooseObjectsUnbound(
