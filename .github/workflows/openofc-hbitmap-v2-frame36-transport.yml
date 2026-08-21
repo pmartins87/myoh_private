@@ -1,0 +1,32 @@
+name: OpenOFC v5.4.3 HBITMAP v2 frame36 transport
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  pull_request:
+    branches:
+      - 'openofc-v542c-dealer-recovery'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frame36-loose-transport:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify and materialize exact frame000036 loose PNG
+        shell: pwsh
+        run: python tools/materialize_openofc_hbitmap_v2_frame36.py
+
+      - name: Upload verified frame000036 loose PNG
+        uses: actions/upload-artifact@v4
+        with:
+          name: openofc-v543-hbitmap-v2-frame36-loose
+          path: fixture-materialized/frame000036_loose.png
+          if-no-files-found: error

@@ -1,0 +1,30 @@
+{
+  "source": "session_1/frame000036.bmp",
+  "source_sha256": "9a33a07c992e5b85f741c96ae4e14e6e26cb142aedb1dfa4a4400df2728d1737",
+  "roi": [20, 630, 430, 735],
+  "width": 410,
+  "height": 105,
+  "png_bytes": 49363,
+  "png_sha256": "ce6a83ff71aca8cf3b760a50f0f42b46ceb8ced2365da4a1ec571078e9195524",
+  "parts": [
+    {"file":"loose_00.bin","git_blob_sha":"704c42dc1828057c3f0fd23ac4191348c582fcae","bytes":3000},
+    {"file":"loose_01.bin","git_blob_sha":"9e19cff54cc792762f471f2dd1f15c08be05aebf","bytes":3000},
+    {"file":"loose_02.bin","git_blob_sha":"841450a6e0a7669f6e459690fb206193c540128c","bytes":3000},
+    {"file":"loose_03.bin","git_blob_sha":"edde8a92fa0633ae543a57ea347938900eb55616","bytes":3000},
+    {"file":"loose_04.bin","git_blob_sha":"4902bdc8329098122cc1229d7714fb2547e7fd14","bytes":3000},
+    {"file":"loose_05.bin","git_blob_sha":"731526774133d3f89c41a90ca440c693286661d0","bytes":3000},
+    {"file":"loose_06.bin","git_blob_sha":"2c494ee9b16abd17cff2b1caf69f8aa9838028c9","bytes":3000},
+    {"file":"loose_07.bin","git_blob_sha":"95e918e84a6dcc46f7392d875406a90c78150254","bytes":3000},
+    {"file":"loose_08.bin","git_blob_sha":"3598c059178292e70e2838b114dd925f89cc22d0","bytes":3000},
+    {"file":"loose_09.bin","git_blob_sha":"55ed9584f74941720f9d3910853a65c1697733b5","bytes":3000},
+    {"file":"loose_10.bin","git_blob_sha":"8e377cc9d6b424d8df15c656f8496b92dbb4fd4b","bytes":3000},
+    {"file":"loose_11.bin","git_blob_sha":"fbdb2a1926496647c49340d24bb0528c747a6b75","bytes":3000},
+    {"file":"loose_12.bin","git_blob_sha":"08a2752533418bc058767eec531e09b27b4ad68c","bytes":3000},
+    {"file":"loose_13a.bin","git_blob_sha":"b11b712a4848ca97bc5e96aeea426f023f7be536","bytes":1000},
+    {"file":"loose_13b.bin","git_blob_sha":"aa9df3b7ad7db1a9e63e9fa443323ea575fa194d","bytes":1000},
+    {"file":"loose_13c.bin","git_blob_sha":"441dda0598750ae449a946a56e4c2cec0f6300e9","bytes":1000},
+    {"file":"loose_14.bin","git_blob_sha":"2073187cc967fa028f865e08d3a8a6c688c21c00","bytes":3000},
+    {"file":"loose_15.bin","git_blob_sha":"2e22faaac421167a7b9458dea49ec0051f4b44f0","bytes":3000},
+    {"file":"loose_16.bin","git_blob_sha":"b821db3a9a1192ae261c973611ffb328d052b2a7","bytes":1363}
+  ]
+}
