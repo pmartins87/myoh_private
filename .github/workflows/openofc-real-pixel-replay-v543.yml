@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'openofc-v543-generic-fantasy'
+      - 'openofc-v543-hbitmap-v2'
   pull_request:
     branches:
       - 'openofc-v542c-dealer-recovery'
@@ -121,13 +122,23 @@ jobs:
           cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { throw "Real-pixel replay compilation failed: $LASTEXITCODE" }
 
+      - name: Compile HBITMAP v2 partial reconnect selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCHBitmapV2Selftest.cpp /Fe:COFCHBitmapV2Selftest.exe /link gdiplus.lib gdi32.lib user32.lib'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP v2 partial selftest compilation failed: $LASTEXITCODE" }
+          Write-Host 'HBITMAP_V2_SELFTEST_COMPILE=PASS'
+
       - name: Run production recognizer and native reconstructor on frame000033
         shell: pwsh
         run: |
           .\COFCRealPixelReplaySelftest.exe 'tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png'
           if ($LASTEXITCODE -ne 0) { throw "Real-pixel replay recognition/reconstruction failed: $LASTEXITCODE" }
           Write-Host 'REAL_PIXEL_REPLAY_GATE=PASS'
-          Write-Host 'CANONICAL_HBITMAP_GATE=NOT_YET_CERTIFIED'
+          Write-Host 'HBITMAP_V2_PIXEL_RUNTIME=WAITING_FOR_VERIFIED_FRAME000036_FIXTURES'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
 
       - name: Upload verified replay fixture
