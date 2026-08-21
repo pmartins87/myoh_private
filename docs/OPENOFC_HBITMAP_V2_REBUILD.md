@@ -44,7 +44,7 @@ This image has already passed the production path:
 - expected loose cards: `Ah Ac Kh Jd Tc 9c 6h 5h 3c 2s`
 - expected union: `5 arranged + 10 loose = 15 unique physical cards`
 
-The arrangement PNG is now attached directly as a binary Git blob. The loose crop is transported as deterministic 8,000-character Base64 chunks and must decode to the exact SHA-256/Git-blob values above before any recognizer assertion is accepted.
+The arrangement PNG is attached directly as a binary Git blob. The loose crop is transported as deterministic 8,000-character Base64 chunks and must decode to the exact SHA-256/Git-blob values above before any recognizer assertion is accepted.
 
 ## Joker coverage
 
