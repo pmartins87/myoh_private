@@ -71,6 +71,12 @@ jobs:
           Write-Host 'PASS: supplied frame000033 transport is byte-for-byte verified.'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
 
+      - name: Verify and materialize canonical HBITMAP v2 frame000036 crops
+        shell: pwsh
+        run: |
+          python tools/materialize_openofc_hbitmap_v2_frame36.py
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP v2 frame000036 transport failed: $LASTEXITCODE" }
+
       - name: Apply frozen v5.3 patch chain
         shell: pwsh
         run: |
@@ -138,12 +144,23 @@ jobs:
           .\COFCRealPixelReplaySelftest.exe 'tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png'
           if ($LASTEXITCODE -ne 0) { throw "Real-pixel replay recognition/reconstruction failed: $LASTEXITCODE" }
           Write-Host 'REAL_PIXEL_REPLAY_GATE=PASS'
-          Write-Host 'HBITMAP_V2_PIXEL_RUNTIME=WAITING_FOR_VERIFIED_FRAME000036_FIXTURES'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
 
-      - name: Upload verified replay fixture
+      - name: Run HBITMAP v2 partial reconnect on frame000036
+        shell: pwsh
+        run: |
+          .\COFCHBitmapV2Selftest.exe 'fixture-materialized/frame000036_arrangement.png' 'fixture-materialized/frame000036_loose.png'
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP v2 frame000036 recognition/reconstruction failed: $LASTEXITCODE" }
+          Write-Host 'HBITMAP_V2_FRAME000036=PASS'
+          Write-Host 'REAL_JOKER_PIXEL=NOT_YET_CERTIFIED'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Upload verified replay fixtures
         uses: actions/upload-artifact@v4
         with:
-          name: openofc-v543-frame000033-byte-verified
-          path: tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png
+          name: openofc-v543-real-pixel-fixtures-byte-verified
+          path: |
+            tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png
+            fixture-materialized/frame000036_arrangement.png
+            fixture-materialized/frame000036_loose.png
           if-no-files-found: error
