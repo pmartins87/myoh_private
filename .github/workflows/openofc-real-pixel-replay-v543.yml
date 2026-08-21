@@ -113,7 +113,7 @@ jobs:
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
-          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_FANTASY_PIXEL_STANDALONE /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRealPixelReplaySelftest.cpp /Fe:COFCRealPixelReplaySelftest.exe /link gdiplus.lib gdi32.lib'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRealPixelReplaySelftest.cpp /Fe:COFCRealPixelReplaySelftest.exe /link gdiplus.lib gdi32.lib'
           cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { throw "Real-pixel replay compilation failed: $LASTEXITCODE" }
 
