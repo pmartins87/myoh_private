@@ -94,7 +94,7 @@ jobs:
           python tools/run_openofc_smart_policy_v53.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC frozen v5.3 chain failed: $LASTEXITCODE" }
 
-      - name: Apply v5.4 through v5.4.3E continuity and recognizer chain
+      - name: Apply v5.4 through v5.4.3F continuity and recognizer chain
         shell: pwsh
         run: |
           python tools/run_openofc_runtime_continuity_v54.py
@@ -113,6 +113,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "HBITMAP standalone recognizer patch failed: $LASTEXITCODE" }
           python tools/apply_openofc_real_pixel_recognizer_v543e.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3E real-pixel recognizer patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dynamic_component_lineage_v543f.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3F component-lineage patch failed: $LASTEXITCODE" }
           python tools/instrument_openofc_real_pixel_diagnostics_v543.py
           if ($LASTEXITCODE -ne 0) { throw "Real-pixel diagnostic instrumentation failed: $LASTEXITCODE" }
 
@@ -158,7 +160,7 @@ jobs:
       - name: Upload verified replay fixtures
         uses: actions/upload-artifact@v4
         with:
-          name: openofc-v543-real-pixel-fixtures-byte-verified
+          name: openofc-v543f-real-pixel-fixtures-byte-verified
           path: |
             tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png
             fixture-materialized/frame000036_arrangement.png
