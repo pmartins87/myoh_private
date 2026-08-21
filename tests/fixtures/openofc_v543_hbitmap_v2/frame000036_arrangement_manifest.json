@@ -1,0 +1,30 @@
+{
+  "source_frame": "session_1/frame000036.bmp",
+  "source_sha256": "9a33a07c992e5b85f741c96ae4e14e6e26cb142aedb1dfa4a4400df2728d1737",
+  "roi": "[112,414)..[381,627)",
+  "png_width": 269,
+  "png_height": 213,
+  "png_bytes": 56386,
+  "png_sha256": "826f786d8c5b47a2e85b1d0195626dff70cb0a9c031a90c254b8807f7bceca50",
+  "parts": [
+    {"file":"arrangement_00.bin","bytes":3000,"git_blob_sha":"1ed0dea1fcc00476cf2cddd6673e89f0e36a347a"},
+    {"file":"arrangement_01.bin","bytes":3000,"git_blob_sha":"b16d7b983647a929c2e63eca4e38e385213efb77"},
+    {"file":"arrangement_02.bin","bytes":3000,"git_blob_sha":"adc2f2354a8cfdbdae598cbaa30163667cfc77ca"},
+    {"file":"arrangement_03.bin","bytes":3000,"git_blob_sha":"eaf5a5fc7ec64742e29d5477cb5be0e8fc10e5f2"},
+    {"file":"arrangement_04.bin","bytes":3000,"git_blob_sha":"08d04c30edd652a9e171493c7ea0fc816e64f5d0"},
+    {"file":"arrangement_05.bin","bytes":3000,"git_blob_sha":"4169b6272fb564fc8eed51a4b3ccff00c768a8b4"},
+    {"file":"arrangement_06.bin","bytes":3000,"git_blob_sha":"fa7b1c53c6792010bc6311fe36aa9b2355268a76"},
+    {"file":"arrangement_07.bin","bytes":3000,"git_blob_sha":"d5837f65465dfe964515da5da64b01ecd05f6af3"},
+    {"file":"arrangement_08.bin","bytes":3000,"git_blob_sha":"1ff9d7d936f850825ab0474e6671402135a0c204"},
+    {"file":"arrangement_09.bin","bytes":3000,"git_blob_sha":"3e675e8ed2aa1e18ed1a12fcf06a163e17c84b3d"},
+    {"file":"arrangement_10.bin","bytes":3000,"git_blob_sha":"9279390b6ba8832e287fbf68c55b1e9ebef52ab9"},
+    {"file":"arrangement_11.bin","bytes":3000,"git_blob_sha":"b39df87865b449cc031a1ce10aa2292c1b129a23"},
+    {"file":"arrangement_12.bin","bytes":3000,"git_blob_sha":"e79a0a6a84fbf4c0501fa77ea3332bfcbc8f819b"},
+    {"file":"arrangement_13.bin","bytes":3000,"git_blob_sha":"8af048d2cb75fafdcdde8e0c05267a195d6fb2bd"},
+    {"file":"arrangement_14.bin","bytes":3000,"git_blob_sha":"25e8c77d8b71246ec78ef9c348f1fd6f36691127"},
+    {"file":"arrangement_15.bin","bytes":3000,"git_blob_sha":"4007e57c58de29f66cbf5b575981a9373afec0a0"},
+    {"file":"arrangement_16.bin","bytes":3000,"git_blob_sha":"3a41c1db8e0cd1e64768c474994b48d004162b82"},
+    {"file":"arrangement_17.bin","bytes":3000,"git_blob_sha":"17ac2c0d3174b37f0639ca36dc5701cdadba301b"},
+    {"file":"arrangement_18.bin","bytes":2386,"git_blob_sha":"0b671bef3b0694a61378c62aa2280febbd1777f2"}
+  ]
+}
