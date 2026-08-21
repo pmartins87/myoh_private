@@ -1,0 +1,180 @@
+name: OpenOFC v5.4.3D bounded recovery gate
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-bounded-recovery:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4 continuity chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4 continuity patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2B partial reconnect patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2C dealer patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2C normalization failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4.3 generic Fantasy chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 generic Fantasy patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 normalization failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4.3D bounded recovery
+        shell: pwsh
+        run: |
+          python tools/apply_openofc_bounded_recovery_v543d.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3D bounded recovery patch failed: $LASTEXITCODE" }
+
+      - name: Assert no absorbing runtime failure state
+        shell: pwsh
+        run: |
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $runtimeHeader = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.h'
+          $executor = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          $executorHeader = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.h'
+          foreach ($needle in @(
+            'OPENOFC_BOUNDED_SAME_STATE_RETRY_V543D',
+            'EvaluateOFCRecoveryLiveness',
+            '[OpenOFC REACQUIRE_TIMEOUT]',
+            'retry_authorized=1',
+            'continue_scraping=1')) {
+            if (-not $runtime.Contains($needle)) { throw "bounded liveness marker missing: $needle" }
+          }
+          foreach ($forbidden in @(
+            'RUNTIME_BLOCKED',
+            'AUTOMATION BLOCKED until a known new hand',
+            'reason=SAME_HERO_TRANSACTION_STATE')) {
+            if ($runtime.Contains($forbidden)) { throw "absorbing runtime sentinel survived: $forbidden" }
+          }
+          if ($runtime.Contains('kBlocked') -or $runtimeHeader.Contains('kBlocked')) {
+            throw 'absorbing runtime-controller kBlocked state survived'
+          }
+          if ($executor.Contains('kBlocked') -or $executorHeader.Contains('kBlocked')) {
+            throw 'absorbing Fantasy-executor kBlocked state survived'
+          }
+          Write-Host 'PASS: runtime/fantasy faults suppress only the unsafe attempt.'
+          Write-Host 'PASS: post-dispatch unchanged Hero state is bounded, not permanent.'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run bounded recovery liveness regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /I OpenHoldem OpenHoldem\COFCRecoveryLivenessSelftest.cpp /Fe:COFCRecoveryLivenessSelftest.exe && COFCRecoveryLivenessSelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Bounded recovery liveness regression failed: $LASTEXITCODE" }
+
+      - name: Compile and run generic Fantasy regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCGenericFantasySelftest.cpp /Fe:COFCGenericFantasySelftest.exe && COFCGenericFantasySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Generic Fantasy regression failed: $LASTEXITCODE" }
+
+      - name: Compile and run continuity regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRuntimeContinuitySelftest.cpp /Fe:COFCRuntimeContinuitySelftest.exe && COFCRuntimeContinuitySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Continuity regression failed: $LASTEXITCODE" }
+
+      - name: Compile and run partial reconnect regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCPartialReconnectSelftest.cpp /Fe:COFCPartialReconnectSelftest.exe && COFCPartialReconnectSelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Partial reconnect regression failed: $LASTEXITCODE" }
+
+      - name: Compile and run dealer recovery regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Dealer recovery regression failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Freeze v5.4.3D result
+        shell: pwsh
+        run: |
+          Write-Host 'OpenOFC v5.4.3D bounded recovery gate completed.'
+          Write-Host 'A fault can no longer wait forever for Hero state to change.'
+          Write-Host 'After a possible dispatched UI action: observe up to 8 stable valid cycles, then fresh re-plan/retry.'
+          Write-Host 'Real HBITMAP replay certification remains a separate required sub-gate.'
+          Write-Host 'No runtime ZIP is uploaded by this workflow.'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
