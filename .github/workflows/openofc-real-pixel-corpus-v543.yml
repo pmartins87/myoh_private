@@ -65,6 +65,8 @@ jobs:
         run: |
           python tools/apply_openofc_hbitmap_selftest_v543.py
           if ($LASTEXITCODE -ne 0) { throw "Standalone recognizer patch failed: $LASTEXITCODE" }
+          python tools/instrument_openofc_real_pixel_diagnostics_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "Real-pixel diagnostic instrumentation failed: $LASTEXITCODE" }
 
       - name: Setup MSBuild toolchain
         uses: microsoft/setup-msbuild@v2
