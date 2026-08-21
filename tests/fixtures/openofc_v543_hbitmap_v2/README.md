@@ -18,6 +18,12 @@ Expected production recognition:
 - loose, left to right: `Ah Ac Kh Jd Tc 9c 6h 5h 3c 2s`;
 - union: exactly 15 unique physical cards.
 
+Transport status:
+
+- the loose PNG is stored as SHA-pinned binary Git chunks under `loose_chunks/`; `frame000036_loose_manifest.json` records every part identity and the exact reconstructed PNG hash;
+- the previous 63-byte `frame000036_arrangement.png` object was not the canonical 56,386-byte crop and has been removed rather than accepted as evidence;
+- arrangement transport remains pending and therefore the full frame36 HBITMAP gate is not certified yet.
+
 The crop transport is considered valid only after exact chunk/blob verification and exact decoded byte SHA verification. No fuzzy repair, inferred bytes, or frame-specific recognition exception may satisfy this gate.
 
 `FIELD_PACKAGE_AUTHORIZED=0`
