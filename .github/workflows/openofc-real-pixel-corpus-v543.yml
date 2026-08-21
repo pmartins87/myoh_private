@@ -1,0 +1,87 @@
+name: OpenOFC v5.4.3 real-pixel corpus gate
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  pull_request:
+    branches:
+      - 'openofc-v542c-dealer-recovery'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-real-pixel-corpus:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Git blobs and materialize frame000033
+        shell: pwsh
+        run: |
+          $expected = @(
+            '6c51e7a1723360ad4df6f687ecec89df1ed0298e',
+            '2c4b71fa69357d674d6aae2d3c2d666b72c67666',
+            '15df22733dbc761d3409a8a74d89e13eaefedfec',
+            '1e18d021723c8defa95369e0949f554adc5f04a6',
+            '803b6609a864dee3e7e2ffe8e8054cde60be1543',
+            '48bf2ceed81244549b0e9de13cc109afff1b8d0c',
+            'c314420180ec7e51de43c3731febac185baf4127',
+            'bebd85264378452b5f345376352b29d007531c4a',
+            'fa9859b04b53c382500a65219bf636bb3254bc61'
+          )
+          $parts = Get-ChildItem 'tests/fixtures/openofc_v543_replay_corpus/b64v2/frame000033_*.txt' | Sort-Object Name
+          if ($parts.Count -ne 9) { throw "Expected 9 frame000033 chunks, got $($parts.Count)" }
+          $pieces = @()
+          for ($i = 0; $i -lt $parts.Count; $i++) {
+            $blob = (git hash-object -- $parts[$i].FullName).Trim().ToLowerInvariant()
+            Write-Host "REAL_PIXEL_BLOB name=$($parts[$i].Name) expected=$($expected[$i]) actual=$blob"
+            if ($blob -ne $expected[$i]) { throw "Git blob SHA mismatch for $($parts[$i].Name)" }
+            $raw = (Get-Content -Raw $parts[$i].FullName).Trim()
+            if ([regex]::IsMatch($raw, '[^A-Za-z0-9+/=]')) {
+              throw "Invalid Base64 data in $($parts[$i].Name)"
+            }
+            $pieces += $raw
+          }
+          $b64 = $pieces -join ''
+          if ($b64.Length -ne 68200) { throw "Expected 68200 Base64 chars, got $($b64.Length)" }
+          $bytes = [Convert]::FromBase64String($b64)
+          if ($bytes.Length -ne 51149) { throw "Expected 51149 PNG bytes, got $($bytes.Length)" }
+          New-Item -ItemType Directory -Force -Path 'tests/fixtures/openofc_v543_replay_corpus/materialized' | Out-Null
+          $path = 'tests/fixtures/openofc_v543_replay_corpus/materialized/frame000033_crop.png'
+          [IO.File]::WriteAllBytes($path, $bytes)
+          $sha = (Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedSha = '36968956aa18c59d323e3a15be9fb74d86d33d873c993da158c8ee7e285fb1b9'
+          Write-Host "REAL_PIXEL_PNG bytes=$($bytes.Length) sha256=$sha"
+          if ($sha -ne $expectedSha) { throw "frame000033 PNG SHA-256 mismatch" }
+          Write-Host 'PASS: frame000033 real-pixel transport is byte-for-byte canonical.'
+
+      - name: Patch recognizer for isolated native build
+        shell: pwsh
+        run: |
+          python tools/apply_openofc_hbitmap_selftest_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "Standalone recognizer patch failed: $LASTEXITCODE" }
+
+      - name: Setup MSBuild toolchain
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run production recognizer on real HBITMAP
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $fixture = (Resolve-Path 'tests/fixtures/openofc_v543_replay_corpus/materialized/frame000033_crop.png').Path
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_FANTASY_PIXEL_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCRealPixelCorpusSelftest.cpp /Fe:COFCRealPixelCorpusSelftest.exe && COFCRealPixelCorpusSelftest.exe "' + $fixture + '"'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Real-pixel recognizer gate failed: $LASTEXITCODE" }
+
+      - name: Freeze development-gate result
+        shell: pwsh
+        run: |
+          Write-Host 'PASS: real supplied pixels reached the production generic Fantasy recognizer through native HBITMAP.'
+          Write-Host 'This is a development corpus gate, not the historical canonical reconnect certification.'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
