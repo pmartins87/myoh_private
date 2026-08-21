@@ -63,6 +63,12 @@ jobs:
       - name: Patch recognizer for isolated native build
         shell: pwsh
         run: |
+          # The generic v5.4.3 API defines an empty prior-lineage vector as a
+          # fresh-screen bootstrap. The isolated corpus gate does not replay the
+          # complete runtime patch chain, so apply exactly that recognizer
+          # semantic here before exercising RecognizeLooseObjectsUnbound().
+          python -c "import tools.apply_openofc_generic_fantasy_v543 as g; g.patch_dynamic_recognizer_unbound_mode(); print('applied generic unbound recognizer semantics')"
+          if ($LASTEXITCODE -ne 0) { throw "Generic unbound recognizer patch failed: $LASTEXITCODE" }
           python tools/apply_openofc_hbitmap_selftest_v543.py
           if ($LASTEXITCODE -ne 0) { throw "Standalone recognizer patch failed: $LASTEXITCODE" }
           python tools/apply_openofc_real_pixel_recognizer_v543e.py
