@@ -35,12 +35,16 @@ This image has already passed the production path:
 - arrangement crop: `[112,414)..[381,627)` = `269x213`
 - arrangement PNG bytes: `56386`
 - arrangement PNG SHA-256: `826f786d8c5b47a2e85b1d0195626dff70cb0a9c031a90c254b8807f7bceca50`
+- arrangement PNG Git blob SHA-1: `c21e13bcbe1e1764c2c8a6c572185d281bb6524a`
 - loose-card crop: `[20,630)..[430,735)` = `410x105`
 - loose PNG bytes: `49363`
 - loose PNG SHA-256: `ce6a83ff71aca8cf3b760a50f0f42b46ceb8ced2365da4a1ec571078e9195524`
+- loose PNG Git blob SHA-1 after materialization must be `2f435fcdfec8644c99a63295736e45dbbee8578c`
 - expected arranged bottom row: `Js 9s 7s 6s 3s`
 - expected loose cards: `Ah Ac Kh Jd Tc 9c 6h 5h 3c 2s`
 - expected union: `5 arranged + 10 loose = 15 unique physical cards`
+
+The arrangement PNG is now attached directly as a binary Git blob. The loose crop is transported as deterministic 8,000-character Base64 chunks and must decode to the exact SHA-256/Git-blob values above before any recognizer assertion is accepted.
 
 ## Joker coverage
 
