@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - 'openofc-v543-generic-fantasy'
+  pull_request:
+    branches:
+      - 'openofc-v542c-dealer-recovery'
   workflow_dispatch:
 
 permissions:
