@@ -90,11 +90,14 @@ def patch_cpp():
     text = text[:start] + block + text[end + 3:]
 
     # Semantic authority and one-shot dispatch check happen before any UI lookup
-    # or mouse boundary.
+    # or mouse boundary. The explicit marker is a release-workspace sentinel:
+    # the package gate verifies that this exact H layer is present in the source
+    # from which the shipped executable is compiled.
     sig = "bool COFCRuntimeController::SendConfirm(const COFCState &state) {\n"
     if text.count(sig) != 1:
         raise RuntimeError("SendConfirm signature not unique")
     prefix = r'''bool COFCRuntimeController::SendConfirm(const COFCState &state) {
+  // OPENOFC_FANTASY_CONFIRM_GUARD_V543H
   const bool fantasy_confirm = state.valid
     && state.hero_chair >= 0 && state.hero_chair < state.player_count
     && state.players[state.hero_chair].fantasy;
@@ -240,6 +243,7 @@ def source_contract():
     header = (ROOT / "OpenHoldem" / "COFCRuntimeController.h").read_text(
         encoding="utf-8-sig")
     required_runtime = [
+        "OPENOFC_FANTASY_CONFIRM_GUARD_V543H",
         "COFCFantasyConfirmGuard::Validate",
         "fantasy_confirm_fence_.CanDispatch",
         "fantasy_confirm_fence_.MarkDispatched",
