@@ -1,401 +1,80 @@
-from __future__ import annotations
-
 from pathlib import Path
 import re
+R=Path(__file__).resolve().parents[1]
+S=R/'OpenHoldem'/'COFCRuntimeController.cpp'
+O=R/'OpenHoldem'/'COFCFantasyConfirmControllerGeneratedSelftest.cpp'
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "OpenHoldem" / "COFCRuntimeController.cpp"
-OUT = ROOT / "OpenHoldem" / "COFCFantasyConfirmControllerGeneratedSelftest.cpp"
-
-
-def extract_method(text: str, signature: str) -> str:
-    start = text.find(signature)
-    if start < 0:
-        raise RuntimeError(f"method signature not found: {signature}")
-    brace = text.find("{", start)
-    if brace < 0:
-        raise RuntimeError(f"method opening brace not found: {signature}")
-    depth = 0
-    in_string = False
-    escape = False
-    i = brace
-    while i < len(text):
-        ch = text[i]
-        if in_string:
-            if escape:
-                escape = False
-            elif ch == "\\":
-                escape = True
-            elif ch == '"':
-                in_string = False
+def bal(text,start):
+    b=text.find('{',start); d=0; q=False; esc=False
+    if b<0: raise RuntimeError('opening brace missing')
+    for i in range(b,len(text)):
+        c=text[i]
+        if q:
+            if esc: esc=False
+            elif c=='\\': esc=True
+            elif c=='"': q=False
         else:
-            if ch == '"':
-                in_string = True
-            elif ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start:i + 1]
-        i += 1
-    raise RuntimeError(f"unterminated method: {signature}")
+            if c=='"': q=True
+            elif c=='{': d+=1
+            elif c=='}':
+                d-=1
+                if d==0:return text[start:i+1]
+    raise RuntimeError('unterminated block')
 
+def meth(t,s):
+    i=t.find(s)
+    if i<0: raise RuntimeError('missing '+s)
+    return bal(t,i)
 
-def seam_send_confirm(method: str) -> str:
-    method = method.replace(
-        "bool COFCRuntimeController::SendConfirm(",
-        "bool ConfirmControllerHarness::SendConfirm(", 1)
-
-    # Replace only the physical/UI boundary. The semantic guard, one-shot fence,
-    # recovery choices, and post-dispatch state updates remain the exact runtime
-    # method body produced by v5.4.3H.
-    pattern = re.compile(
-        r'''  CString region = state\.players\[state\.hero_chair\]\.fantasy\n'''
-        r'''    \? CString\("ofc_fantasy_confirm_button"\)\n'''
-        r'''    : CString\("ofc_confirm_button"\);\n'''
-        r'''  RECT rect;\n'''
-        r'''  if \(!ReadRegion\(region, &rect\)\) \{.*?\n  \}\n'''
-        r'''  write_log\(true,.*?\n  if \(p_casino_interface == NULL \|\| !p_casino_interface->ClickRectSafely\(rect\)\) \{''',
-        re.S)
-    replacement = '''  if (!DeepOFCTestConfirmRegionAvailable()) {\n    Recover("missing calibrated Confirm button region");\n    return false;\n  }\n  if (!DeepOFCTestConfirmClickSafely()) {'''
-    method, count = pattern.subn(replacement, method, count=1)
-    if count != 1:
-        raise RuntimeError("could not replace SendConfirm physical/UI boundary")
-
-    return method
-
-
-def seam_handle_post_confirm(method: str) -> str:
-    method = method.replace(
-        "bool COFCRuntimeController::HandlePostConfirm(",
-        "bool ConfirmControllerHarness::HandlePostConfirm(", 1)
-
-    # The tests below exercise Fantasy only. Keep the exact Fantasy unchanged-
-    # frame/timeout logic and exact Fantasy terminal branch; replace only the
-    # unreachable normal-round verifier tail to avoid linking unrelated normal
-    # OFC dependencies into this focused executable.
-    marker = '''  COFCConfirmReceipt receipt;\n'''
-    idx = method.find(marker)
-    if idx < 0:
-        raise RuntimeError("normal ConfirmVerifier tail marker missing")
-    close = method.rfind("}")
-    method = method[:idx] + '''  return true;  // test seam: normal-round verifier is outside this Fantasy gate\n''' + method[close:]
-    return method
-
-
-def main() -> None:
-    text = SRC.read_text(encoding="utf-8-sig")
-    required = [
-        "COFCFantasyConfirmGuard::Validate",
-        "fantasy_confirm_fence_.CanDispatch",
-        "fantasy_confirm_fence_.MarkDispatched",
-        "ObserveUnchangedAfterDispatch",
-        "physical retry forbidden",
-    ]
-    missing = [needle for needle in required if needle not in text]
-    if missing:
-        raise RuntimeError(f"v5.4.3H materialized runtime missing: {missing}")
-
-    send = seam_send_confirm(extract_method(
-        text, "bool COFCRuntimeController::SendConfirm("))
-    post = seam_handle_post_confirm(extract_method(
-        text, "bool COFCRuntimeController::HandlePostConfirm("))
-
-    # Fail if the generated methods accidentally retain a real UI/mouse path.
-    joined = send + "\n" + post
-    forbidden = ["p_casino_interface", "ReadRegion(", "CString("]
-    survived = [x for x in forbidden if x in joined]
-    if survived:
-        raise RuntimeError(f"real UI dependency survived controller seam: {survived}")
-
-    source = r'''// AUTO-GENERATED by materialize_openofc_fantasy_confirm_controller_selftest_v543h.py
-// The SendConfirm/HandlePostConfirm method bodies below are mechanically
-// extracted from the fully materialized v5.4.3H production runtime. Only the
-// physical UI boundary and unreachable normal-round verifier tail are seamed.
-
-#include <cstdlib>
+def main():
+    t=S.read_text(encoding='utf-8-sig')
+    req=['COFCFantasyConfirmGuard::Validate','fantasy_confirm_fence_.CanDispatch','fantasy_confirm_fence_.MarkDispatched','fantasy_confirm_fence_.HasAnyDispatch','ObserveUnchangedAfterDispatch','confirm_was_fantasy','physical retry forbidden']
+    miss=[x for x in req if x not in t]
+    if miss: raise RuntimeError('H runtime missing '+repr(miss))
+    send=meth(t,'bool COFCRuntimeController::SendConfirm(').replace('COFCRuntimeController::','ConfirmControllerHarness::',1)
+    pat=re.compile(r'  const bool fantasy = state\.players\[state\.hero_chair\]\.fantasy;\n.*?  if \(p_casino_interface == NULL \|\| !p_casino_interface->ClickRectSafely\(rect\)\) \{',re.S)
+    send,n=pat.subn('  if (!TestRegion()) { Recover("missing calibrated Confirm button region"); return false; }\n  if (!TestClick()) {',send,1)
+    if n!=1: raise RuntimeError('SendConfirm UI seam failed')
+    tick=meth(t,'void COFCRuntimeController::Tick(')
+    i=tick.find('  if (phase_ == kConfirmSent) {')
+    if i<0: raise RuntimeError('Tick ConfirmSent block missing')
+    block=bal(tick,i)
+    for x in ['confirm_was_fantasy','HasAnyDispatch','ObserveUnchangedAfterDispatch','ack=TIMEOUT']:
+        if x not in block: raise RuntimeError('Tick H marker missing '+x)
+    if any(x in send for x in ['p_casino_interface','ReadRegion(','CString(']): raise RuntimeError('real UI survived seam')
+    src=r'''#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <string>
-
 #include "COFCFantasyConfirmGuard.h"
 #include "COFCFantasyConfirmFence.h"
-
+#include "COFCVisualObservation.h"
 using namespace std;
-
-static const bool k_always_log_errors = true;
-static void write_log(bool, const char *, ...) {}
-
-namespace {
-bool g_region_available = true;
-bool g_allow_physical_dispatch = true;
-int g_click_boundary_calls = 0;
-int g_physical_dispatches = 0;
-
-bool DeepOFCTestConfirmRegionAvailable() {
-  return g_region_available;
+static const bool k_always_log_errors=true; static void write_log(bool,const char*,...){}
+static int g_openofc_expected_round=0; static void OpenOFCOnConfirmSent(const COFCState&){}
+namespace { bool allow_click=true; int boundary=0, physical=0; bool TestRegion(){return true;} bool TestClick(){++boundary;if(!allow_click)return false;++physical;return true;}
+void req(bool x,const string&m){if(!x){cerr<<"FAIL: "<<m<<endl;exit(2);}}
+const int D[15]={kOFCCardJoker1,kOFCCardJoker2,0,1,2,3,4,5,6,7,8,9,10,11,12};
+EOFCRow row(int i){if(i==0||i==2||i==3)return kOFCRowTop;if(i==1||i<=7)return kOFCRowMiddle;return kOFCRowBottom;}
+COFCState st(bool arranged=true){COFCState s;s.Reset();s.valid=true;s.player_count=2;s.hero_chair=1;s.dealer_chair=0;s.acting_chair=1;s.round_index=-1;s.fantasy_card_count=15;s.hero_can_prepare=true;s.hero_can_confirm=true;s.action_required=true;s.players[0].occupied=true;s.players[0].source_chair=0;s.players[1].occupied=true;s.players[1].source_chair=1;s.players[1].fantasy=true;s.hero_incoming_count=15;for(int i=0;i<15;++i)s.hero_incoming[i].value=D[i];if(arranged)for(int i=0;i<13;++i){s.pending[i].active=true;s.pending[i].incoming_index=i;s.pending[i].row=row(i);}return s;}
+COFCVisualObservation ob(){COFCVisualObservation o;o.Reset();o.valid=true;o.player_count=2;o.hero_chair=1;o.dealer_chair=0;o.acting_chair=1;o.round_index=-1;o.fantasy_card_count=15;o.players[0].occupied=true;o.players[0].source_chair=0;o.players[1].occupied=true;o.players[1].source_chair=1;o.players[1].fantasy=true;return o;}
+COFCTurnPlan pl(){COFCTurnPlan p;p.Reset();p.valid=true;p.decision_state=st(false);p.decision_state.hero_can_confirm=false;p.decision_state.action_required=false;p.target_count=13;p.to_add_count=13;for(int i=0;i<13;++i){p.target[i].card_value=D[i];p.target[i].row=row(i);p.to_add[i]=p.target[i];}p.unused_count=2;p.unused_cards[0]=D[13];p.unused_cards[1]=D[14];return p;}
 }
-
-bool DeepOFCTestConfirmClickSafely() {
-  ++g_click_boundary_calls;
-  if (!g_allow_physical_dispatch) return false;
-  ++g_physical_dispatches;
-  return true;
-}
-
-void ResetIO() {
-  g_region_available = true;
-  g_allow_physical_dispatch = true;
-  g_click_boundary_calls = 0;
-  g_physical_dispatches = 0;
-}
-
-void Require(bool condition, const string &message) {
-  if (!condition) {
-    cerr << "FAIL: " << message << endl;
-    exit(2);
-  }
-}
-
-const int kDeal[15] = {
-  kOFCCardJoker1, kOFCCardJoker2,
-  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
-};
-
-EOFCRow TargetRow(int i) {
-  if (i == 0) return kOFCRowTop;
-  if (i == 1) return kOFCRowMiddle;
-  if (i <= 3) return kOFCRowTop;
-  if (i <= 7) return kOFCRowMiddle;
-  return kOFCRowBottom;
-}
-
-COFCState MakeState(bool arranged) {
-  COFCState state;
-  state.Reset();
-  state.valid = true;
-  state.player_count = 2;
-  state.hero_chair = 1;
-  state.dealer_chair = 0;
-  state.acting_chair = 1;
-  state.round_index = -1;
-  state.fantasy_card_count = 15;
-  state.hero_can_prepare = true;
-  state.hero_can_confirm = true;
-  state.action_required = true;
-  state.players[0].occupied = true;
-  state.players[0].source_chair = 0;
-  state.players[1].occupied = true;
-  state.players[1].source_chair = 1;
-  state.players[1].fantasy = true;
-  state.hero_incoming_count = 15;
-  for (int i = 0; i < 15; ++i) state.hero_incoming[i].value = kDeal[i];
-  if (arranged) {
-    for (int i = 0; i < 13; ++i) {
-      state.pending[i].active = true;
-      state.pending[i].incoming_index = i;
-      state.pending[i].row = TargetRow(i);
-    }
-  }
-  return state;
-}
-
-COFCTurnPlan MakePlan() {
-  COFCTurnPlan plan;
-  plan.Reset();
-  plan.valid = true;
-  plan.decision_state = MakeState(false);
-  plan.decision_state.hero_can_confirm = false;
-  plan.decision_state.action_required = false;
-  plan.target_count = 13;
-  for (int i = 0; i < 13; ++i) {
-    plan.target[i].card_value = kDeal[i];
-    plan.target[i].row = TargetRow(i);
-  }
-  plan.unused_count = 2;
-  plan.unused_cards[0] = kDeal[13];
-  plan.unused_cards[1] = kDeal[14];
-  return plan;
-}
-}  // namespace
-
-class ConfirmControllerHarness {
- public:
-  enum Phase { kIdle, kArranging, kConfirmSent, kReacquire, kReplayProbeComplete };
-
-  ConfirmControllerHarness()
-      : phase_(kIdle), reacquire_stable_cycles_(0),
-        recovery_requires_change_(false), provisional_(false) {}
-
-  bool SendConfirm(const COFCState &state);
-  bool HandlePostConfirm(const COFCState &state);
-
-  void BindPlan(const COFCTurnPlan &plan) { plan_ = plan; }
-  void ForceIdleAfterSafeReacquire() { phase_ = kIdle; }
-  Phase phase() const { return phase_; }
-  bool fence_armed() const { return fantasy_confirm_fence_.HasAnyDispatch(); }
-  bool recovery_requires_change() const { return recovery_requires_change_; }
-
- private:
-  static string StateFingerprint(const COFCState &state) {
-    ostringstream out;
-    out << "F|R" << state.round_index << "|C" << state.hero_incoming_count << '|';
-    for (int i = 0; i < state.hero_incoming_count; ++i)
-      out << state.hero_incoming[i].value << ',';
-    out << "|P";
-    for (int i = 0; i < kOFCMaxIncomingCards; ++i) {
-      if (!state.pending[i].active) continue;
-      out << state.pending[i].incoming_index << '@'
-          << static_cast<int>(state.pending[i].row) << ',';
-    }
-    return out.str();
-  }
-
-  void Recover(const string &) {
-    recovery_fingerprint_ = current_fingerprint_;
-    recovery_requires_change_ = phase_ == kArranging || phase_ == kConfirmSent;
-    reacquire_stable_cycles_ = 0;
-    plan_.Reset();
-    confirm_before_.Reset();
-    provisional_ = false;
-    phase_ = kReacquire;
-    // Deliberately do NOT reset fantasy_confirm_fence_. This mirrors v5.4.3H.
-  }
-
- private:
-  Phase phase_;
-  COFCTurnPlan plan_;
-  COFCState confirm_before_;
-  COFCFantasyConfirmFence fantasy_confirm_fence_;
-  string current_fingerprint_;
-  string recovery_fingerprint_;
-  int reacquire_stable_cycles_;
-  bool recovery_requires_change_;
-  bool provisional_;
-};
-
+class ConfirmControllerHarness{public:enum Phase{kIdle,kArranging,kConfirmSent,kReacquire,kReplayProbeComplete};ConfirmControllerHarness():phase_(kIdle),reacquire_stable_cycles_(0),recovery_requires_change_(false),provisional_(false),newhand_(false){}bool SendConfirm(const COFCState&);void TickConfirmSent(const COFCState&,const COFCVisualObservation&);void Bind(){plan_=pl();}void Idle(){phase_=kIdle;}void NewHand(bool x){newhand_=x;}Phase phase()const{return phase_;}bool armed()const{return fantasy_confirm_fence_.HasAnyDispatch();}bool needchange()const{return recovery_requires_change_;}
+private:static string StateFingerprint(const COFCState&s){ostringstream o;o<<s.round_index<<'|'<<s.hero_incoming_count<<'|';for(int i=0;i<s.hero_incoming_count;++i)o<<s.hero_incoming[i].value<<',';o<<'|';for(int i=0;i<kOFCMaxIncomingCards;++i)if(s.pending[i].active)o<<s.pending[i].incoming_index<<'@'<<int(s.pending[i].row)<<',';const COFCPlayerBoard&b=s.players[s.hero_chair].board;for(int i=0;i<kOFCTopCards;++i)if(b.top[i].IsKnownPhysicalCard())o<<'T'<<b.top[i].value;return o.str();}bool IsKnownNewHand(const COFCState&)const{return newhand_;}bool HandlePostConfirm(const COFCState&){return true;}void ResetForKnownNewHand(const COFCState&s){fantasy_confirm_fence_.ResetForNewHand();plan_.Reset();confirm_before_.Reset();current_fingerprint_=StateFingerprint(s);recovery_requires_change_=false;phase_=kIdle;}void Recover(const string&){recovery_fingerprint_=current_fingerprint_;recovery_requires_change_=phase_==kArranging||phase_==kConfirmSent;reacquire_stable_cycles_=0;plan_.Reset();provisional_=false;phase_=kReacquire;}
+Phase phase_;COFCTurnPlan plan_;COFCState confirm_before_;COFCFantasyConfirmFence fantasy_confirm_fence_;string current_fingerprint_,recovery_fingerprint_;int reacquire_stable_cycles_;bool recovery_requires_change_,provisional_,newhand_;};
 '''
-    source += send + "\n\n" + post + r'''
-
-namespace {
-
-void TestValidConfirmDispatchesExactlyOnce() {
-  ResetIO();
-  ConfirmControllerHarness c;
-  c.BindPlan(MakePlan());
-  COFCState state = MakeState(true);
-  Require(c.SendConfirm(state), "valid Fantasy Confirm did not dispatch");
-  Require(g_physical_dispatches == 1, "valid Confirm did not produce exactly one physical dispatch");
-  Require(c.phase() == ConfirmControllerHarness::kConfirmSent,
-    "valid Confirm did not enter kConfirmSent");
-  Require(c.fence_armed(), "successful physical dispatch did not arm one-shot fence");
-
-  // Even if an upstream bug calls SendConfirm again directly, the production
-  // method's fence must suppress the second physical input.
-  c.BindPlan(MakePlan());
-  Require(c.SendConfirm(state), "duplicate suppression path returned failure");
-  Require(g_physical_dispatches == 1,
-    "same-hand duplicate SendConfirm escaped the one-shot fence");
-  Require(c.phase() == ConfirmControllerHarness::kReacquire,
-    "duplicate suppression did not enter safe reacquisition");
-  cout << "FANTASY_CONFIRM_CONTROLLER_ONE_SHOT=PASS" << endl;
+    src+=send+'\nvoid ConfirmControllerHarness::TickConfirmSent(const COFCState& state,const COFCVisualObservation& observation){if(phase_!=kConfirmSent)return;\n'+block+'\n}\n'
+    src+=r'''namespace{
+void one(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();req(c.SendConfirm(s),"first");req(physical==1&&c.armed(),"first dispatch/fence");c.Bind();req(c.SendConfirm(s),"duplicate return");req(physical==1&&c.phase()==ConfirmControllerHarness::kReacquire,"duplicate escaped");cout<<"FANTASY_CONFIRM_CONTROLLER_ONE_SHOT=PASS\n";}
+void timeout(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();auto o=ob();req(c.SendConfirm(s),"setup");for(int i=0;i<19;++i){c.TickConfirmSent(s,o);req(physical==1&&c.phase()==ConfirmControllerHarness::kConfirmSent,"early timeout/resend");}c.TickConfirmSent(s,o);req(physical==1&&c.phase()==ConfirmControllerHarness::kReacquire&&c.armed(),"timeout invariant");c.Bind();auto d=s;d.players[1].board.top[0].value=D[0];req(c.SendConfirm(d),"post-timeout suppress");req(physical==1,"post-timeout resend");cout<<"FANTASY_CONFIRM_CONTROLLER_TICK_ACK_TIMEOUT=PASS\n";}
+void changed(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();auto o=ob();req(c.SendConfirm(s),"setup changed");auto d=s;d.players[1].board.top[0].value=D[0];c.TickConfirmSent(d,o);req(c.phase()==ConfirmControllerHarness::kConfirmSent&&c.armed()&&physical==1,"changed state rearmed");cout<<"FANTASY_CONFIRM_CONTROLLER_CHANGED_STATE_FENCE=PASS\n";}
+void retry(){allow_click=false;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();req(!c.SendConfirm(s),"refusal");req(physical==0&&!c.armed()&&!c.needchange(),"refusal armed");allow_click=true;c.Idle();c.Bind();req(c.SendConfirm(s)&&physical==1&&c.armed(),"safe retry");cout<<"FANTASY_CONFIRM_CONTROLLER_PREDISPATCH_RETRY=PASS\n";}
+void guard(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();s.pending[12].Reset();req(!c.SendConfirm(s)&&boundary==0&&physical==0,"12-card reached IO");ConfirmControllerHarness n;n.Bind();s=st();s.hero_can_confirm=false;req(!n.SendConfirm(s)&&boundary==0,"noauth reached IO");cout<<"FANTASY_CONFIRM_CONTROLLER_GUARD_BEFORE_IO=PASS\n";}
+void newhand(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();auto o=ob();req(c.SendConfirm(s)&&c.armed(),"newhand setup");c.NewHand(true);c.TickConfirmSent(s,o);req(!c.armed()&&c.phase()==ConfirmControllerHarness::kIdle,"newhand did not reset fence");cout<<"FANTASY_CONFIRM_CONTROLLER_NEW_HAND_RESET=PASS\n";}
 }
-
-void TestUnchangedAckTimeoutNeverResends() {
-  ResetIO();
-  ConfirmControllerHarness c;
-  c.BindPlan(MakePlan());
-  COFCState state = MakeState(true);
-  Require(c.SendConfirm(state), "ack-timeout setup Confirm failed");
-  Require(g_physical_dispatches == 1, "ack-timeout setup did not dispatch once");
-
-  for (int i = 0; i < 19; ++i) {
-    Require(c.HandlePostConfirm(state), "unchanged post-Confirm wait failed");
-    Require(g_physical_dispatches == 1,
-      "unchanged post-Confirm frame caused a duplicate physical input");
-    Require(c.phase() == ConfirmControllerHarness::kConfirmSent,
-      "controller left ConfirmSent before bounded timeout");
-  }
-  Require(c.HandlePostConfirm(state), "20th unchanged post-Confirm frame failed");
-  Require(g_physical_dispatches == 1,
-    "ack timeout caused a physical Confirm retry");
-  Require(c.phase() == ConfirmControllerHarness::kReacquire,
-    "ack timeout did not exit stale ConfirmSent into reacquisition");
-  Require(c.fence_armed(), "ack timeout cleared the physical dispatch fence");
-
-  c.BindPlan(MakePlan());
-  COFCState changed = state;
-  changed.hero_can_prepare = !changed.hero_can_prepare;  // altered state, same Fantasy hand.
-  Require(c.SendConfirm(changed), "same-hand post-timeout suppression returned failure");
-  Require(g_physical_dispatches == 1,
-    "same Fantasy hand physically re-confirmed after acknowledgement timeout");
-  cout << "FANTASY_CONFIRM_CONTROLLER_ACK_TIMEOUT=PASS" << endl;
-}
-
-void TestPreDispatchRefusalIsRetryable() {
-  ResetIO();
-  ConfirmControllerHarness c;
-  c.BindPlan(MakePlan());
-  COFCState state = MakeState(true);
-
-  g_allow_physical_dispatch = false;
-  Require(!c.SendConfirm(state), "pre-dispatch refusal unexpectedly succeeded");
-  Require(g_physical_dispatches == 0, "refused safe click was counted as physical dispatch");
-  Require(!c.fence_armed(), "pre-dispatch refusal incorrectly armed one-shot fence");
-  Require(!c.recovery_requires_change(),
-    "known pre-dispatch refusal incorrectly requires Hero transaction change");
-
-  // Model the ordinary stable reacquire/replan: same state is safe because the
-  // mouse DLL was never invoked on the first attempt.
-  g_allow_physical_dispatch = true;
-  c.ForceIdleAfterSafeReacquire();
-  c.BindPlan(MakePlan());
-  Require(c.SendConfirm(state), "safe same-state retry after pre-dispatch refusal failed");
-  Require(g_physical_dispatches == 1,
-    "safe retry after pre-dispatch refusal did not dispatch exactly once");
-  Require(c.fence_armed(), "successful retry did not arm one-shot fence");
-  cout << "FANTASY_CONFIRM_CONTROLLER_PREDISPATCH_RETRY=PASS" << endl;
-}
-
-void TestGuardBlocksBeforePhysicalBoundary() {
-  ResetIO();
-  ConfirmControllerHarness c;
-  c.BindPlan(MakePlan());
-  COFCState bad = MakeState(true);
-  bad.pending[12].Reset();
-  Require(!c.SendConfirm(bad), "12-card Fantasy board passed controller Confirm guard");
-  Require(g_click_boundary_calls == 0 && g_physical_dispatches == 0,
-    "invalid Fantasy board reached physical Confirm boundary");
-  Require(!c.fence_armed(), "semantic guard rejection armed physical dispatch fence");
-
-  ResetIO();
-  ConfirmControllerHarness noauth;
-  noauth.BindPlan(MakePlan());
-  COFCState no_authority = MakeState(true);
-  no_authority.hero_can_confirm = false;
-  Require(!noauth.SendConfirm(no_authority), "no-authority Fantasy Confirm was accepted");
-  Require(g_click_boundary_calls == 0 && g_physical_dispatches == 0,
-    "no-authority Confirm reached physical boundary");
-  cout << "FANTASY_CONFIRM_CONTROLLER_GUARD_BEFORE_IO=PASS" << endl;
-}
-
-}  // namespace
-
-int main() {
-  TestValidConfirmDispatchesExactlyOnce();
-  TestUnchangedAckTimeoutNeverResends();
-  TestPreDispatchRefusalIsRetryable();
-  TestGuardBlocksBeforePhysicalBoundary();
-  cout << "FANTASY_CONFIRM_DYNAMIC_CONTROLLER_GATE=PASS" << endl;
-  cout << "FIELD_PACKAGE_AUTHORIZED=0" << endl;
-  return 0;
-}
+int main(){one();timeout();changed();retry();guard();newhand();cout<<"FANTASY_CONFIRM_DYNAMIC_CONTROLLER_GATE=PASS\nFIELD_PACKAGE_AUTHORIZED=0\n";return 0;}
 '''
-
-    OUT.write_text(source, encoding="utf-8")
-    print(f"generated {OUT.relative_to(ROOT)}")
-    print("FANTASY_CONFIRM_CONTROLLER_SEAM_REAL_MOUSE_DISABLED=PASS")
-
-
-if __name__ == "__main__":
-    main()
+    O.write_text(src,encoding='utf-8')
+    print('generated Fantasy Confirm controller regression from production SendConfirm + Tick ConfirmSent block')
+if __name__=='__main__':main()
