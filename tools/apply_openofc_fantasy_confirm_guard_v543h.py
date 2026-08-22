@@ -255,11 +255,12 @@ def main():
     patch_cpp()
     source_contract()
     print("OpenOFC v5.4.3H Fantasy Confirm hardening applied successfully")
-    # v5.4.4 uses source-shape-sensitive assertions. Normalize only formatting
-    # here, after the frozen v5.4.3H semantics are materialized and before the
-    # field-recovery layer runs.
+    # v5.4.4 uses source-shape-sensitive assertions. Normalize the upgrader
+    # after frozen v5.4.3H semantics are materialized and before field recovery.
     from apply_openofc_field_recovery_v544a import main as normalize_v544_state
     normalize_v544_state()
+    from apply_openofc_field_recovery_v544aa import main as harden_v544_tick
+    harden_v544_tick()
 
 
 if __name__ == "__main__":
