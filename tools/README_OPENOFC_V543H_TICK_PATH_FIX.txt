@@ -1,0 +1,1 @@
+The authoritative v5.4.3H repair patches the Fantasy post-Confirm wait in COFCRuntimeController::Tick(), because v4 moved that logic out of HandlePostConfirm(). This file is only a repository-visible checkpoint; the gate remains uncertified until Windows CI passes.

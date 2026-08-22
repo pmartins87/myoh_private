@@ -1,0 +1,166 @@
+name: OpenOFC v5.4.3G supplied real-pixel replay gate
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+      - 'openofc-v543-hbitmap-v2'
+      - 'openofc-v543-joker-execution-gate'
+  pull_request:
+    branches:
+      - 'openofc-v542c-dealer-recovery'
+      - 'openofc-v543-generic-fantasy'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-real-pixel-replay:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Git blobs and materialize frame000033 PNG
+        shell: pwsh
+        run: |
+          $expected = @(
+            '6c51e7a1723360ad4df6f687ecec89df1ed0298e',
+            '2c4b71fa69357d674d6aae2d3c2d666b72c67666',
+            '15df22733dbc761d3409a8a74d89e13eaefedfec',
+            '1e18d021723c8defa95369e0949f554adc5f04a6',
+            '803b6609a864dee3e7e2ffe8e8054cde60be1543',
+            '48bf2ceed81244549b0e9de13cc109afff1b8d0c',
+            'c314420180ec7e51de43c3731febac185baf4127',
+            'bebd85264378452b5f345376352b29d007531c4a',
+            'fa9859b04b53c382500a65219bf636bb3254bc61'
+          )
+          $root = 'tests/fixtures/openofc_v543_replay_corpus'
+          $parts = Get-ChildItem "$root/b64v2/frame000033_*.txt" | Sort-Object Name
+          if ($parts.Count -ne 9) { throw "Expected 9 frame000033 chunks, got $($parts.Count)" }
+          $pieces = @()
+          for ($i = 0; $i -lt $parts.Count; $i++) {
+            $actualBlob = (git hash-object -- $parts[$i].FullName).Trim().ToLowerInvariant()
+            Write-Host "REPLAY_BLOB name=$($parts[$i].Name) expected=$($expected[$i]) actual=$actualBlob"
+            if ($actualBlob -ne $expected[$i]) { throw "Git blob SHA mismatch for $($parts[$i].Name)" }
+            $raw = (Get-Content -Raw $parts[$i].FullName).Trim()
+            $bad = [regex]::Match($raw, '[^A-Za-z0-9+/=]')
+            if ($bad.Success) { throw "Invalid base64 character in $($parts[$i].Name) at $($bad.Index)" }
+            if ($i -lt 8 -and $raw.Length -ne 8000) { throw "Unexpected non-final chunk length for $($parts[$i].Name): $($raw.Length)" }
+            if ($i -eq 8 -and $raw.Length -ne 4200) { throw "Unexpected final chunk length: $($raw.Length)" }
+            $pieces += $raw
+          }
+          $b64 = $pieces -join ''
+          if ($b64.Length -ne 68200) { throw "Unexpected combined base64 length: $($b64.Length)" }
+          $bytes = [Convert]::FromBase64String($b64)
+          if ($bytes.Length -ne 51149) { throw "Unexpected decoded PNG length: $($bytes.Length)" }
+          $png = "$root/field_frame000033_loose.png"
+          [IO.File]::WriteAllBytes($png, $bytes)
+          $sha = (Get-FileHash -Algorithm SHA256 $png).Hash.ToLowerInvariant()
+          $expectedSha = '36968956aa18c59d323e3a15be9fb74d86d33d873c993da158c8ee7e285fb1b9'
+          Write-Host "REPLAY_PNG chars=$($b64.Length) bytes=$($bytes.Length) sha256=$sha"
+          if ($sha -ne $expectedSha) { throw "frame000033 SHA-256 mismatch" }
+          Write-Host 'PASS: supplied frame000033 transport is byte-for-byte verified.'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Verify and materialize canonical HBITMAP v2 frame000036 crops
+        shell: pwsh
+        run: |
+          python tools/materialize_openofc_hbitmap_v2_frame36.py
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP v2 frame000036 transport failed: $LASTEXITCODE" }
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4 through v5.4.3G continuity and recognizer chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4 continuity patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2B partial reconnect patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2C dealer patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2C normalization failed: $LASTEXITCODE" }
+          python tools/run_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 generic Fantasy patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 normalization failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3G source-identity patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_hbitmap_selftest_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP standalone recognizer patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_real_pixel_recognizer_v543e.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3E real-pixel recognizer patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dynamic_component_lineage_v543f.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3F component-lineage patch failed: $LASTEXITCODE" }
+          python tools/instrument_openofc_real_pixel_diagnostics_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "Real-pixel diagnostic instrumentation failed: $LASTEXITCODE" }
+          $executor = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          if ($executor -notmatch 'OPENOFC_FANTASY_SOURCE_IDENTITY_V543G') { throw 'v5.4.3G executor identity marker missing from replay source chain' }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile supplied real-pixel HBITMAP replay
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRealPixelReplaySelftest.cpp /Fe:COFCRealPixelReplaySelftest.exe /link gdiplus.lib gdi32.lib user32.lib'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Real-pixel replay compilation failed: $LASTEXITCODE" }
+
+      - name: Compile HBITMAP v2 partial reconnect selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCHBitmapV2Selftest.cpp /Fe:COFCHBitmapV2Selftest.exe /link gdiplus.lib gdi32.lib user32.lib'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP v2 partial selftest compilation failed: $LASTEXITCODE" }
+          Write-Host 'HBITMAP_V2_SELFTEST_COMPILE=PASS'
+
+      - name: Run production recognizer and native reconstructor on frame000033
+        shell: pwsh
+        run: |
+          .\COFCRealPixelReplaySelftest.exe 'tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png'
+          if ($LASTEXITCODE -ne 0) { throw "Real-pixel replay recognition/reconstruction failed: $LASTEXITCODE" }
+          Write-Host 'REAL_PIXEL_REPLAY_GATE=PASS'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Run HBITMAP v2 partial reconnect on frame000036
+        shell: pwsh
+        run: |
+          .\COFCHBitmapV2Selftest.exe 'fixture-materialized/frame000036_arrangement.png' 'fixture-materialized/frame000036_loose.png'
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP v2 frame000036 recognition/reconstruction failed: $LASTEXITCODE" }
+          Write-Host 'HBITMAP_V2_FRAME000036=PASS'
+          Write-Host 'REAL_JOKER_PIXEL=SEPARATE_CERTIFIED_GATE'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Upload verified replay fixtures
+        uses: actions/upload-artifact@v4
+        with:
+          name: openofc-v543g-real-pixel-fixtures-byte-verified
+          path: |
+            tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png
+            fixture-materialized/frame000036_arrangement.png
+            fixture-materialized/frame000036_loose.png
+          if-no-files-found: error

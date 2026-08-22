@@ -1,0 +1,96 @@
+name: OpenOFC v5.4.3G Fantasy Joker execution gate
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-joker-execution-gate'
+  pull_request:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-fantasy-joker-execution:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4 through v5.4.3 generic runtime chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4 continuity patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2B partial reconnect patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C dealer patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C normalization failed: $LASTEXITCODE" }
+          python tools/run_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 generic Fantasy patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 normalization failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4.3G physical source-identity hardening
+        shell: pwsh
+        run: |
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3G source-identity patch failed: $LASTEXITCODE" }
+          $source = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          if ($source -match 'kBlocked') { throw 'absorbing Fantasy executor phase survived v5.4.3' }
+          if ($source -notmatch 'OPENOFC_FANTASY_SOURCE_IDENTITY_V543G') { throw 'source identity marker missing' }
+          Write-Host 'FANTASY_NONABSORBING_SOURCE_CONTRACT=PASS'
+          Write-Host 'FANTASY_SOURCE_IDENTITY_SOURCE_CONTRACT=PASS'
+
+      - name: Install no-mouse standalone transaction seam
+        shell: pwsh
+        run: |
+          python tools/apply_openofc_fantasy_executor_test_seam_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "execution test seam failed: $LASTEXITCODE" }
+          $source = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          if ($source -match 'p_casino_interface|p_tablemap') { throw 'real mouse/TableMap dependency survived test seam' }
+          Write-Host 'FANTASY_EXECUTION_REAL_MOUSE_DISABLED=PASS'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile production Fantasy executor state machine
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /I OpenHoldem OpenHoldem\COFCFantasyBatchExecutor.cpp OpenHoldem\COFCFantasyJokerExecutionSelftest.cpp /Fe:COFCFantasyJokerExecutionSelftest.exe /link user32.lib'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy Joker execution selftest compilation failed: $LASTEXITCODE" }
+          Write-Host 'FANTASY_JOKER_EXECUTION_COMPILE=PASS'
+
+      - name: Run exact Joker action and bounded restart regression
+        shell: pwsh
+        run: |
+          .\COFCFantasyJokerExecutionSelftest.exe
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy Joker execution regression failed: $LASTEXITCODE" }
+          Write-Host 'FANTASY_JOKER_EXECUTION_GATE=PASS'
+          Write-Host 'FANTASY_CONFIRM_GATE=NOT_YET_CERTIFIED'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'

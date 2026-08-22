@@ -1,0 +1,206 @@
+name: OpenOFC v5.4.3G generic Fantasy gate
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+      - 'openofc-v543-joker-execution-gate'
+  pull_request:
+    branches:
+      - 'openofc-v542c-dealer-recovery'
+      - 'openofc-v543-generic-fantasy'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-generic-fantasy:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4 continuity chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4 continuity patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2B partial reconnect patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2C dealer patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2C normalization failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4.3G generic Fantasy patch
+        shell: pwsh
+        run: |
+          python tools/run_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 generic Fantasy patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 normalization failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3G source-identity patch failed: $LASTEXITCODE" }
+
+      - name: Assert v5.4.3G source contract
+        shell: pwsh
+        run: |
+          $obs = Get-Content -Raw 'OpenHoldem/COFCVisualObservation.h'
+          $state = Get-Content -Raw 'OpenHoldem/COFCState.h'
+          $scraper = Get-Content -Raw 'OpenHoldem/COFCScraper.cpp'
+          $policy = Get-Content -Raw 'OpenHoldem/COFCBaselinePolicy.cpp'
+          $executor = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          $executorHeader = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.h'
+          $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
+          $runtimeHeader = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.h'
+          $tablemap = Get-Content -Raw 'CTablemap/CTablemap.h'
+
+          foreach ($needle in @('fantasy_card_count','OPENOFC_GENERIC_FANTASY_V543')) {
+            if (-not $obs.Contains($needle)) { throw "observation marker missing: $needle" }
+            if (-not $state.Contains($needle)) { throw "state marker missing: $needle" }
+          }
+          foreach ($needle in @(
+            'COFCFantasyPixelRecognizer',
+            'CURRENT_SCREEN_BOOTSTRAP',
+            'route=FANTASY',
+            'fantasy_card_count=%d',
+            'ofc_fantasy_confirm_visible',
+            'actor_authority=FANTASY_UI')) {
+            if (-not $scraper.Contains($needle)) { throw "generic Fantasy scraper marker missing: $needle" }
+          }
+          if ($scraper.Contains('Operational Fantasy15 requires exactly 15 cards')) {
+            throw 'operational fixed-15 Fantasy gate survived v5.4.3'
+          }
+          foreach ($needle in @('bool ChooseFantasy(','fantasy_count - 13')) {
+            if (-not $policy.Contains($needle)) { throw "generic Fantasy policy marker missing: $needle" }
+          }
+          if ($policy.Contains('ChooseFantasy15(')) {
+            throw 'count-specific Fantasy policy entry point survived v5.4.3'
+          }
+          if ($executor.Contains('kBlocked') -or $executorHeader.Contains('kBlocked')) {
+            throw 'absorbing Fantasy executor phase survived v5.4.3'
+          }
+          foreach ($needle in @('executor_fault','terminal=0','continue_scraping=1','OPENOFC_FANTASY_SOURCE_IDENTITY_V543G','source.card_value != observation.hero_loose_cards[index].value')) {
+            if (-not $executor.Contains($needle)) { throw "recoverable/source-identity Fantasy executor marker missing: $needle" }
+          }
+          if ($runtime.Contains('kBlocked') -or $runtimeHeader.Contains('kBlocked')) {
+            throw 'absorbing runtime-controller failure state survived v5.4.3'
+          }
+          if (-not $tablemap.Contains('OFCFantasyGeometryMeasured')) {
+            throw 'generic Fantasy geometry authority accessor missing'
+          }
+          Write-Host 'PASS: Fantasy is one runtime state; 14..17 is explicit count data.'
+          Write-Host 'PASS: current-screen bootstrap no longer requires stale process lineage.'
+          Write-Host 'PASS: Fantasy executor faults are nonterminal and force fresh replan.'
+          Write-Host 'PASS: loose-card click geometry is bound to the same fresh physical identity, including JK1/JK2.'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile and run generic Fantasy 14-17 regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCGenericFantasySelftest.cpp /Fe:COFCGenericFantasySelftest.exe && COFCGenericFantasySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Generic Fantasy 14..17 regression failed: $LASTEXITCODE" }
+
+      - name: Compile and run current-screen continuity regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRuntimeContinuitySelftest.cpp /Fe:COFCRuntimeContinuitySelftest.exe && COFCRuntimeContinuitySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Continuity regression failed: $LASTEXITCODE" }
+
+      - name: Compile and run partial reconnect regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCPartialReconnectSelftest.cpp /Fe:COFCPartialReconnectSelftest.exe && COFCPartialReconnectSelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Partial reconnect regression failed: $LASTEXITCODE" }
+
+      - name: Compile and run dealer continuity regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Dealer continuity regression failed: $LASTEXITCODE" }
+
+      - name: Compile and run smart-policy regression
+        shell: pwsh
+        run: |
+          python tools/instrument_openofc_policy_selftest_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "Policy selftest instrumentation failed: $LASTEXITCODE" }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Policy regression failed: $LASTEXITCODE" }
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+
+      - name: Freeze v5.4.3G source/state gate result
+        shell: pwsh
+        run: |
+          Write-Host 'OpenOFC v5.4.3G generic Fantasy source/state gate completed.'
+          Write-Host 'Native policy/reconstructor regression covers count=14,15,16,17.'
+          Write-Host 'Fresh-process partial-Fantasy bootstrap is certified at canonical state level.'
+          Write-Host 'JK1/JK2 loose-source geometry is bound to matching fresh physical identity metadata.'
+          Write-Host 'Real HBITMAP/Joker certification remains independently required and is not implied by this build.'
+          Write-Host 'No runtime ZIP is uploaded by this workflow.'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'

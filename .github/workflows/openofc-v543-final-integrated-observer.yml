@@ -1,0 +1,57 @@
+name: OpenOFC v5.4.3 final integrated gate observer
+
+on:
+  pull_request:
+    branches:
+      - 'openofc-v542c-dealer-recovery'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  observe-final-integrated-gate:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Wait for exact-head push gate and mirror its conclusion
+        shell: pwsh
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $target = $env:TARGET_SHA.ToLowerInvariant()
+          $deadline = (Get-Date).AddMinutes(110)
+          $wantedName = 'OpenOFC v5.4.3 final integrated release gate'
+          Write-Host "OBSERVER_TARGET_SHA=$target"
+          while ((Get-Date) -lt $deadline) {
+            $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs?head_sha=$target&event=push&per_page=100"
+            $response = Invoke-RestMethod -Headers $headers -Uri $uri -Method Get
+            $run = @($response.workflow_runs | Where-Object { $_.name -eq $wantedName } | Sort-Object run_number -Descending | Select-Object -First 1)
+            if ($run.Count -eq 0) {
+              Write-Host 'FINAL_GATE_OBSERVER state=WAITING_FOR_RUN'
+              Start-Sleep -Seconds 10
+              continue
+            }
+            $r = $run[0]
+            Write-Host "FINAL_GATE_OBSERVER run_id=$($r.id) status=$($r.status) conclusion=$($r.conclusion) head_sha=$($r.head_sha)"
+            if ($r.head_sha.ToLowerInvariant() -ne $target) { throw 'observer resolved a run for the wrong commit' }
+            if ($r.status -ne 'completed') {
+              Start-Sleep -Seconds 15
+              continue
+            }
+            if ($r.conclusion -ne 'success') {
+              throw "final integrated push gate did not pass: run=$($r.id) conclusion=$($r.conclusion)"
+            }
+            Write-Host "FINAL_INTEGRATED_AUTHORITATIVE_RUN=$($r.id)"
+            Write-Host 'FINAL_INTEGRATED_RELEASE_GATE_OBSERVED=PASS'
+            Write-Host 'FIELD_PACKAGE_AUTHORIZED=1'
+            exit 0
+          }
+          throw 'timed out waiting for exact-head final integrated push gate'

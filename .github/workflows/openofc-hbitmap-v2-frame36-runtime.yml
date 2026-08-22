@@ -1,0 +1,89 @@
+name: OpenOFC v5.4.3F HBITMAP v2 frame36 runtime
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  pull_request:
+    branches:
+      - 'openofc-v542c-dealer-recovery'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frame36-runtime:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify and materialize exact frame000036 pixels
+        shell: pwsh
+        run: |
+          python tools/materialize_openofc_hbitmap_v2_frame36.py
+          if ($LASTEXITCODE -ne 0) { throw "frame36 transport failed: $LASTEXITCODE" }
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4 through v5.4.3F recognizer chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          python tools/run_openofc_generic_fantasy_v543.py
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          python tools/apply_openofc_hbitmap_selftest_v543.py
+          python tools/apply_openofc_real_pixel_recognizer_v543e.py
+          python tools/apply_openofc_dynamic_component_lineage_v543f.py
+          python tools/instrument_openofc_real_pixel_diagnostics_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3F recognizer chain failed: $LASTEXITCODE" }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile frame36 production HBITMAP selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCHBitmapV2Selftest.cpp /Fe:COFCHBitmapV2Selftest.exe /link gdiplus.lib gdi32.lib user32.lib'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "frame36 selftest compilation failed: $LASTEXITCODE" }
+
+      - name: Run frame36 native HBITMAP partial reconnect
+        shell: pwsh
+        run: |
+          .\COFCHBitmapV2Selftest.exe 'fixture-materialized/frame000036_arrangement.png' 'fixture-materialized/frame000036_loose.png'
+          if ($LASTEXITCODE -ne 0) { throw "frame36 recognition/reconstruction failed: $LASTEXITCODE" }
+          Write-Host 'HBITMAP_V2_FRAME000036=PASS'
+          Write-Host 'REAL_JOKER_PIXEL=NOT_YET_CERTIFIED'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Upload certified frame36 pixels
+        uses: actions/upload-artifact@v4
+        with:
+          name: openofc-v543f-hbitmap-v2-frame36
+          path: |
+            fixture-materialized/frame000036_arrangement.png
+            fixture-materialized/frame000036_loose.png
+          if-no-files-found: error

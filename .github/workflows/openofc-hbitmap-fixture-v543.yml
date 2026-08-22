@@ -1,0 +1,90 @@
+name: OpenOFC v5.4.3 real HBITMAP fixture integrity
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  pull_request:
+    branches:
+      - 'openofc-v542c-dealer-recovery'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fixture-integrity:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Diagnose legacy transport against verified prefix
+        shell: pwsh
+        run: |
+          $verifiedParts = Get-ChildItem 'tests/fixtures/openofc_v543_hbitmap/b64/verified_initial_*.txt' | Sort-Object Name
+          $legacyParts = Get-ChildItem 'tests/fixtures/openofc_v543_hbitmap/b64/initial_*.txt' | Sort-Object Name
+          $verified = ($verifiedParts | ForEach-Object { (Get-Content -Raw $_.FullName).Trim() }) -join ''
+          $legacy = ($legacyParts | ForEach-Object { (Get-Content -Raw $_.FullName).Trim() }) -join ''
+          Write-Host "COVERAGE verified_chars=$($verified.Length) legacy_chars=$($legacy.Length) remaining_if_prefix=$($legacy.Length-$verified.Length)"
+          $n = [Math]::Min($verified.Length, $legacy.Length)
+          $firstMismatch = -1
+          for ($i=0; $i -lt $n; $i++) {
+            if ($verified[$i] -ne $legacy[$i]) { $firstMismatch = $i; break }
+          }
+          Write-Host "PREFIX_COMPARE first_mismatch=$firstMismatch compared=$n"
+          $eq = @()
+          for ($i=0; $i -lt $legacy.Length; $i++) { if ($legacy[$i] -eq '=') { $eq += $i } }
+          Write-Host "LEGACY_PADDING positions=$($eq -join ',') count=$($eq.Count)"
+          for ($i=0; $i -lt $legacyParts.Count; $i++) {
+            $raw=(Get-Content -Raw $legacyParts[$i].FullName).Trim()
+            $eqLocal=@(); for($j=0;$j -lt $raw.Length;$j++){if($raw[$j] -eq '='){$eqLocal+=$j}}
+            Write-Host "LEGACY_PART name=$($legacyParts[$i].Name) chars=$($raw.Length) padding=$($eqLocal -join ',') blob=$((git hash-object -- $legacyParts[$i].FullName).Trim())"
+          }
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Verify transported Git blobs and export verified PNG prefix
+        shell: pwsh
+        run: |
+          $expected = @(
+            '03caef68a84c3ab66f3be3e86e930a33dcce3c00',
+            '61ba62951ba8fae7f7b9fab35a7cfb0332b2d057',
+            '0b0d5af3385400eb8413bab13fbf52c4585df552',
+            'e2781d04969c4c4531df31bbbc051713f26c615e',
+            'e3f43ac34096365daebde5e289c0aed3b9cbca8d',
+            '70a25546a42e1fd769354f6e1d50391a00e22afe'
+          )
+          $parts = Get-ChildItem 'tests/fixtures/openofc_v543_hbitmap/b64/verified_initial_*.txt' | Sort-Object Name
+          if ($parts.Count -ne $expected.Count) { throw "Expected $($expected.Count) verified chunks, got $($parts.Count)" }
+          $pieces = @()
+          for ($i=0; $i -lt $parts.Count; $i++) {
+            $actualBlob = (git hash-object -- $parts[$i].FullName).Trim().ToLowerInvariant()
+            Write-Host "GIT_BLOB_VERIFY name=$($parts[$i].Name) expected=$($expected[$i]) actual=$actualBlob"
+            if ($actualBlob -ne $expected[$i]) { throw "Git blob SHA mismatch for $($parts[$i].Name)" }
+            $raw = (Get-Content -Raw $parts[$i].FullName).Trim()
+            $bad = [regex]::Match($raw, '[^A-Za-z0-9+/=]')
+            if ($bad.Success) { throw "Invalid base64 character in $($parts[$i].Name) at $($bad.Index)" }
+            $pieces += $raw
+          }
+          $b64 = $pieces -join ''
+          $bytes = [Convert]::FromBase64String($b64)
+          New-Item -ItemType Directory -Force -Path hbitmap-prefix | Out-Null
+          [IO.File]::WriteAllBytes('hbitmap-prefix/field_frame000000_loose.prefix.png', $bytes)
+          Write-Host "VERIFIED_COVERAGE chars=$($b64.Length) decoded_bytes=$($bytes.Length)"
+          Write-Host 'PASS verified Git blob identities; fixture still incomplete until canonical SHA-256 matches'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Upload verified prefix artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openofc-v543-hbitmap-verified-prefix
+          path: hbitmap-prefix/field_frame000000_loose.prefix.png
+          if-no-files-found: error
+
+      - name: Upload transport recovery corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: openofc-v543-hbitmap-transport-corpus
+          path: tests/fixtures/openofc_v543_hbitmap/b64/*.txt
+          if-no-files-found: error
