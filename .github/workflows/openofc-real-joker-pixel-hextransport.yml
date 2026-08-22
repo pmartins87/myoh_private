@@ -1,0 +1,94 @@
+name: OpenOFC v5.4.3 real Joker pixel gate hextransport
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-joker-pixel-gate-hextransport'
+  pull_request:
+    branches:
+      - 'openofc-v543-joker-pixel-gate'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-joker-pixel:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify and materialize exact real-Joker pixels
+        shell: pwsh
+        run: |
+          python tools/materialize_openofc_real_joker_frame5.py
+          if ($LASTEXITCODE -ne 0) { throw "real-Joker transport failed: $LASTEXITCODE" }
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4 through v5.4.3F recognizer chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4 continuity patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2B partial reconnect patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C dealer patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C normalization failed: $LASTEXITCODE" }
+          python tools/run_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 generic Fantasy patch failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 normalization failed: $LASTEXITCODE" }
+          python tools/apply_openofc_hbitmap_selftest_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP standalone recognizer patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_real_pixel_recognizer_v543e.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3E recognizer patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dynamic_component_lineage_v543f.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3F lineage patch failed: $LASTEXITCODE" }
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile real-Joker production HBITMAP selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCRealJokerPixelSelftest.cpp /Fe:COFCRealJokerPixelSelftest.exe /link gdiplus.lib gdi32.lib user32.lib'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "real-Joker selftest compilation failed: $LASTEXITCODE" }
+          Write-Host 'REAL_JOKER_PIXEL_SELFTEST_COMPILE=PASS'
+
+      - name: Run unconditioned production recognizer on two real Jokers
+        shell: pwsh
+        run: |
+          .\COFCRealJokerPixelSelftest.exe 'fixture-materialized/frame000005_joker_arrangement.png'
+          if ($LASTEXITCODE -ne 0) { throw "real-Joker recognition failed: $LASTEXITCODE" }
+          Write-Host 'REAL_JOKER_PIXEL=PASS'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Upload certified real-Joker crop
+        uses: actions/upload-artifact@v4
+        with:
+          name: openofc-v543-real-joker-pixel-byte-verified-hextransport
+          path: fixture-materialized/frame000005_joker_arrangement.png
+          if-no-files-found: error
