@@ -101,6 +101,22 @@ jobs:
           Write-Host 'FANTASY_CONFIRM_SEMANTIC_GUARD=PASS'
           Write-Host 'FANTASY_CONFIRM_FENCE_STATE_MACHINE=PASS'
 
+      - name: Generate and run actual-controller Confirm regression
+        shell: pwsh
+        run: |
+          python tools/materialize_openofc_fantasy_confirm_controller_selftest_v543h.py
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy Confirm controller seam generation failed: $LASTEXITCODE" }
+          $generated = Get-Content -Raw 'OpenHoldem/COFCFantasyConfirmControllerGeneratedSelftest.cpp'
+          if ($generated.Contains('p_casino_interface') -or $generated.Contains('ReadRegion(')) {
+            throw 'real mouse/TableMap dependency survived generated controller test seam'
+          }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /I OpenHoldem OpenHoldem\COFCFantasyConfirmControllerGeneratedSelftest.cpp /Fe:COFCFantasyConfirmControllerGeneratedSelftest.exe && COFCFantasyConfirmControllerGeneratedSelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "dynamic Fantasy Confirm controller regression failed: $LASTEXITCODE" }
+          Write-Host 'FANTASY_CONFIRM_DYNAMIC_CONTROLLER_GATE=PASS'
+
       - name: Re-run Fantasy Joker executor regression under H source tree
         shell: pwsh
         run: |
@@ -149,5 +165,6 @@ jobs:
           Write-Host 'FANTASY_CONFIRM_SEMANTIC_GUARD=PASS'
           Write-Host 'FANTASY_CONFIRM_FENCE_STATE_MACHINE=PASS'
           Write-Host 'FANTASY_CONFIRM_RUNTIME_SOURCE_CONTRACT=PASS'
-          Write-Host 'FANTASY_CONFIRM_DYNAMIC_CONTROLLER_GATE=NOT_YET_CERTIFIED'
+          Write-Host 'FANTASY_CONFIRM_DYNAMIC_CONTROLLER_GATE=PASS'
+          Write-Host 'FANTASY_CONFIRM_GATE=PASS'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
