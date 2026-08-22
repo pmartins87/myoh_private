@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - 'openofc-v543-joker-pixel-gate-hextransport'
+  pull_request:
+    branches:
+      - 'openofc-v543-joker-pixel-gate'
   workflow_dispatch:
 
 permissions:
