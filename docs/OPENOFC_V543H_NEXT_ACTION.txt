@@ -1,0 +1,1 @@
+Attach prepared blob 24c6e3248d4780661d36cb13e9a189a623da9df7 to tools/apply_openofc_fantasy_confirm_guard_v543h.py, add HasAnyDispatch to COFCFantasyConfirmFence, adapt generated controller regression to Tick(), rerun H.
