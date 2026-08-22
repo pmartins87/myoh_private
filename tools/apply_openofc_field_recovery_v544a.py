@@ -65,9 +65,9 @@ def harden_v544_scraper_patch():
     eol = "\r\n" if b"\r\n" in raw else "\n"
 
     old = '    regex_once(rel, pattern, replacement, "non-empty UNKNOWN remains occupied")\n'
-    new = '''    path, text, eol, bom = read_source(rel)
+    new = r"""    path, text, eol, bom = read_source(rel)
     function_start = 'int CScraper::ScrapeOFCSlot('
-    function_end = '\\nstatic bool DeepOFCRegisterKnownCard'
+    function_end = '\nstatic bool DeepOFCRegisterKnownCard'
     if text.count(function_start) != 1 or text.count(function_end) != 1:
         raise RuntimeError(
           "non-empty UNKNOWN remains occupied: ScrapeOFCSlot function bounds are not unique")
@@ -98,7 +98,7 @@ def harden_v544_scraper_patch():
     write_source(path, text, eol, bom)
     print(
       "patched OpenHoldem/COFCScraper.cpp: 3 non-empty identity failures -> UNKNOWN_OCCUPIED")
-'''
+"""
     if text.count(old) == 1:
         text = text.replace(old, new, 1)
     elif text.count(new) != 1:
