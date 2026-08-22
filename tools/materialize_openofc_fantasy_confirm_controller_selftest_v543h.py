@@ -28,7 +28,7 @@ def meth(t,s):
 
 def main():
     t=S.read_text(encoding='utf-8-sig')
-    req=['COFCFantasyConfirmGuard::Validate','fantasy_confirm_fence_.CanDispatch','fantasy_confirm_fence_.MarkDispatched','fantasy_confirm_fence_.HasAnyDispatch','ObserveUnchangedAfterDispatch','confirm_was_fantasy','physical retry forbidden']
+    req=['COFCFantasyConfirmGuard::Validate','fantasy_confirm_fence_.CanDispatch','fantasy_confirm_fence_.MarkDispatched','fantasy_confirm_fence_.HasAnyDispatch','ObserveUnchangedAfterDispatch','confirm_was_fantasy','baseline=UPDATED','physical retry forbidden']
     miss=[x for x in req if x not in t]
     if miss: raise RuntimeError('H runtime missing '+repr(miss))
     send=meth(t,'bool COFCRuntimeController::SendConfirm(').replace('COFCRuntimeController::','ConfirmControllerHarness::',1)
@@ -39,7 +39,7 @@ def main():
     i=tick.find('  if (phase_ == kConfirmSent) {')
     if i<0: raise RuntimeError('Tick ConfirmSent block missing')
     block=bal(tick,i)
-    for x in ['confirm_was_fantasy','HasAnyDispatch','ObserveUnchangedAfterDispatch','ack=TIMEOUT']:
+    for x in ['confirm_was_fantasy','HasAnyDispatch','ObserveUnchangedAfterDispatch','baseline=UPDATED','ack=TIMEOUT']:
         if x not in block: raise RuntimeError('Tick H marker missing '+x)
     if any(x in send for x in ['p_casino_interface','ReadRegion(','CString(']): raise RuntimeError('real UI survived seam')
     src=r'''#include <cstdlib>
@@ -68,7 +68,7 @@ Phase phase_;COFCTurnPlan plan_;COFCState confirm_before_;COFCFantasyConfirmFenc
     src+=r'''namespace{
 void one(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();req(c.SendConfirm(s),"first");req(physical==1&&c.armed(),"first dispatch/fence");c.Bind();req(c.SendConfirm(s),"duplicate return");req(physical==1&&c.phase()==ConfirmControllerHarness::kReacquire,"duplicate escaped");cout<<"FANTASY_CONFIRM_CONTROLLER_ONE_SHOT=PASS\n";}
 void timeout(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();auto o=ob();req(c.SendConfirm(s),"setup");for(int i=0;i<19;++i){c.TickConfirmSent(s,o);req(physical==1&&c.phase()==ConfirmControllerHarness::kConfirmSent,"early timeout/resend");}c.TickConfirmSent(s,o);req(physical==1&&c.phase()==ConfirmControllerHarness::kReacquire&&c.armed(),"timeout invariant");c.Bind();auto d=s;d.players[1].board.top[0].value=D[0];req(c.SendConfirm(d),"post-timeout suppress");req(physical==1,"post-timeout resend");cout<<"FANTASY_CONFIRM_CONTROLLER_TICK_ACK_TIMEOUT=PASS\n";}
-void changed(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();auto o=ob();req(c.SendConfirm(s),"setup changed");auto d=s;d.players[1].board.top[0].value=D[0];c.TickConfirmSent(d,o);req(c.phase()==ConfirmControllerHarness::kConfirmSent&&c.armed()&&physical==1,"changed state rearmed");cout<<"FANTASY_CONFIRM_CONTROLLER_CHANGED_STATE_FENCE=PASS\n";}
+void changed(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();auto o=ob();req(c.SendConfirm(s),"setup changed");auto d=s;d.players[1].board.top[0].value=D[0];c.TickConfirmSent(d,o);req(c.phase()==ConfirmControllerHarness::kConfirmSent&&c.armed()&&physical==1,"changed state rearmed");for(int i=0;i<19;++i){c.TickConfirmSent(d,o);req(c.phase()==ConfirmControllerHarness::kConfirmSent&&physical==1,"stable changed state timed out early/resend");}c.TickConfirmSent(d,o);req(c.phase()==ConfirmControllerHarness::kReacquire&&c.armed()&&physical==1,"stable changed state never reached bounded reacquire");cout<<"FANTASY_CONFIRM_CONTROLLER_CHANGED_STATE_STABILITY=PASS\n";}
 void retry(){allow_click=false;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();req(!c.SendConfirm(s),"refusal");req(physical==0&&!c.armed()&&!c.needchange(),"refusal armed");allow_click=true;c.Idle();c.Bind();req(c.SendConfirm(s)&&physical==1&&c.armed(),"safe retry");cout<<"FANTASY_CONFIRM_CONTROLLER_PREDISPATCH_RETRY=PASS\n";}
 void guard(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();s.pending[12].Reset();req(!c.SendConfirm(s)&&boundary==0&&physical==0,"12-card reached IO");ConfirmControllerHarness n;n.Bind();s=st();s.hero_can_confirm=false;req(!n.SendConfirm(s)&&boundary==0,"noauth reached IO");cout<<"FANTASY_CONFIRM_CONTROLLER_GUARD_BEFORE_IO=PASS\n";}
 void newhand(){allow_click=true;boundary=physical=0;ConfirmControllerHarness c;c.Bind();auto s=st();auto o=ob();req(c.SendConfirm(s)&&c.armed(),"newhand setup");c.NewHand(true);c.TickConfirmSent(s,o);req(!c.armed()&&c.phase()==ConfirmControllerHarness::kIdle,"newhand did not reset fence");cout<<"FANTASY_CONFIRM_CONTROLLER_NEW_HAND_RESET=PASS\n";}
