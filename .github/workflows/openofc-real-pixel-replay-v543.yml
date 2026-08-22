@@ -1,13 +1,15 @@
-name: OpenOFC v5.4.3 supplied real-pixel replay gate
+name: OpenOFC v5.4.3G supplied real-pixel replay gate
 
 on:
   push:
     branches:
       - 'openofc-v543-generic-fantasy'
       - 'openofc-v543-hbitmap-v2'
+      - 'openofc-v543-joker-execution-gate'
   pull_request:
     branches:
       - 'openofc-v542c-dealer-recovery'
+      - 'openofc-v543-generic-fantasy'
   workflow_dispatch:
 
 permissions:
@@ -42,20 +44,12 @@ jobs:
           for ($i = 0; $i -lt $parts.Count; $i++) {
             $actualBlob = (git hash-object -- $parts[$i].FullName).Trim().ToLowerInvariant()
             Write-Host "REPLAY_BLOB name=$($parts[$i].Name) expected=$($expected[$i]) actual=$actualBlob"
-            if ($actualBlob -ne $expected[$i]) {
-              throw "Git blob SHA mismatch for $($parts[$i].Name)"
-            }
+            if ($actualBlob -ne $expected[$i]) { throw "Git blob SHA mismatch for $($parts[$i].Name)" }
             $raw = (Get-Content -Raw $parts[$i].FullName).Trim()
             $bad = [regex]::Match($raw, '[^A-Za-z0-9+/=]')
-            if ($bad.Success) {
-              throw "Invalid base64 character in $($parts[$i].Name) at $($bad.Index)"
-            }
-            if ($i -lt 8 -and $raw.Length -ne 8000) {
-              throw "Unexpected non-final chunk length for $($parts[$i].Name): $($raw.Length)"
-            }
-            if ($i -eq 8 -and $raw.Length -ne 4200) {
-              throw "Unexpected final chunk length: $($raw.Length)"
-            }
+            if ($bad.Success) { throw "Invalid base64 character in $($parts[$i].Name) at $($bad.Index)" }
+            if ($i -lt 8 -and $raw.Length -ne 8000) { throw "Unexpected non-final chunk length for $($parts[$i].Name): $($raw.Length)" }
+            if ($i -eq 8 -and $raw.Length -ne 4200) { throw "Unexpected final chunk length: $($raw.Length)" }
             $pieces += $raw
           }
           $b64 = $pieces -join ''
@@ -94,7 +88,7 @@ jobs:
           python tools/run_openofc_smart_policy_v53.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC frozen v5.3 chain failed: $LASTEXITCODE" }
 
-      - name: Apply v5.4 through v5.4.3F continuity and recognizer chain
+      - name: Apply v5.4 through v5.4.3G continuity and recognizer chain
         shell: pwsh
         run: |
           python tools/run_openofc_runtime_continuity_v54.py
@@ -109,6 +103,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 generic Fantasy patch failed: $LASTEXITCODE" }
           python tools/normalize_openofc_generic_fantasy_v543.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 normalization failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3G source-identity patch failed: $LASTEXITCODE" }
           python tools/apply_openofc_hbitmap_selftest_v543.py
           if ($LASTEXITCODE -ne 0) { throw "HBITMAP standalone recognizer patch failed: $LASTEXITCODE" }
           python tools/apply_openofc_real_pixel_recognizer_v543e.py
@@ -117,6 +113,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3F component-lineage patch failed: $LASTEXITCODE" }
           python tools/instrument_openofc_real_pixel_diagnostics_v543.py
           if ($LASTEXITCODE -ne 0) { throw "Real-pixel diagnostic instrumentation failed: $LASTEXITCODE" }
+          $executor = Get-Content -Raw 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          if ($executor -notmatch 'OPENOFC_FANTASY_SOURCE_IDENTITY_V543G') { throw 'v5.4.3G executor identity marker missing from replay source chain' }
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -154,13 +152,13 @@ jobs:
           .\COFCHBitmapV2Selftest.exe 'fixture-materialized/frame000036_arrangement.png' 'fixture-materialized/frame000036_loose.png'
           if ($LASTEXITCODE -ne 0) { throw "HBITMAP v2 frame000036 recognition/reconstruction failed: $LASTEXITCODE" }
           Write-Host 'HBITMAP_V2_FRAME000036=PASS'
-          Write-Host 'REAL_JOKER_PIXEL=NOT_YET_CERTIFIED'
+          Write-Host 'REAL_JOKER_PIXEL=SEPARATE_CERTIFIED_GATE'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
 
       - name: Upload verified replay fixtures
         uses: actions/upload-artifact@v4
         with:
-          name: openofc-v543f-real-pixel-fixtures-byte-verified
+          name: openofc-v543g-real-pixel-fixtures-byte-verified
           path: |
             tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png
             fixture-materialized/frame000036_arrangement.png
