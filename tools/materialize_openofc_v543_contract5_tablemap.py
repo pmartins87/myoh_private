@@ -78,6 +78,21 @@ def region_names(text: str) -> list[str]:
     return names
 
 
+def parse_symbols(text: str) -> dict[str, str]:
+    symbols: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("s$"):
+            continue
+        parts = line.split(None, 1)
+        key = parts[0][2:]
+        value = parts[1].strip() if len(parts) > 1 else ""
+        if key in symbols:
+            raise RuntimeError(f"duplicate TableMap symbol s${key}")
+        symbols[key] = value
+    return symbols
+
+
 def materialize(output: Path) -> None:
     # v5.2 is the latest clean TableMap lineage: it already removed legacy
     # Hold'em gameplay regions and retained only OFC-native regions plus the
@@ -110,33 +125,49 @@ def materialize(output: Path) -> None:
     )
 
     verify = output.read_text(encoding="utf-8")
-    required = [
-        "s$openofc_contract          5",
-        "s$openofc_tablemap_clean 1",
-        "s$openofc_opponent_history 1",
-        "s$openofc_opponent_reveal_scrape 1",
-        "s$ofc_fantasy_geometry_measured 1",
-        "r$ofc_fantasy_arrange_top0",
-        "r$ofc_fantasy_arrange_middle0",
-        "r$ofc_fantasy_arrange_bottom0",
-        "r$ofc_fantasy_confirm_button",
-        "r$ofc_fantasy_confirm_visible",
-        "r$ofc_fantasy_row_action_top",
-        "r$ofc_fantasy_row_action_middle",
-        "r$ofc_fantasy_row_action_bottom",
-        "r$ofc_confirm_button",
-        "r$ofc_confirm_visible",
-        "r$ofc_p0_name",
-        "r$ofc_p1_name",
+    symbols = parse_symbols(verify)
+    expected_symbols = {
+        "openofc_contract": "5",
+        "openofc_tablemap_clean": "1",
+        "openofc_opponent_history": "1",
+        "openofc_opponent_reveal_scrape": "1",
+        "ofc_fantasy_geometry_measured": "1",
+    }
+    wrong_symbols = [
+        f"s${key} expected={expected!r} got={symbols.get(key)!r}"
+        for key, expected in expected_symbols.items()
+        if symbols.get(key) != expected
     ]
-    missing = [item for item in required if item not in verify]
-    if missing:
-        raise RuntimeError("v5.4.3 contract-5 TableMap missing: " + ", ".join(missing))
+    if wrong_symbols:
+        raise RuntimeError(
+            "v5.4.3 contract-5 TableMap symbol mismatch: " + "; ".join(wrong_symbols)
+        )
+
+    names = set(region_names(verify))
+    required_regions = {
+        "ofc_fantasy_arrange_top0",
+        "ofc_fantasy_arrange_middle0",
+        "ofc_fantasy_arrange_bottom0",
+        "ofc_fantasy_confirm_button",
+        "ofc_fantasy_confirm_visible",
+        "ofc_fantasy_row_action_top",
+        "ofc_fantasy_row_action_middle",
+        "ofc_fantasy_row_action_bottom",
+        "ofc_confirm_button",
+        "ofc_confirm_visible",
+        "ofc_p0_name",
+        "ofc_p1_name",
+    }
+    missing_regions = sorted(required_regions.difference(names))
+    if missing_regions:
+        raise RuntimeError(
+            "v5.4.3 contract-5 TableMap missing regions: " + ", ".join(missing_regions)
+        )
 
     # The field regression being fixed here was a release downgrade to v3,
     # which reintroduced ordinary Hold'em gameplay regions. Contract 5 refuses
     # any such region: every region in this TableMap must be explicitly OFC.
-    non_ofc = [name for name in region_names(verify) if not name.startswith("ofc_")]
+    non_ofc = sorted(name for name in names if not name.startswith("ofc_"))
     if non_ofc:
         raise RuntimeError(
             "contract-5 TableMap contains non-OFC/legacy gameplay regions: "
@@ -161,6 +192,8 @@ def materialize(output: Path) -> None:
         raise RuntimeError("legacy Hold'em TableMap leak: " + ", ".join(leaked))
 
     print(f"OPENOFC_TABLEMAP_V543_CONTRACT5=PASS path={output}")
+    print(f"OPENOFC_TABLEMAP_REGION_COUNT={len(names)}")
+    print("LEGACY_HOLDEM_TABLEMAP_REGIONS=0")
 
 
 def main() -> None:
