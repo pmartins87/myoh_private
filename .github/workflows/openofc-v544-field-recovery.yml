@@ -1,0 +1,184 @@
+name: OpenOFC v5.4.4 field recovery
+
+on:
+  push:
+    branches:
+      - 'openofc-v544-field-recovery'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-field-recovery:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@v4
+
+      - name: Assert checkout provenance
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $expected = $env:GITHUB_SHA.ToLowerInvariant()
+          Write-Host "V544_HEAD actual=$head expected=$expected"
+          if ($head -ne $expected) { throw 'checkout does not match GITHUB_SHA' }
+
+      - name: Apply frozen v5.3 chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          if ($LASTEXITCODE -ne 0) { throw "runtime repair failed: $LASTEXITCODE" }
+          python tools/apply_openofc_log248_repair.py
+          if ($LASTEXITCODE -ne 0) { throw "log248 repair failed: $LASTEXITCODE" }
+          python tools/run_openofc_gameflow_v2.py
+          if ($LASTEXITCODE -ne 0) { throw "gameflow v2 failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_flow_v3.py
+          if ($LASTEXITCODE -ne 0) { throw "normal flow v3 failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v4.py
+          if ($LASTEXITCODE -ne 0) { throw "phase flow v4 failed: $LASTEXITCODE" }
+          python tools/apply_openofc_phase_flow_v41.py
+          if ($LASTEXITCODE -ne 0) { throw "phase flow v4.1 failed: $LASTEXITCODE" }
+          python tools/apply_openofc_round_discard_exit_v42.py
+          if ($LASTEXITCODE -ne 0) { throw "round/discard v4.2 failed: $LASTEXITCODE" }
+          python tools/apply_openofc_normal_completion_v43.py
+          if ($LASTEXITCODE -ne 0) { throw "normal completion v4.3 failed: $LASTEXITCODE" }
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          if ($LASTEXITCODE -ne 0) { throw "dealer v4.4 failed: $LASTEXITCODE" }
+          python tools/run_openofc_fantasy_v5.py
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy v5 failed: $LASTEXITCODE" }
+          python tools/apply_openofc_opponent_history_v52.py
+          if ($LASTEXITCODE -ne 0) { throw "opponent history v5.2 failed: $LASTEXITCODE" }
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "smart policy v5.3 failed: $LASTEXITCODE" }
+          Write-Host 'V53_MATERIALIZATION=PASS'
+
+      - name: Apply v5.4 through v5.4.4 field recovery
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4 continuity failed: $LASTEXITCODE" }
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2B failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C normalization failed: $LASTEXITCODE" }
+          python tools/run_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 generic Fantasy failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 normalization failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3G failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_confirm_guard_v543h.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3H failed: $LASTEXITCODE" }
+          python tools/apply_openofc_field_recovery_v544.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.4 field recovery failed: $LASTEXITCODE" }
+          python tools/apply_openofc_field_recovery_v544b.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.4B cleanup failed: $LASTEXITCODE" }
+          Write-Host 'V544_FIELD_RECOVERY_MATERIALIZATION=PASS'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Run v5.4.4 UNKNOWN regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCUnknownToleranceSelftest.cpp /Fe:COFCUnknownToleranceSelftest.exe && COFCUnknownToleranceSelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "UNKNOWN regression failed: $LASTEXITCODE" }
+          Write-Host 'UNKNOWN_OCCUPIED_V544=PASS'
+
+      - name: Run generic Fantasy 14-17 regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCGenericFantasySelftest.cpp /Fe:COFCGenericFantasySelftest.exe && COFCGenericFantasySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "generic Fantasy regression failed: $LASTEXITCODE" }
+          Write-Host 'GENERIC_FANTASY_14_17_V544=PASS'
+
+      - name: Run runtime continuity regressions
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $c1 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRuntimeContinuitySelftest.cpp /Fe:COFCRuntimeContinuitySelftest.exe && COFCRuntimeContinuitySelftest.exe'
+          cmd.exe /d /s /c $c1
+          if ($LASTEXITCODE -ne 0) { throw "runtime continuity regression failed: $LASTEXITCODE" }
+          $c2 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCPartialReconnectSelftest.cpp /Fe:COFCPartialReconnectSelftest.exe && COFCPartialReconnectSelftest.exe'
+          cmd.exe /d /s /c $c2
+          if ($LASTEXITCODE -ne 0) { throw "partial reconnect regression failed: $LASTEXITCODE" }
+          $c3 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
+          cmd.exe /d /s /c $c3
+          if ($LASTEXITCODE -ne 0) { throw "dealer recovery regression failed: $LASTEXITCODE" }
+          Write-Host 'RUNTIME_CONTINUITY_V544=PASS'
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
+          Write-Host 'OPENOFC_V544_RELEASE_WIN32=PASS'
+
+      - name: Assemble field-test binary package
+        shell: pwsh
+        run: |
+          $out = 'artifact/OpenOFC_v544_FIELD_TEST'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item 'Release/OpenHoldem.exe' $out
+          Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path 'Release/tessdata') { Copy-Item 'Release/tessdata' "$out/tessdata" -Recurse }
+          @(
+            "source_commit=$env:GITHUB_SHA",
+            'source_branch=openofc-v544-field-recovery',
+            'configuration=Release',
+            'platform=Win32',
+            'patch=OpenOFC_v5.4.4_field_recovery',
+            'tablemap=USER_V5_4_4_TO_BE_INJECTED_POST_BUILD'
+          ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
+          $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
+          $lines = foreach ($file in $files) {
+            $rel = $file.FullName.Substring((Resolve-Path $out).Path.Length + 1).Replace('\','/')
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $rel"
+          }
+          $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
+          $exeHash = (Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant()
+          Write-Host "OPENOFC_V544_EXE_SHA256=$exeHash"
+
+      - name: Upload field-test binary package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v544_FIELD_TEST_BINARY
+          path: artifact/OpenOFC_v544_FIELD_TEST
+          if-no-files-found: error
