@@ -23,14 +23,21 @@ class COFCFantasyConfirmFence {
     ack_wait_cycles_ = 0;
   }
 
+  bool HasAnyDispatch() const {
+    return !dispatched_fingerprint_.empty();
+  }
+
   bool HasDispatched(const std::string &fingerprint) const {
     return !fingerprint.empty()
       && !dispatched_fingerprint_.empty()
       && dispatched_fingerprint_ == fingerprint;
   }
 
+  // Once the mouse DLL has been invoked for a Fantasy Confirm, no second
+  // physical Confirm is allowed in that Fantasy hand. The fingerprint is kept
+  // for diagnostics/correlation, while the one-shot rule is deal-wide.
   bool CanDispatch(const std::string &fingerprint) const {
-    return !HasDispatched(fingerprint);
+    return !fingerprint.empty() && !HasAnyDispatch();
   }
 
   void MarkDispatched(const std::string &fingerprint) {
