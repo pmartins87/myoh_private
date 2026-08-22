@@ -310,11 +310,9 @@ def harden_v544_reconstructor_patch():
     write_script(text, eol, bom)
 
 
-def harden_v544_policy_patch():
-    # v5.4.2B intentionally permits a Joker to be the only remaining discard in
-    # partial reconnect. Preserve that guard while v5.4.4 temporarily adds its
-    # pending/loose executor preference (v5.4.4C later removes the preference).
+def harden_v544_policy_and_runtime_patch():
     text, eol, bom = read_script()
+
     old = r"""    needle = '''    if (unused >= 0 && incoming[unused].joker != 0) continue;
 '''
     if text.count(needle) != 2:
@@ -339,6 +337,48 @@ def harden_v544_policy_patch():
         text = text.replace(old, new, 1)
     elif text.count(new) != 1:
         raise RuntimeError("v5.4.4A could not normalize partial-reconnect discard guard")
+
+    constructor_old = r"""    # Constructor body is created by v5.4 continuity; initialize the new fields.
+    replace = '''  reacquire_stable_cycles_ = 0;
+  recovery_requires_change_ = false;
+'''
+    if text.count(replace) != 1:
+        raise RuntimeError("runtime constructor v5.4 body missing")
+    text = text.replace(
+        replace,
+        replace
+        + "  decision_stabilizing_ = false;\n"
+          "  decision_stable_since_tick_ = 0;\n",
+        1)
+"""
+    constructor_new = r"""    # Constructor body is created by v5.4 continuity. The same two
+    # assignments also occur in ResetForKnownNewHand, so scope this edit to the
+    # constructor instead of asserting global uniqueness.
+    constructor_start = text.find("COFCRuntimeController::COFCRuntimeController()")
+    constructor_end = text.find(
+      "\nvoid COFCRuntimeController::ResetForKnownNewHand", constructor_start)
+    if constructor_start < 0 or constructor_end < 0:
+        raise RuntimeError("runtime constructor v5.4 semantic bounds missing")
+    constructor_body = text[constructor_start:constructor_end]
+    replace = '''  reacquire_stable_cycles_ = 0;
+  recovery_requires_change_ = false;
+'''
+    if constructor_body.count(replace) != 1:
+        raise RuntimeError(
+          f"runtime constructor v5.4 body expected one init pair, got {constructor_body.count(replace)}")
+    constructor_body = constructor_body.replace(
+        replace,
+        replace
+        + "  decision_stabilizing_ = false;\n"
+          "  decision_stable_since_tick_ = 0;\n",
+        1)
+    text = text[:constructor_start] + constructor_body + text[constructor_end:]
+"""
+    if text.count(constructor_old) == 1:
+        text = text.replace(constructor_old, constructor_new, 1)
+    elif text.count(constructor_new) != 1:
+        raise RuntimeError("v5.4.4A could not scope runtime constructor initialization")
+
     write_script(text, eol, bom)
 
 
@@ -346,7 +386,7 @@ def main():
     normalize_state_source()
     harden_v544_scraper_patch()
     harden_v544_reconstructor_patch()
-    harden_v544_policy_patch()
+    harden_v544_policy_and_runtime_patch()
     print("OpenOFC v5.4.4A source normalization/hardening: PASS")
 
 
