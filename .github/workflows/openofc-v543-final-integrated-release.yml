@@ -1,0 +1,405 @@
+name: OpenOFC v5.4.3 final integrated release gate
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-integrated-runtime:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact integrated head
+        uses: actions/checkout@v4
+
+      - name: Assert checkout provenance
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $expected = $env:GITHUB_SHA.ToLowerInvariant()
+          Write-Host "INTEGRATED_HEAD actual=$head expected=$expected"
+          if ($head -ne $expected) { throw 'checkout does not match GITHUB_SHA' }
+          Write-Host 'INTEGRATED_HEAD_PROVENANCE=PASS'
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply integrated v5.4 through v5.4.3H runtime
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4 continuity failed: $LASTEXITCODE" }
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2B failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C normalization failed: $LASTEXITCODE" }
+          python tools/run_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 generic Fantasy failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 normalization failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3G failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_confirm_guard_v543h.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3H failed: $LASTEXITCODE" }
+          python tools/inspect_openofc_fantasy_confirm_runtime_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "integrated H runtime inspection failed: $LASTEXITCODE" }
+          Write-Host 'INTEGRATED_RUNTIME_MATERIALIZATION=PASS'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Run generic Fantasy 14-17 state regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCGenericFantasySelftest.cpp /Fe:COFCGenericFantasySelftest.exe && COFCGenericFantasySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "generic Fantasy regression failed: $LASTEXITCODE" }
+          Write-Host 'GENERIC_FANTASY_14_17_INTEGRATED=PASS'
+
+      - name: Run runtime continuity and reconnect regressions
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $c1 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRuntimeContinuitySelftest.cpp /Fe:COFCRuntimeContinuitySelftest.exe && COFCRuntimeContinuitySelftest.exe'
+          cmd.exe /d /s /c $c1
+          if ($LASTEXITCODE -ne 0) { throw "runtime continuity regression failed: $LASTEXITCODE" }
+          $c2 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCPartialReconnectSelftest.cpp /Fe:COFCPartialReconnectSelftest.exe && COFCPartialReconnectSelftest.exe'
+          cmd.exe /d /s /c $c2
+          if ($LASTEXITCODE -ne 0) { throw "partial reconnect regression failed: $LASTEXITCODE" }
+          $c3 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
+          cmd.exe /d /s /c $c3
+          if ($LASTEXITCODE -ne 0) { throw "dealer continuity regression failed: $LASTEXITCODE" }
+          Write-Host 'GENERIC_RUNTIME_CONTINUITY_INTEGRATED=PASS'
+
+      - name: Run Fantasy Confirm semantic and actual-controller regressions
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $guard = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /I OpenHoldem OpenHoldem\COFCFantasyConfirmGuardSelftest.cpp /Fe:COFCFantasyConfirmGuardSelftest.exe && COFCFantasyConfirmGuardSelftest.exe'
+          cmd.exe /d /s /c $guard
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy Confirm semantic regression failed: $LASTEXITCODE" }
+          python tools/materialize_openofc_fantasy_confirm_controller_selftest_v543h.py
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy Confirm controller generation failed: $LASTEXITCODE" }
+          $generated = Get-Content -Raw 'OpenHoldem/COFCFantasyConfirmControllerGeneratedSelftest.cpp'
+          if ($generated.Contains('p_casino_interface') -or $generated.Contains('ReadRegion(')) { throw 'real UI dependency survived controller seam' }
+          $controller = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /I OpenHoldem OpenHoldem\COFCFantasyConfirmControllerGeneratedSelftest.cpp /Fe:COFCFantasyConfirmControllerGeneratedSelftest.exe && COFCFantasyConfirmControllerGeneratedSelftest.exe'
+          cmd.exe /d /s /c $controller
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy Confirm dynamic controller regression failed: $LASTEXITCODE" }
+          Write-Host 'FANTASY_CONFIRM_INTEGRATED=PASS'
+
+      - name: Run Fantasy Joker execution with production-source restoration
+        shell: pwsh
+        run: |
+          $executor = 'OpenHoldem/COFCFantasyBatchExecutor.cpp'
+          $backup = Join-Path $env:RUNNER_TEMP 'COFCFantasyBatchExecutor.production.cpp'
+          Copy-Item $executor $backup -Force
+          try {
+            python tools/apply_openofc_fantasy_executor_test_seam_v543.py
+            if ($LASTEXITCODE -ne 0) { throw "Fantasy executor seam failed: $LASTEXITCODE" }
+            $seamed = Get-Content -Raw $executor
+            if ($seamed -match 'p_casino_interface|p_tablemap') { throw 'real mouse/TableMap dependency survived executor test seam' }
+            $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+            $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+            $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /I OpenHoldem OpenHoldem\COFCFantasyBatchExecutor.cpp OpenHoldem\COFCFantasyJokerExecutionSelftest.cpp /Fe:COFCFantasyJokerExecutionSelftest.exe /link user32.lib && COFCFantasyJokerExecutionSelftest.exe'
+            cmd.exe /d /s /c $command
+            if ($LASTEXITCODE -ne 0) { throw "Fantasy Joker execution regression failed: $LASTEXITCODE" }
+          }
+          finally {
+            Copy-Item $backup $executor -Force
+          }
+          $restored = Get-Content -Raw $executor
+          if (-not $restored.Contains('#include "StdAfx.h"')) { throw 'production executor PCH include not restored' }
+          if ($restored.Contains('DeepOFCTestFantasy')) { throw 'executor test seam survived restoration' }
+          Write-Host 'FANTASY_JOKER_EXECUTION_INTEGRATED=PASS'
+          Write-Host 'FANTASY_EXECUTOR_PRODUCTION_SOURCE_RESTORED=PASS'
+
+      - name: Build dependency chain
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build integrated OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "integrated OpenHoldem Win32 build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing after successful build' }
+          Write-Host 'FINAL_RELEASE_WIN32=PASS'
+
+      - name: Assemble hash-pinned candidate package
+        shell: pwsh
+        run: |
+          $release = 'Release'
+          $out = 'artifact/OpenOFC_v543_FINAL_CANDIDATE'
+          $canonical = 'OpenOFC/TableMaps/KKPoker_OpenOFC_JokerUltimate_v3.tm'
+          if (-not (Test-Path $canonical)) { throw 'canonical OpenOFC TableMap missing' }
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "$release/OpenHoldem.exe" $out
+          Get-ChildItem $release -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path "$release/tessdata") { Copy-Item "$release/tessdata" "$out/tessdata" -Recurse }
+          New-Item -ItemType Directory -Force -Path "$out/scraper" | Out-Null
+          Copy-Item $canonical "$out/scraper/KKPoker_OpenOFC_JokerUltimate_v3.tm"
+          if (Test-Path 'OpenOFC/TableMaps/FONT_GAPS_OPENOFC_v3.txt') { Copy-Item 'OpenOFC/TableMaps/FONT_GAPS_OPENOFC_v3.txt' $out }
+          @(
+            "source_commit=$env:GITHUB_SHA",
+            'source_branch=openofc-v543-generic-fantasy',
+            'configuration=Release',
+            'platform=Win32',
+            'gate=OpenOFC v5.4.3 final integrated release',
+            'field_package_authorized=0'
+          ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
+          $tm = @(Get-ChildItem $out -Recurse -Filter '*.tm')
+          if ($tm.Count -ne 1) { throw "candidate package must contain exactly one TableMap; got $($tm.Count)" }
+          $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
+          $lines = foreach ($file in $files) {
+            $rel = $file.FullName.Substring((Resolve-Path $out).Path.Length + 1).Replace('\','/')
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $rel"
+          }
+          $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
+          foreach ($line in Get-Content "$out/SHA256SUMS.txt") {
+            if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "invalid manifest line: $line" }
+            $expected = $matches[1]
+            $path = Join-Path $out ($matches[2].Replace('/','\'))
+            if (-not (Test-Path $path)) { throw "manifest path missing: $path" }
+            $actual = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "manifest hash mismatch: $path" }
+          }
+          $exeHash = (Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant()
+          Write-Host "FINAL_OPENHOLDEM_SHA256=$exeHash"
+          Write-Host 'PACKAGE_MANIFEST_LOCAL_VERIFY=PASS'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+      - name: Upload integrated candidate package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v543_FINAL_CANDIDATE
+          path: artifact/OpenOFC_v543_FINAL_CANDIDATE
+          if-no-files-found: error
+
+  windows-integrated-real-pixels:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    steps:
+      - name: Checkout exact integrated head
+        uses: actions/checkout@v4
+
+      - name: Assert pixel job provenance
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($head -ne $env:GITHUB_SHA.ToLowerInvariant()) { throw 'pixel checkout does not match GITHUB_SHA' }
+          Write-Host 'PIXEL_JOB_HEAD_PROVENANCE=PASS'
+
+      - name: Verify and materialize frame000033, frame000036 and real-Joker pixels
+        shell: pwsh
+        run: |
+          $expected = @(
+            '6c51e7a1723360ad4df6f687ecec89df1ed0298e','2c4b71fa69357d674d6aae2d3c2d666b72c67666','15df22733dbc761d3409a8a74d89e13eaefedfec','1e18d021723c8defa95369e0949f554adc5f04a6','803b6609a864dee3e7e2ffe8e8054cde60be1543','48bf2ceed81244549b0e9de13cc109afff1b8d0c','c314420180ec7e51de43c3731febac185baf4127','bebd85264378452b5f345376352b29d007531c4a','fa9859b04b53c382500a65219bf636bb3254bc61')
+          $root = 'tests/fixtures/openofc_v543_replay_corpus'
+          $parts = Get-ChildItem "$root/b64v2/frame000033_*.txt" | Sort-Object Name
+          if ($parts.Count -ne 9) { throw "expected 9 frame000033 chunks, got $($parts.Count)" }
+          $pieces = @()
+          for ($i=0; $i -lt $parts.Count; $i++) {
+            $blob = (git hash-object -- $parts[$i].FullName).Trim().ToLowerInvariant()
+            if ($blob -ne $expected[$i]) { throw "frame000033 blob mismatch: $($parts[$i].Name)" }
+            $pieces += (Get-Content -Raw $parts[$i].FullName).Trim()
+          }
+          $b64 = $pieces -join ''
+          if ($b64.Length -ne 68200) { throw "frame000033 combined Base64 length mismatch: $($b64.Length)" }
+          $bytes = [Convert]::FromBase64String($b64)
+          if ($bytes.Length -ne 51149) { throw "frame000033 PNG byte count mismatch: $($bytes.Length)" }
+          $png = "$root/field_frame000033_loose.png"
+          [IO.File]::WriteAllBytes($png,$bytes)
+          $sha = (Get-FileHash -Algorithm SHA256 $png).Hash.ToLowerInvariant()
+          if ($sha -ne '36968956aa18c59d323e3a15be9fb74d86d33d873c993da158c8ee7e285fb1b9') { throw 'frame000033 SHA-256 mismatch' }
+          python tools/materialize_openofc_hbitmap_v2_frame36.py
+          if ($LASTEXITCODE -ne 0) { throw "frame000036 transport failed: $LASTEXITCODE" }
+          python tools/materialize_openofc_real_joker_frame5.py
+          if ($LASTEXITCODE -ne 0) { throw "real-Joker transport failed: $LASTEXITCODE" }
+          Write-Host 'ALL_REAL_PIXEL_TRANSPORTS=PASS'
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply integrated runtime and real-pixel recognizer chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4 continuity failed: $LASTEXITCODE" }
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2B failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.2C normalization failed: $LASTEXITCODE" }
+          python tools/run_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 failed: $LASTEXITCODE" }
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3 normalization failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3G failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_confirm_guard_v543h.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3H failed: $LASTEXITCODE" }
+          python tools/apply_openofc_hbitmap_selftest_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "HBITMAP standalone patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_real_pixel_recognizer_v543e.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3E recognizer patch failed: $LASTEXITCODE" }
+          python tools/apply_openofc_dynamic_component_lineage_v543f.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3F lineage patch failed: $LASTEXITCODE" }
+          python tools/instrument_openofc_real_pixel_diagnostics_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "real-pixel diagnostics failed: $LASTEXITCODE" }
+          Write-Host 'INTEGRATED_REAL_PIXEL_SOURCE_CHAIN=PASS'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Compile all production HBITMAP pixel gates
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $c1 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRealPixelReplaySelftest.cpp /Fe:COFCRealPixelReplaySelftest.exe /link gdiplus.lib gdi32.lib user32.lib'
+          cmd.exe /d /s /c $c1
+          if ($LASTEXITCODE -ne 0) { throw "frame000033 selftest compilation failed: $LASTEXITCODE" }
+          $c2 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCHBitmapV2Selftest.cpp /Fe:COFCHBitmapV2Selftest.exe /link gdiplus.lib gdi32.lib user32.lib'
+          cmd.exe /d /s /c $c2
+          if ($LASTEXITCODE -ne 0) { throw "frame000036 selftest compilation failed: $LASTEXITCODE" }
+          $c3 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /DDEEPOFC_FANTASY_PIXEL_STANDALONE /I OpenHoldem OpenHoldem\COFCFantasy15PixelRecognizer.cpp OpenHoldem\COFCRealJokerPixelSelftest.cpp /Fe:COFCRealJokerPixelSelftest.exe /link gdiplus.lib gdi32.lib user32.lib'
+          cmd.exe /d /s /c $c3
+          if ($LASTEXITCODE -ne 0) { throw "real-Joker selftest compilation failed: $LASTEXITCODE" }
+          Write-Host 'ALL_REAL_PIXEL_SELFTESTS_COMPILE=PASS'
+
+      - name: Run frame000033, frame000036 and real-Joker production recognizers
+        shell: pwsh
+        run: |
+          .\COFCRealPixelReplaySelftest.exe 'tests/fixtures/openofc_v543_replay_corpus/field_frame000033_loose.png'
+          if ($LASTEXITCODE -ne 0) { throw "frame000033 recognition/reconstruction failed: $LASTEXITCODE" }
+          Write-Host 'REAL_PIXEL_FRAME000033=PASS'
+          .\COFCHBitmapV2Selftest.exe 'fixture-materialized/frame000036_arrangement.png' 'fixture-materialized/frame000036_loose.png'
+          if ($LASTEXITCODE -ne 0) { throw "frame000036 recognition/reconstruction failed: $LASTEXITCODE" }
+          Write-Host 'HBITMAP_V2_FRAME000036=PASS'
+          .\COFCRealJokerPixelSelftest.exe 'fixture-materialized/frame000005_joker_arrangement.png'
+          if ($LASTEXITCODE -ne 0) { throw "real-Joker recognition failed: $LASTEXITCODE" }
+          Write-Host 'REAL_JOKER_PIXEL=PASS'
+          Write-Host 'INTEGRATED_REAL_PIXEL_GATE=PASS'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
+
+  final-integrated-release:
+    runs-on: windows-2022
+    needs:
+      - windows-integrated-runtime
+      - windows-integrated-real-pixels
+    steps:
+      - name: Download candidate package produced by integrated Release build
+        uses: actions/download-artifact@v4
+        with:
+          name: OpenOFC_v543_FINAL_CANDIDATE
+          path: verified-package
+
+      - name: Reverify artifact provenance and every SHA-256 after transport
+        shell: pwsh
+        run: |
+          $prov = @(Get-ChildItem 'verified-package' -Recurse -Filter 'SOURCE_PROVENANCE.txt')
+          $manifest = @(Get-ChildItem 'verified-package' -Recurse -Filter 'SHA256SUMS.txt')
+          $exe = @(Get-ChildItem 'verified-package' -Recurse -Filter 'OpenHoldem.exe')
+          $tm = @(Get-ChildItem 'verified-package' -Recurse -Filter '*.tm')
+          if ($prov.Count -ne 1) { throw "expected one provenance file, got $($prov.Count)" }
+          if ($manifest.Count -ne 1) { throw "expected one SHA manifest, got $($manifest.Count)" }
+          if ($exe.Count -ne 1) { throw "expected one OpenHoldem.exe, got $($exe.Count)" }
+          if ($tm.Count -ne 1) { throw "expected one canonical TableMap, got $($tm.Count)" }
+          $provenance = Get-Content -Raw $prov[0].FullName
+          if (-not $provenance.Contains("source_commit=$env:GITHUB_SHA")) { throw 'artifact provenance does not match integrated workflow commit' }
+          $root = $manifest[0].Directory.FullName
+          foreach ($line in Get-Content $manifest[0].FullName) {
+            if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "invalid transported manifest line: $line" }
+            $expected = $matches[1]
+            $path = Join-Path $root ($matches[2].Replace('/','\'))
+            if (-not (Test-Path $path)) { throw "transported manifest path missing: $path" }
+            $actual = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "transported artifact hash mismatch: $path" }
+          }
+          $exeHash = (Get-FileHash -Algorithm SHA256 $exe[0].FullName).Hash.ToLowerInvariant()
+          Write-Host "CERTIFIED_OPENHOLDEM_SHA256=$exeHash"
+          Write-Host 'PACKAGE_PROVENANCE_HASH_GATE=PASS'
+          Write-Host 'FINAL_INTEGRATED_RELEASE_GATE=PASS'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=1'
+          'field_package_authorized=1' | Add-Content -Encoding ascii $prov[0].FullName
+
+      - name: Upload only the post-gate certified field package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v543_FINAL_CERTIFIED
+          path: verified-package
+          if-no-files-found: error
+
+      - name: Freeze final v5.4.3 release decision
+        shell: pwsh
+        run: |
+          Write-Host 'REAL_PIXEL_FRAME000033=PASS'
+          Write-Host 'HBITMAP_V2_FRAME000036=PASS'
+          Write-Host 'REAL_JOKER_PIXEL=PASS'
+          Write-Host 'FANTASY_JOKER_EXECUTION_GATE=PASS'
+          Write-Host 'FANTASY_CONFIRM_GATE=PASS'
+          Write-Host 'FINAL_RELEASE_WIN32=PASS'
+          Write-Host 'PACKAGE_PROVENANCE_HASH_GATE=PASS'
+          Write-Host 'FINAL_INTEGRATED_RELEASE_GATE=PASS'
+          Write-Host 'FIELD_PACKAGE_AUTHORIZED=1'
