@@ -7,6 +7,7 @@
 #include <string>
 
 #include "COFCFantasyConfirmGuard.h"
+#include "COFCFantasyConfirmFence.h"
 
 namespace {
 
@@ -149,13 +150,67 @@ void TestPlanBindingAndAuthority() {
   std::cout << "FANTASY_CONFIRM_AUTHORITY_GATE=PASS" << std::endl;
 }
 
+void TestOneShotDispatchFence() {
+  COFCFantasyConfirmFence fence;
+  const std::string first = "F:15|R-1|13-exact";
+  const std::string changed = "F:15|R-1|13-exact-but-other-hero-fingerprint";
+
+  Require(fence.CanDispatch(first),
+    "fresh Fantasy hand incorrectly suppresses first Confirm dispatch");
+  Require(!fence.HasAnyDispatch(),
+    "fresh Fantasy fence already contains a dispatch");
+
+  // A pre-dispatch refusal does not call MarkDispatched in production. The same
+  // transaction therefore remains retryable after a stable reacquire.
+  Require(fence.CanDispatch(first),
+    "pre-dispatch refusal would incorrectly consume the one-shot fence");
+
+  fence.MarkDispatched(first);
+  Require(fence.HasAnyDispatch() && fence.HasDispatched(first),
+    "mouse-dispatch marker did not arm the fence");
+  Require(!fence.CanDispatch(first),
+    "same-transaction duplicate Confirm remained dispatchable");
+  Require(!fence.CanDispatch(changed),
+    "a changed fingerprint bypassed the one-Confirm-per-Fantasy-hand fence");
+
+  for (int i = 1; i < 20; ++i) {
+    Require(fence.ObserveUnchangedAfterDispatch(20)
+        == COFCFantasyConfirmFence::kAckWait,
+      "acknowledgement timeout fired before its bound");
+  }
+  Require(fence.ack_wait_cycles() == 19,
+    "acknowledgement wait counter drifted before timeout");
+  Require(fence.ObserveUnchangedAfterDispatch(20)
+      == COFCFantasyConfirmFence::kAckTimeoutReacquire,
+    "20th unchanged frame did not enter bounded reacquisition");
+  Require(!fence.CanDispatch(first),
+    "acknowledgement timeout incorrectly disarmed physical duplicate protection");
+
+  fence.ObserveChangedState();
+  Require(fence.ack_wait_cycles() == 0,
+    "changed state did not clear only the acknowledgement wait counter");
+  Require(!fence.CanDispatch(changed),
+    "changed state inside the same Fantasy hand incorrectly cleared one-shot fence");
+
+  fence.ResetForNewHand();
+  Require(fence.CanDispatch("F:new-hand"),
+    "independently recognized new hand did not reset Confirm fence");
+  Require(!fence.HasAnyDispatch(),
+    "new-hand reset retained prior physical dispatch marker");
+
+  std::cout << "FANTASY_CONFIRM_ONE_SHOT_DISPATCH_GATE=PASS" << std::endl;
+  std::cout << "FANTASY_CONFIRM_ACK_TIMEOUT_GATE=PASS" << std::endl;
+}
+
 }  // namespace
 
 int main() {
   TestAllFantasyCounts();
   TestExactBoardAndJokerBinding();
   TestPlanBindingAndAuthority();
+  TestOneShotDispatchFence();
   std::cout << "FANTASY_CONFIRM_SEMANTIC_GUARD=PASS" << std::endl;
+  std::cout << "FANTASY_CONFIRM_FENCE_STATE_MACHINE=PASS" << std::endl;
   std::cout << "FIELD_PACKAGE_AUTHORIZED=0" << std::endl;
   return 0;
 }
