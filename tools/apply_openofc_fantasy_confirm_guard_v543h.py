@@ -75,8 +75,6 @@ def patch_cpp():
         include_anchor + '#include "COFCFantasyConfirmGuard.h"\n',
         rel + " include")
 
-    # Reset the fence only on an independently recognized new hand. Recover()
-    # deliberately preserves it after a dispatched-but-unacknowledged Confirm.
     start = text.find("void COFCRuntimeController::ResetForKnownNewHand(")
     end = text.find("\n}\n", start)
     if start < 0 or end < 0:
@@ -89,10 +87,6 @@ def patch_cpp():
         "ResetForKnownNewHand confirm reset")
     text = text[:start] + block + text[end + 3:]
 
-    # Semantic authority and one-shot dispatch check happen before any UI lookup
-    # or mouse boundary. The explicit marker is a release-workspace sentinel:
-    # the package gate verifies that this exact H layer is present in the source
-    # from which the shipped executable is compiled.
     sig = "bool COFCRuntimeController::SendConfirm(const COFCState &state) {\n"
     if text.count(sig) != 1:
         raise RuntimeError("SendConfirm signature not unique")
@@ -133,8 +127,6 @@ def patch_cpp():
   }
   confirm_before_ = state;
 '''
-    # Raw literal is deliberate: C++ must receive backslash-n, never a literal
-    # newline inside the generated string constant.
     refusal_new = r'''  if (p_casino_interface == NULL || !p_casino_interface->ClickRectSafely(rect)) {
     Recover("safe Confirm click was refused before mouse dispatch");
     // ClickRectSafely returns false only before invoking the mouse DLL. A fresh
@@ -159,11 +151,6 @@ def patch_cpp():
     text = replace_once_text(
         text, refusal_old, refusal_new, "SendConfirm dispatch/refusal block")
 
-    # v4 owns Fantasy post-Confirm in Tick(), not HandlePostConfirm(). Patch that
-    # real phase branch. Result/new-hand recognition retains priority. The wait
-    # is bounded around the latest stable Hero semantic state, not forever around
-    # the original dispatch fingerprint: a one-frame transition resets the ack
-    # timer once, then a stable changed screen can itself time out/reacquire.
     wait_old = '''  if (phase_ == kConfirmSent) {
     if (confirm_before_.players[confirm_before_.hero_chair].fantasy
         || confirm_before_.round_index == 4) {
@@ -192,10 +179,6 @@ def patch_cpp():
           if (state.valid && observation.valid) {
             const string now = StateFingerprint(state);
             if (now != current_fingerprint_) {
-              // A changed Hero state is useful acknowledgement evidence, but it
-              // does not disarm the one-shot physical fence. Adopt it as the new
-              // stability baseline, reset the wait counter once, and require the
-              // changed state to remain stable before any timeout decision.
               current_fingerprint_ = now;
               fantasy_confirm_fence_.ObserveChangedState();
               count_wait = false;
@@ -272,6 +255,11 @@ def main():
     patch_cpp()
     source_contract()
     print("OpenOFC v5.4.3H Fantasy Confirm hardening applied successfully")
+    # v5.4.4 uses source-shape-sensitive assertions. Normalize only formatting
+    # here, after the frozen v5.4.3H semantics are materialized and before the
+    # field-recovery layer runs.
+    from apply_openofc_field_recovery_v544a import main as normalize_v544_state
+    normalize_v544_state()
 
 
 if __name__ == "__main__":
