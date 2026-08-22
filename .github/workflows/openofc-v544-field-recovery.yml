@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - 'openofc-v544-field-recovery'
+  pull_request:
+    branches:
+      - 'openofc-v543-field-resilience'
   workflow_dispatch:
 
 permissions:
@@ -21,9 +24,8 @@ jobs:
         shell: pwsh
         run: |
           $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          $expected = $env:GITHUB_SHA.ToLowerInvariant()
-          Write-Host "V544_HEAD actual=$head expected=$expected"
-          if ($head -ne $expected) { throw 'checkout does not match GITHUB_SHA' }
+          Write-Host "V544_HEAD actual=$head event=$env:GITHUB_EVENT_NAME sha=$env:GITHUB_SHA"
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $head -ne $env:GITHUB_SHA.ToLowerInvariant()) { throw 'push checkout does not match GITHUB_SHA' }
 
       - name: Apply frozen v5.3 chain
         shell: pwsh
