@@ -90,15 +90,21 @@ def materialize_and_validate_canonical_tablemap() -> None:
         raise RuntimeError(f"canonical TableMap structural validation failed: {result.returncode}")
 
     text = raw.decode("utf-8", errors="replace")
-    required_markers = [
-        "s$ofc_joker_rank_token X",
-        "s$openofc_partial_slot_tolerance 1",
-        "s$openofc_opponent_partial_progression 1",
-        "s$openofc_fantasy_dynamic_sources 1",
-        "r$ofc_p0_timer_active",
-        "r$ofc_p1_timer_active",
+    # TableMap symbols are whitespace-delimited, not single-space-delimited.
+    # Mirror the historical release checks without weakening the semantic
+    # contract: accept tabs/alignment spaces, but still require exact values.
+    required_patterns = {
+        "joker rank token X": r"(?m)^s\$ofc_joker_rank_token[ \t]+X[ \t]*\r?$",
+        "partial slot tolerance": r"(?m)^s\$openofc_partial_slot_tolerance[ \t]+1[ \t]*\r?$",
+        "partial opponent progression": r"(?m)^s\$openofc_opponent_partial_progression[ \t]+1[ \t]*\r?$",
+        "Fantasy dynamic sources": r"(?m)^s\$openofc_fantasy_dynamic_sources[ \t]+1[ \t]*\r?$",
+        "p0 timer region": r"(?m)^r\$ofc_p0_timer_active\b",
+        "p1 timer region": r"(?m)^r\$ofc_p1_timer_active\b",
+    }
+    missing = [
+        name for name, pattern in required_patterns.items()
+        if re.search(pattern, text) is None
     ]
-    missing = [marker for marker in required_markers if marker not in text]
     if missing:
         raise RuntimeError(f"canonical TableMap markers missing: {missing}")
     if re.search(r"r\$ofc_.*joker[12]", text):
