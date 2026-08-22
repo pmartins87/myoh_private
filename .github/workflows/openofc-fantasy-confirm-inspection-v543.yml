@@ -70,27 +70,36 @@ jobs:
           $runtime = Get-Content -Raw 'OpenHoldem/COFCRuntimeController.cpp'
           foreach ($needle in @(
             'COFCFantasyConfirmGuard::Validate',
-            'fantasy_confirm_attempt_fingerprint_',
+            'fantasy_confirm_fence_.CanDispatch',
+            'fantasy_confirm_fence_.MarkDispatched',
+            'ObserveUnchangedAfterDispatch',
             'physical_dispatch=1',
             'duplicate_input_suppressed=1',
             'ack=TIMEOUT',
             'physical retry forbidden')) {
             if (-not $runtime.Contains($needle)) { throw "v5.4.3H runtime marker missing: $needle" }
           }
+          $click = $runtime.IndexOf('p_casino_interface->ClickRectSafely(rect)')
+          $mark = $runtime.IndexOf('fantasy_confirm_fence_.MarkDispatched(confirm_fingerprint)')
+          if ($click -lt 0 -or $mark -le $click) {
+            throw 'Confirm fence is not armed strictly after successful ClickRectSafely dispatch'
+          }
           Write-Host 'FANTASY_CONFIRM_RUNTIME_SOURCE_CONTRACT=PASS'
+          Write-Host 'FANTASY_CONFIRM_FENCE_ORDERING=PASS'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Compile and run pure Fantasy Confirm guard regression
+      - name: Compile and run pure Fantasy Confirm guard/fence regression
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
           $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DNOMINMAX /I OpenHoldem OpenHoldem\COFCFantasyConfirmGuardSelftest.cpp /Fe:COFCFantasyConfirmGuardSelftest.exe && COFCFantasyConfirmGuardSelftest.exe'
           cmd.exe /d /s /c $command
-          if ($LASTEXITCODE -ne 0) { throw "Fantasy Confirm guard regression failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy Confirm guard/fence regression failed: $LASTEXITCODE" }
           Write-Host 'FANTASY_CONFIRM_SEMANTIC_GUARD=PASS'
+          Write-Host 'FANTASY_CONFIRM_FENCE_STATE_MACHINE=PASS'
 
       - name: Re-run Fantasy Joker executor regression under H source tree
         shell: pwsh
@@ -138,6 +147,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host 'FANTASY_CONFIRM_SEMANTIC_GUARD=PASS'
+          Write-Host 'FANTASY_CONFIRM_FENCE_STATE_MACHINE=PASS'
           Write-Host 'FANTASY_CONFIRM_RUNTIME_SOURCE_CONTRACT=PASS'
-          Write-Host 'FANTASY_CONFIRM_DYNAMIC_DISPATCH_GATE=NOT_YET_CERTIFIED'
+          Write-Host 'FANTASY_CONFIRM_DYNAMIC_CONTROLLER_GATE=NOT_YET_CERTIFIED'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
