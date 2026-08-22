@@ -130,7 +130,9 @@ def patch_cpp():
   }
   confirm_before_ = state;
 '''
-    refusal_new = '''  if (p_casino_interface == NULL || !p_casino_interface->ClickRectSafely(rect)) {
+    # Raw literal is deliberate: C++ must receive backslash-n, never a literal
+    # newline inside the generated string constant.
+    refusal_new = r'''  if (p_casino_interface == NULL || !p_casino_interface->ClickRectSafely(rect)) {
     Recover("safe Confirm click was refused before mouse dispatch");
     // ClickRectSafely returns false only before invoking the mouse DLL. A fresh
     // stable replan may therefore retry without creating a duplicate click.
