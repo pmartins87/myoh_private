@@ -75,6 +75,16 @@ def main():
         raise RuntimeError(
             f"v5.4.4AA could not replace brittle Tick new-hand patch; old_count={count}")
 
+    # Source-contract spelling must match the runtime log marker exactly.
+    # The implementation writes "[OpenOFC STABILIZE]"; the original assertion
+    # accidentally required uppercase "OPENOFC", creating a false-negative CI.
+    wrong_marker = '            "OPENOFC STABILIZE",\n'
+    right_marker = '            "OpenOFC STABILIZE",\n'
+    if text.count(wrong_marker) == 1:
+        text = text.replace(wrong_marker, right_marker, 1)
+    elif text.count(right_marker) != 1:
+        raise RuntimeError("v5.4.4AA stabilization contract marker shape is unknown")
+
     out = text if eol == "\n" else text.replace("\n", "\r\n")
     data = out.encode("utf-8")
     if bom:
