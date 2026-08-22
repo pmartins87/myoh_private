@@ -53,10 +53,12 @@ def normalize_state_source():
 
 
 def harden_v544_scraper_patch():
-    # v5.4.3 materialization changes harmless formatting around the terminal
-    # REJECTED block.  Do not make v5.4.4 depend on that formatting: teach the
-    # v5.4.4 upgrader to replace the block structurally, from its semantic log
-    # marker through the first following `return -3;`.
+    # The materialized ScrapeOFCSlot has three independent non-empty identity
+    # failure terminals (rank contract, suit recognition and final conversion).
+    # v5.4.4 must preserve physical occupancy for ALL three; tying the patch to
+    # one formatting-specific REJECTED block made the upgrader itself brittle.
+    # Teach the v5.4.4 upgrader to operate only inside ScrapeOFCSlot and convert
+    # every one of those three terminal -3 returns into UNKNOWN_OCCUPIED.
     raw = V544_PATH.read_bytes()
     bom = raw.startswith(b"\xef\xbb\xbf")
     text = raw.decode("utf-8-sig").replace("\r\n", "\n")
@@ -64,20 +66,38 @@ def harden_v544_scraper_patch():
 
     old = '    regex_once(rel, pattern, replacement, "non-empty UNKNOWN remains occupied")\n'
     new = '''    path, text, eol, bom = read_source(rel)
-    start_marker = '  DeepOFCLogSlot(base_name, "REJECTED", kOFCCardUnknown,'
-    end_marker = '  return -3;'
-    if text.count(start_marker) != 1:
+    function_start = 'int CScraper::ScrapeOFCSlot('
+    function_end = '\\nstatic bool DeepOFCRegisterKnownCard'
+    if text.count(function_start) != 1 or text.count(function_end) != 1:
         raise RuntimeError(
-          "non-empty UNKNOWN remains occupied: semantic REJECTED marker is not unique")
-    start = text.find(start_marker)
-    end = text.find(end_marker, start)
+          "non-empty UNKNOWN remains occupied: ScrapeOFCSlot function bounds are not unique")
+    start = text.find(function_start)
+    end = text.find(function_end, start)
     if end < 0:
         raise RuntimeError(
-          "non-empty UNKNOWN remains occupied: terminal return -3 not found after marker")
-    end += len(end_marker)
-    text = text[:start] + replacement + text[end:]
+          "non-empty UNKNOWN remains occupied: ScrapeOFCSlot terminal boundary missing")
+    body = text[start:end]
+    rejected_marker = 'DeepOFCLogSlot(base_name, "REJECTED", kOFCCardUnknown,'
+    rejected_count = body.count(rejected_marker)
+    terminal = '    return -3;'
+    terminal_count = body.count(terminal)
+    if rejected_count != 3 or terminal_count != 3:
+        raise RuntimeError(
+          f"non-empty UNKNOWN remains occupied: expected 3 identity failures, "
+          f"got rejected={rejected_count} return_minus3={terminal_count}")
+    body = body.replace(
+      rejected_marker,
+      'DeepOFCLogSlot(base_name, "UNKNOWN_OCCUPIED", kOFCCardUnknown,')
+    body = body.replace(
+      terminal,
+      '''    // OPENOFC_UNKNOWN_OCCUPIED_V544: the slot was already proven non-empty.
+    // Failed rank/suit identity must not erase its physical occupancy.
+    card->value = kOFCCardUnknown;
+    return 2;''')
+    text = text[:start] + body + text[end:]
     write_source(path, text, eol, bom)
-    print("patched OpenHoldem/COFCScraper.cpp: non-empty UNKNOWN remains occupied")
+    print(
+      "patched OpenHoldem/COFCScraper.cpp: 3 non-empty identity failures -> UNKNOWN_OCCUPIED")
 '''
     if text.count(old) == 1:
         text = text.replace(old, new, 1)
