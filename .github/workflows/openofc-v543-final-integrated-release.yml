@@ -190,7 +190,7 @@ jobs:
             'configuration=Release',
             'platform=Win32',
             'gate=OpenOFC v5.4.3 final integrated release',
-            'field_package_authorized=0'
+            'field_package_authorized=pending_final_gate'
           ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
           $tm = @(Get-ChildItem $out -Recurse -Filter '*.tm')
           if ($tm.Count -ne 1) { throw "candidate package must contain exactly one TableMap; got $($tm.Count)" }
@@ -377,12 +377,29 @@ jobs:
             $actual = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
             if ($actual -ne $expected) { throw "transported artifact hash mismatch: $path" }
           }
+          $provLines = @(Get-Content $prov[0].FullName | Where-Object { $_ -notmatch '^field_package_authorized=' })
+          @($provLines + 'field_package_authorized=1') | Set-Content -Encoding ascii $prov[0].FullName
+          $files = @(Get-ChildItem $root -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
+          $newLines = foreach ($file in $files) {
+            $rel = $file.FullName.Substring($root.Length + 1).Replace('\','/')
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $rel"
+          }
+          $newLines | Set-Content -Encoding ascii $manifest[0].FullName
+          foreach ($line in Get-Content $manifest[0].FullName) {
+            if ($line -notmatch '^([0-9a-f]{64})  (.+)$') { throw "invalid certified manifest line: $line" }
+            $expected = $matches[1]
+            $path = Join-Path $root ($matches[2].Replace('/','\'))
+            $actual = (Get-FileHash -Algorithm SHA256 $path).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "certified manifest hash mismatch: $path" }
+          }
+          $certProv = Get-Content -Raw $prov[0].FullName
+          if (-not $certProv.Contains('field_package_authorized=1')) { throw 'certified provenance authorization marker missing' }
           $exeHash = (Get-FileHash -Algorithm SHA256 $exe[0].FullName).Hash.ToLowerInvariant()
           Write-Host "CERTIFIED_OPENHOLDEM_SHA256=$exeHash"
           Write-Host 'PACKAGE_PROVENANCE_HASH_GATE=PASS'
           Write-Host 'FINAL_INTEGRATED_RELEASE_GATE=PASS'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=1'
-          'field_package_authorized=1' | Add-Content -Encoding ascii $prov[0].FullName
 
       - name: Upload only the post-gate certified field package
         uses: actions/upload-artifact@v4
