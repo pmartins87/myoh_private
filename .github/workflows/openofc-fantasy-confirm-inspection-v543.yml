@@ -1,0 +1,56 @@
+name: OpenOFC v5.4.3H Fantasy confirm inspection
+
+on:
+  push:
+    branches:
+      - 'openofc-v543-confirm-gate'
+  pull_request:
+    branches:
+      - 'openofc-v543-generic-fantasy'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-confirm-inspection:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply frozen v5.3 patch chain
+        shell: pwsh
+        run: |
+          python -c "import tools.apply_openofc_runtime_repair as r; r.patch_transform(); r.patch_opponent_discards(); r.patch_capture(); print('OpenOFC runtime source repair applied successfully')"
+          python tools/apply_openofc_log248_repair.py
+          python tools/run_openofc_gameflow_v2.py
+          python tools/apply_openofc_normal_flow_v3.py
+          python tools/apply_openofc_phase_flow_v4.py
+          python tools/apply_openofc_phase_flow_v41.py
+          python tools/apply_openofc_round_discard_exit_v42.py
+          python tools/apply_openofc_normal_completion_v43.py
+          python tools/apply_openofc_simultaneous_dealer_v44.py
+          python tools/run_openofc_fantasy_v5.py
+          python tools/apply_openofc_opponent_history_v52.py
+          python tools/run_openofc_smart_policy_v53.py
+          if ($LASTEXITCODE -ne 0) { throw "frozen v5.3 chain failed: $LASTEXITCODE" }
+
+      - name: Apply v5.4 through v5.4.3G chain
+        shell: pwsh
+        run: |
+          python tools/run_openofc_runtime_continuity_v54.py
+          python tools/apply_openofc_partial_reconnect_v542b.py
+          python tools/apply_openofc_dealer_recovery_v542c.py
+          python tools/normalize_openofc_dealer_recovery_v542c.py
+          python tools/run_openofc_generic_fantasy_v543.py
+          python tools/normalize_openofc_generic_fantasy_v543.py
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.3G materialization failed: $LASTEXITCODE" }
+
+      - name: Inspect materialized Fantasy Confirm runtime
+        shell: pwsh
+        run: |
+          python tools/inspect_openofc_fantasy_confirm_runtime_v543.py
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy Confirm runtime inspection failed: $LASTEXITCODE" }
