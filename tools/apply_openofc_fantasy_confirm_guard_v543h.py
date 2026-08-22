@@ -141,6 +141,10 @@ def patch_cpp():
     // The mouse DLL has now been invoked. From this point onward no second
     // physical Confirm is allowed in this Fantasy hand.
     fantasy_confirm_fence_.MarkDispatched(confirm_fingerprint);
+    // Keep the acknowledgement-stability baseline explicit. The regular Tick
+    // current_fingerprint_ update occurs after the kConfirmSent branch, so the
+    // dispatch boundary must seed it here.
+    current_fingerprint_ = confirm_fingerprint;
     write_log(true,
       "[OpenOFC FANTASY CONFIRM] physical_dispatch=1 fingerprint=%s fence=ARMED\n",
       confirm_fingerprint.c_str());
@@ -151,9 +155,10 @@ def patch_cpp():
         text, refusal_old, refusal_new, "SendConfirm dispatch/refusal block")
 
     # v4 owns Fantasy post-Confirm in Tick(), not HandlePostConfirm(). Patch that
-    # real phase branch. Result/new-hand recognition retains priority. While the
-    # client still shows the same/invalid post-dispatch state, wait is bounded;
-    # timeout enters v5.4 reacquisition with the physical fence preserved.
+    # real phase branch. Result/new-hand recognition retains priority. The wait
+    # is bounded around the latest stable Hero semantic state, not forever around
+    # the original dispatch fingerprint: a one-frame transition resets the ack
+    # timer once, then a stable changed screen can itself time out/reacquire.
     wait_old = '''  if (phase_ == kConfirmSent) {
     if (confirm_before_.players[confirm_before_.hero_chair].fantasy
         || confirm_before_.round_index == 4) {
@@ -181,11 +186,18 @@ def patch_cpp():
           bool count_wait = !state.valid || !observation.valid;
           if (state.valid && observation.valid) {
             const string now = StateFingerprint(state);
-            count_wait = now == fantasy_confirm_fence_.dispatched_fingerprint();
-            if (!count_wait) {
+            if (now != current_fingerprint_) {
+              // A changed Hero state is useful acknowledgement evidence, but it
+              // does not disarm the one-shot physical fence. Adopt it as the new
+              // stability baseline, reset the wait counter once, and require the
+              // changed state to remain stable before any timeout decision.
+              current_fingerprint_ = now;
               fantasy_confirm_fence_.ObserveChangedState();
+              count_wait = false;
               write_log(true,
-                "[OpenOFC FANTASY CONFIRM] ack=STATE_CHANGED physical_retry=0 fence=PRESERVED\\n");
+                "[OpenOFC FANTASY CONFIRM] ack=STATE_CHANGED baseline=UPDATED physical_retry=0 fence=PRESERVED\\n");
+            } else {
+              count_wait = true;
             }
           }
           if (count_wait) {
@@ -232,6 +244,8 @@ def source_contract():
         "fantasy_confirm_fence_.HasAnyDispatch",
         "ObserveUnchangedAfterDispatch",
         "confirm_was_fantasy",
+        "baseline=UPDATED",
+        "current_fingerprint_ = confirm_fingerprint",
         "physical_dispatch=1",
         "duplicate_input_suppressed=1",
         "ack=TIMEOUT",
