@@ -310,10 +310,43 @@ def harden_v544_reconstructor_patch():
     write_script(text, eol, bom)
 
 
+def harden_v544_policy_patch():
+    # v5.4.2B intentionally permits a Joker to be the only remaining discard in
+    # partial reconnect. Preserve that guard while v5.4.4 temporarily adds its
+    # pending/loose executor preference (v5.4.4C later removes the preference).
+    text, eol, bom = read_script()
+    old = r"""    needle = '''    if (unused >= 0 && incoming[unused].joker != 0) continue;
+'''
+    if text.count(needle) != 2:
+        raise RuntimeError(f"expected two normal discard loops after v4.3, got {text.count(needle)}")
+    guarded = '''    if (unused >= 0 && incoming[unused].joker != 0) continue;
+    if (unused >= 0 && have_loose_nonjoker_discard
+        && pending_value[incoming[unused].value]) continue;
+'''
+"""
+    new = r"""    needle = '''    if (unused >= 0 && incoming[unused].joker != 0
+        && !partial_recovery) continue;
+'''
+    if text.count(needle) != 2:
+        raise RuntimeError(f"expected two normal discard loops after v4.3/v5.4.2B, got {text.count(needle)}")
+    guarded = '''    if (unused >= 0 && incoming[unused].joker != 0
+        && !partial_recovery) continue;
+    if (unused >= 0 && have_loose_nonjoker_discard
+        && pending_value[incoming[unused].value]) continue;
+'''
+"""
+    if text.count(old) == 1:
+        text = text.replace(old, new, 1)
+    elif text.count(new) != 1:
+        raise RuntimeError("v5.4.4A could not normalize partial-reconnect discard guard")
+    write_script(text, eol, bom)
+
+
 def main():
     normalize_state_source()
     harden_v544_scraper_patch()
     harden_v544_reconstructor_patch()
+    harden_v544_policy_patch()
     print("OpenOFC v5.4.4A source normalization/hardening: PASS")
 
 
