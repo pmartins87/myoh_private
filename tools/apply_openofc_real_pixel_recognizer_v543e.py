@@ -46,7 +46,8 @@ def main():
     if (fallback.accepted && fallback.label == 'T') rank = fallback;
   }
 '''
-    new_rank = '''  // KKPoker renders Ten as the two-glyph string "10" in the fanned/reflow
+    new_rank = '''  // OPENOFC_REAL_PIXEL_RECOGNIZER_V543E
+  // KKPoker renders Ten as the two-glyph string "10" in the fanned/reflow
   // layout. Across the supplied real replay corpus, that rank is uniquely a
   // wide+dense rank component (19..24 x 18..24, area 200..280). Single-glyph
   // ranks stay narrower; merged rank+suit columns are taller. Recognize this
