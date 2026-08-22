@@ -94,15 +94,21 @@ def parse_symbols(text: str) -> dict[str, str]:
 
 
 def materialize(output: Path) -> None:
-    # v5.2 is the latest clean TableMap lineage: it already removed legacy
-    # Hold'em gameplay regions and retained only OFC-native regions plus the
-    # minimal generic OpenHoldem symbols needed to load the map.
+    # v5.2 is the latest clean TableMap lineage. The field repair must be a
+    # monotonic upgrade from it, never a reconstruction from the old v3 map.
     temp = output.with_suffix(output.suffix + ".v52tmp")
     materialize_v52(temp)
-    text = temp.read_text(encoding="utf-8").replace("\r\n", "\n")
+    baseline = temp.read_text(encoding="utf-8").replace("\r\n", "\n")
     temp.unlink(missing_ok=True)
 
-    text = replace_symbol(text, "openofc_contract", "5")
+    baseline_regions = set(region_names(baseline))
+    baseline_symbols = parse_symbols(baseline)
+    if not baseline_regions:
+        raise RuntimeError("v5.2 baseline has no regions")
+    if any(not name.startswith("ofc_") for name in baseline_regions):
+        raise RuntimeError("v5.2 baseline unexpectedly contains legacy/non-OFC regions")
+
+    text = replace_symbol(baseline, "openofc_contract", "5")
     text = replace_symbol(
         text, "ofc_tablemap_stage", "openofc_v5_4_3_contract5_generic_runtime"
     )
@@ -126,6 +132,55 @@ def materialize(output: Path) -> None:
 
     verify = output.read_text(encoding="utf-8")
     symbols = parse_symbols(verify)
+    names = set(region_names(verify))
+
+    # Strong anti-downgrade lineage proof: every region from the clean v5.2 map
+    # must survive byte-semantic materialization. The only new regions are the
+    # 13 generic arrangement aliases plus generic Confirm button/visibility.
+    missing_from_v52 = sorted(baseline_regions.difference(names))
+    if missing_from_v52:
+        raise RuntimeError(
+            "contract-5 TableMap lost v5.2 regions: " + ", ".join(missing_from_v52)
+        )
+    added_regions = sorted(names.difference(baseline_regions))
+    expected_added_regions = {
+        *(f"ofc_fantasy_arrange_top{i}" for i in range(3)),
+        *(f"ofc_fantasy_arrange_middle{i}" for i in range(5)),
+        *(f"ofc_fantasy_arrange_bottom{i}" for i in range(5)),
+        "ofc_fantasy_confirm_button",
+        "ofc_fantasy_confirm_visible",
+    }
+    if set(added_regions) != expected_added_regions:
+        raise RuntimeError(
+            "unexpected region delta versus v5.2 baseline: added="
+            + ", ".join(added_regions)
+        )
+    if len(names) != len(baseline_regions) + 15:
+        raise RuntimeError(
+            f"region-count lineage mismatch: v5.2={len(baseline_regions)} final={len(names)}"
+        )
+
+    # Every v5.2 symbol must survive except the two intentionally advanced
+    # values. The generic geometry authority is the only new symbol.
+    for key, old_value in baseline_symbols.items():
+        if key == "openofc_contract":
+            expected = "5"
+        elif key == "ofc_tablemap_stage":
+            expected = "openofc_v5_4_3_contract5_generic_runtime"
+        else:
+            expected = old_value
+        if symbols.get(key) != expected:
+            raise RuntimeError(
+                f"v5.2 symbol lineage changed unexpectedly: s${key} "
+                f"expected={expected!r} got={symbols.get(key)!r}"
+            )
+    new_symbol_keys = set(symbols).difference(baseline_symbols)
+    if new_symbol_keys != {"ofc_fantasy_geometry_measured"}:
+        raise RuntimeError(
+            "unexpected new TableMap symbols versus v5.2: "
+            + ", ".join(sorted(new_symbol_keys))
+        )
+
     expected_symbols = {
         "openofc_contract": "5",
         "openofc_tablemap_clean": "1",
@@ -143,7 +198,6 @@ def materialize(output: Path) -> None:
             "v5.4.3 contract-5 TableMap symbol mismatch: " + "; ".join(wrong_symbols)
         )
 
-    names = set(region_names(verify))
     required_regions = {
         "ofc_fantasy_arrange_top0",
         "ofc_fantasy_arrange_middle0",
@@ -164,9 +218,6 @@ def materialize(output: Path) -> None:
             "v5.4.3 contract-5 TableMap missing regions: " + ", ".join(missing_regions)
         )
 
-    # The field regression being fixed here was a release downgrade to v3,
-    # which reintroduced ordinary Hold'em gameplay regions. Contract 5 refuses
-    # any such region: every region in this TableMap must be explicitly OFC.
     non_ofc = sorted(name for name in names if not name.startswith("ofc_"))
     if non_ofc:
         raise RuntimeError(
@@ -191,8 +242,11 @@ def materialize(output: Path) -> None:
     if leaked:
         raise RuntimeError("legacy Hold'em TableMap leak: " + ", ".join(leaked))
 
+    print(
+        f"OPENOFC_TABLEMAP_V52_LINEAGE=PASS baseline_regions={len(baseline_regions)} "
+        f"added_generic_regions={len(added_regions)} final_regions={len(names)}"
+    )
     print(f"OPENOFC_TABLEMAP_V543_CONTRACT5=PASS path={output}")
-    print(f"OPENOFC_TABLEMAP_REGION_COUNT={len(names)}")
     print("LEGACY_HOLDEM_TABLEMAP_REGIONS=0")
 
 
