@@ -1,12 +1,14 @@
-name: OpenOFC v5.4.3 generic Fantasy gate
+name: OpenOFC v5.4.3G generic Fantasy gate
 
 on:
   push:
     branches:
       - 'openofc-v543-generic-fantasy'
+      - 'openofc-v543-joker-execution-gate'
   pull_request:
     branches:
       - 'openofc-v542c-dealer-recovery'
+      - 'openofc-v543-generic-fantasy'
   workflow_dispatch:
 
 permissions:
@@ -49,15 +51,17 @@ jobs:
           python tools/normalize_openofc_dealer_recovery_v542c.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.2C normalization failed: $LASTEXITCODE" }
 
-      - name: Apply v5.4.3 generic Fantasy patch
+      - name: Apply v5.4.3G generic Fantasy patch
         shell: pwsh
         run: |
           python tools/run_openofc_generic_fantasy_v543.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 generic Fantasy patch failed: $LASTEXITCODE" }
           python tools/normalize_openofc_generic_fantasy_v543.py
           if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3 normalization failed: $LASTEXITCODE" }
+          python tools/apply_openofc_fantasy_source_identity_v543g.py
+          if ($LASTEXITCODE -ne 0) { throw "OpenOFC v5.4.3G source-identity patch failed: $LASTEXITCODE" }
 
-      - name: Assert v5.4.3 source contract
+      - name: Assert v5.4.3G source contract
         shell: pwsh
         run: |
           $obs = Get-Content -Raw 'OpenHoldem/COFCVisualObservation.h'
@@ -95,8 +99,8 @@ jobs:
           if ($executor.Contains('kBlocked') -or $executorHeader.Contains('kBlocked')) {
             throw 'absorbing Fantasy executor phase survived v5.4.3'
           }
-          foreach ($needle in @('executor_fault','terminal=0','continue_scraping=1')) {
-            if (-not $executor.Contains($needle)) { throw "recoverable Fantasy executor marker missing: $needle" }
+          foreach ($needle in @('executor_fault','terminal=0','continue_scraping=1','OPENOFC_FANTASY_SOURCE_IDENTITY_V543G','source.card_value != observation.hero_loose_cards[index].value')) {
+            if (-not $executor.Contains($needle)) { throw "recoverable/source-identity Fantasy executor marker missing: $needle" }
           }
           if ($runtime.Contains('kBlocked') -or $runtimeHeader.Contains('kBlocked')) {
             throw 'absorbing runtime-controller failure state survived v5.4.3'
@@ -107,6 +111,7 @@ jobs:
           Write-Host 'PASS: Fantasy is one runtime state; 14..17 is explicit count data.'
           Write-Host 'PASS: current-screen bootstrap no longer requires stale process lineage.'
           Write-Host 'PASS: Fantasy executor faults are nonterminal and force fresh replan.'
+          Write-Host 'PASS: loose-card click geometry is bound to the same fresh physical identity, including JK1/JK2.'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
 
       - name: Setup MSBuild
@@ -189,12 +194,13 @@ jobs:
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
           if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
 
-      - name: Freeze v5.4.3 source/state gate result
+      - name: Freeze v5.4.3G source/state gate result
         shell: pwsh
         run: |
-          Write-Host 'OpenOFC v5.4.3 generic Fantasy source/state gate completed.'
+          Write-Host 'OpenOFC v5.4.3G generic Fantasy source/state gate completed.'
           Write-Host 'Native policy/reconstructor regression covers count=14,15,16,17.'
           Write-Host 'Fresh-process partial-Fantasy bootstrap is certified at canonical state level.'
-          Write-Host 'Real HBITMAP replay certification remains a separate required sub-gate.'
+          Write-Host 'JK1/JK2 loose-source geometry is bound to matching fresh physical identity metadata.'
+          Write-Host 'Real HBITMAP/Joker certification remains independently required and is not implied by this build.'
           Write-Host 'No runtime ZIP is uploaded by this workflow.'
           Write-Host 'FIELD_PACKAGE_AUTHORIZED=0'
