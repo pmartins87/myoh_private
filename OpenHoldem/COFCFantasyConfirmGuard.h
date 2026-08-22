@@ -41,9 +41,10 @@ class COFCFantasyConfirmGuard {
         || decision.player_count != state.player_count
         || decision.round_index != -1
         || !decision.players[decision.hero_chair].fantasy
+        || !decision.decision_finalizable
         || decision.fantasy_card_count != state.fantasy_card_count
         || decision.hero_incoming_count != state.hero_incoming_count) {
-      return Fail(error, "turn plan is not bound to this Fantasy deal shape");
+      return Fail(error, "turn plan is not bound to this finalizable Fantasy deal shape");
     }
 
     bool incoming_present[kOFCCardJoker2 + 1] = {false};
@@ -140,8 +141,9 @@ class COFCFantasyConfirmGuard {
     }
 
     if (!state.hero_can_confirm || !state.action_required
+        || !state.decision_finalizable
         || state.acting_chair != state.hero_chair) {
-      return Fail(error, "canonical Hero Confirm authority is absent");
+      return Fail(error, "canonical finalizable Hero Confirm authority is absent");
     }
     return true;
   }

@@ -46,6 +46,7 @@ COFCState MakeState(int count, bool arranged) {
   state.fantasy_card_count = count;
   state.hero_can_prepare = true;
   state.hero_can_confirm = true;
+  state.decision_finalizable = true;
   state.action_required = true;
   state.players[0].occupied = true;
   state.players[0].source_chair = 0;
@@ -138,9 +139,17 @@ void TestPlanBindingAndAuthority() {
   no_authority.hero_can_confirm = false;
   ExpectReject(no_authority, MakePlan(16), "authority is absent");
 
+  COFCState not_finalizable = MakeState(16, true);
+  not_finalizable.decision_finalizable = false;
+  ExpectReject(not_finalizable, MakePlan(16), "finalizable");
+
   COFCState wrong_actor = MakeState(16, true);
   wrong_actor.acting_chair = 0;
   ExpectReject(wrong_actor, MakePlan(16), "authority is absent");
+
+  COFCTurnPlan stale_finalization = MakePlan(16);
+  stale_finalization.decision_state.decision_finalizable = false;
+  ExpectReject(state, stale_finalization, "finalizable Fantasy deal shape");
 
   COFCTurnPlan wrong_unused = MakePlan(16);
   wrong_unused.unused_count = 2;
@@ -148,6 +157,7 @@ void TestPlanBindingAndAuthority() {
 
   std::cout << "FANTASY_CONFIRM_PLAN_BINDING_GATE=PASS" << std::endl;
   std::cout << "FANTASY_CONFIRM_AUTHORITY_GATE=PASS" << std::endl;
+  std::cout << "FANTASY_CONFIRM_FINALIZABLE_GATE=PASS" << std::endl;
 }
 
 void TestOneShotDispatchFence() {
