@@ -10,7 +10,7 @@ def main():
     text = raw.decode("utf-8-sig").replace("\r\n", "\n")
     eol = "\r\n" if b"\r\n" in raw else "\n"
 
-    old = r'''    # New hand edge in Tick.
+    old = r"""    # New hand edge in Tick.
     old = '''    ResetForKnownNewHand(state);
     g_openofc_flow_phase = kOpenOFCFlowRoundActive;
 '''
@@ -23,7 +23,7 @@ def main():
     g_openofc_flow_phase = kOpenOFCFlowRoundActive;
 ''',
         1)
-'''
+"""
 
     new = r'''    # New-hand resets exist in more than one Tick path after v4.4 and
     # v5.4.3H (ordinary recovery edge plus post-Confirm/Fantasy edge). They are
