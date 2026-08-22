@@ -29,7 +29,8 @@ def main():
   return NULL;
 '''
 
-    new = '''  // Recovered narrow rank+suit columns deliberately split one connected
+    new = '''  // OPENOFC_DYNAMIC_COMPONENT_LINEAGE_V543F
+  // Recovered narrow rank+suit columns deliberately split one connected
   // component into an upper rank anchor and lower suit bounds. Multiple
   // components can geometrically enclose that synthetic anchor (for example a
   // large dark/background-connected component spanning the whole loose-card
