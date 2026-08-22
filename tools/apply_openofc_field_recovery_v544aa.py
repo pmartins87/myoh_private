@@ -10,6 +10,24 @@ def main():
     text = raw.decode("utf-8-sig").replace("\r\n", "\n")
     eol = "\r\n" if b"\r\n" in raw else "\n"
 
+    # The v5.4.4 runtime patch originally staged the stabilization methods only
+    # in its in-memory `text`, then called regex_once(), which re-read the file
+    # from disk before those staged changes had been persisted. The subsequent
+    # re-read therefore discarded ArmDecisionStabilization(),
+    # DecisionStabilized(), and the TableMap timing symbol. Persist that staged
+    # source before the post-Confirm regex patch so both edits compose.
+    regex_call = '''    regex_once(rel, pattern, replacement, "post-Confirm round edge stabilization")
+    path, text, eol, bom = read_source(rel)
+'''
+    regex_fixed = '''    write_source(path, text, eol, bom)
+    regex_once(rel, pattern, replacement, "post-Confirm round edge stabilization")
+    path, text, eol, bom = read_source(rel)
+'''
+    if text.count(regex_call) == 1:
+        text = text.replace(regex_call, regex_fixed, 1)
+    elif text.count(regex_fixed) != 1:
+        raise RuntimeError("v5.4.4AA could not persist stabilization source before regex patch")
+
     old = r"""    # New hand edge in Tick.
     old = '''    ResetForKnownNewHand(state);
     g_openofc_flow_phase = kOpenOFCFlowRoundActive;
@@ -62,7 +80,7 @@ def main():
     if bom:
         data = b"\xef\xbb\xbf" + data
     V544_PATH.write_bytes(data)
-    print("OpenOFC v5.4.4AA Tick new-hand stabilization hardening: PASS")
+    print("OpenOFC v5.4.4AA runtime stabilization hardening: PASS")
 
 
 if __name__ == "__main__":
