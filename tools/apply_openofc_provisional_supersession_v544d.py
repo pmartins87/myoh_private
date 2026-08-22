@@ -51,10 +51,10 @@ def patch_orchestrator_supersession():
       std::string *error);
 
   // A dealer-side provisional solution may become strategically obsolete at
-  // the instant the opponent's final placements are revealed.  This method is
-  // called only on a fresh scrape.  It first certifies any drag that was already
+  // the instant the opponent's final placements are revealed. This method is
+  // called only on a fresh scrape. It first certifies any drag that was already
   // sent, then releases the old fixed plan without treating new information as
-  // an automation fault.  Runtime may then solve again from the fresh state.
+  // an automation fault. Runtime may then solve again from the fresh state.
   bool SupersedeProvisionalPlanAfterFreshScrape(
       const COFCState &fresh_state,
       std::string *error);
@@ -84,7 +84,7 @@ def patch_orchestrator_supersession():
     return false;
   }
 
-  // The opponent can finish while one Hero drag is in flight.  New strategic
+  // The opponent can finish while one Hero drag is in flight. New strategic
   // information must not erase the transaction boundary: certify that already
   // attempted movement from the fresh scrape before dropping the old plan.
   if (placement_executor_.awaiting_verification()) {
@@ -101,37 +101,17 @@ def patch_orchestrator_supersession():
   baseline_.Reset();
   plan_.Reset();
   placement_executor_.ResetForKnownNewHand();
-  write_log(true,
-    "[OpenOFC PROVISIONAL] old_plan_superseded=1 reason=OPPONENT_FINAL_INFO "
-    "round=%d pending_now=%d replan=REQUIRED\n",
-    fresh_state.round_index,
-    PendingInRow(fresh_state, kOFCRowTop)
-      + PendingInRow(fresh_state, kOFCRowMiddle)
-      + PendingInRow(fresh_state, kOFCRowBottom));
-  return true;
-}
-
-'''
-    # PendingInRow is a helper in COFCActionPlanner.cpp, not this translation
-    # unit. Avoid coupling by replacing the diagnostic with a local count before
-    # writing the final source.
-    method = method.replace(
-        '''  write_log(true,
-    "[OpenOFC PROVISIONAL] old_plan_superseded=1 reason=OPPONENT_FINAL_INFO "
-    "round=%d pending_now=%d replan=REQUIRED\\n",
-    fresh_state.round_index,
-    PendingInRow(fresh_state, kOFCRowTop)
-      + PendingInRow(fresh_state, kOFCRowMiddle)
-      + PendingInRow(fresh_state, kOFCRowBottom));
-''',
-        '''  int pending_now = 0;
+  int pending_now = 0;
   for (int i = 0; i < kOFCMaxIncomingCards; ++i)
     if (fresh_state.pending[i].active) ++pending_now;
   write_log(true,
     "[OpenOFC PROVISIONAL] old_plan_superseded=1 reason=OPPONENT_FINAL_INFO "
-    "round=%d pending_now=%d replan=REQUIRED\\n",
+    "round=%d pending_now=%d replan=REQUIRED\n",
     fresh_state.round_index, pending_now);
-''')
+  return true;
+}
+
+'''
     text = text.replace(anchor, method + anchor, 1)
     write_source(path, text, eol, bom)
     print(f"patched {rel}: implement provisional supersession")
@@ -139,10 +119,6 @@ def patch_orchestrator_supersession():
 
 def patch_runtime_replan_edge():
     rel = "OpenHoldem/COFCRuntimeController.cpp"
-    # This anchor is after the in-flight-drag wait/retry fence and before the
-    # orchestrator validates the old fixed strategic decision.  Therefore a
-    # final opponent reveal can supersede the provisional plan only after any
-    # already-sent physical mutation has become observable.
     old = '''  bool complete = false;
   bool ready = false;
   string error;
@@ -180,8 +156,8 @@ def patch_runtime_replan_edge():
   string error;
   const int duration = max(100,
 '''
-    # AdvanceArrangement and StartDecision both contain the complete/ready/error
-    # shape. Restrict replacement to the AdvanceArrangement function body.
+    # StartDecision contains a similar local-variable shape, so operate only on
+    # the AdvanceArrangement function body.
     path, text, eol, bom = read_source(rel)
     fn_start = text.find("bool COFCRuntimeController::AdvanceArrangement(")
     if fn_start < 0:
@@ -196,7 +172,7 @@ def patch_runtime_replan_edge():
     body = body.replace(old, new, 1)
     text = text[:fn_start] + body + text[fn_end:]
     write_source(path, text, eol, bom)
-    print(f"patched {rel}: replan immediately when final info supersedes provisional plan")
+    print(f"patched {rel}: replan when final info supersedes provisional plan")
 
 
 def assert_contract():
