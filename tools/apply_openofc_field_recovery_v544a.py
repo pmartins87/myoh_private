@@ -69,9 +69,6 @@ def normalize_state_source():
 
 
 def harden_v544_scraper_patch():
-    # The materialized ScrapeOFCSlot has three independent non-empty identity
-    # failure terminals. Teach v5.4.4 to operate on the semantic function body
-    # instead of relying on formatting inherited from an earlier patch layer.
     text, eol, bom = read_script()
     old = '    regex_once(rel, pattern, replacement, "non-empty UNKNOWN remains occupied")\n'
     new = r"""    path, text, eol, bom = read_source(rel)
@@ -118,9 +115,6 @@ def harden_v544_scraper_patch():
 def harden_v544_reconstructor_patch():
     text, eol, bom = read_script()
 
-    # COFCReconstructor.cpp already owns this helper in the base source. The
-    # first v5.4.4 draft accidentally emitted a second identical definition.
-    # Remove only the duplicate embedded in the v5.4.4 helper payload.
     helper_start = "COFCCard *MutableRowCards(COFCPlayerBoard *board, EOFCRow row, int *count) {\n"
     repair_start = "void RepairCommittedUnknownRows(\n"
     hs = text.find(helper_start)
@@ -132,8 +126,6 @@ def harden_v544_reconstructor_patch():
     elif text.count("OPENOFC_UNKNOWN_LINEAGE_V544") != 1:
         raise RuntimeError("v5.4.4A UNKNOWN helper payload missing")
 
-    # Preserve v5.4.2B partial-reconnect discard semantics inside the larger
-    # v5.4.4 UNKNOWN-derived-discard replacement.
     old_expected = "      const int expected_commit_count = previous->round_index == 0 ? 5 : 2;\n"
     new_expected = r"""      int expected_commit_count = previous->round_index == 0 ? 5 : 2;
       if (previous->partial_turn_recovery) {
@@ -147,10 +139,6 @@ def harden_v544_reconstructor_patch():
     elif text.count(new_expected) != 1:
         raise RuntimeError("v5.4.4A could not preserve partial reconnect discard count")
 
-    # Replace the remaining formatting-sensitive v5.4.4 normal-current block,
-    # canonical incoming copy and current-screen bootstrap with semantic-marker
-    # edits. This deliberately carries forward v5.4.2B's reduced incoming count
-    # for a partial reconnect instead of silently reverting it to 3.
     region_start_marker = "    # Replace normal current-incoming set cardinality with known + exactly one\n"
     region_end_marker = "\n\ndef patch_policy_unknown_and_pending_discard():\n"
     rs = text.find(region_start_marker)
@@ -158,7 +146,7 @@ def harden_v544_reconstructor_patch():
     if rs < 0 or re < 0:
         raise RuntimeError("v5.4.4A reconstructor hardening region markers missing")
 
-    hardened = r'''    # OPENOFC_UNKNOWN_PARTIAL_RECONNECT_V544A. Operate on semantic
+    hardened = r"""    # OPENOFC_UNKNOWN_PARTIAL_RECONNECT_V544A. Operate on semantic
     # boundaries after v5.4.2B/v5.4.2C/v5.4.3 materialization.
     path, text, eol, bom = read_source(rel)
     normal_start_marker = "  set<int> committed_cards = KnownBoardSet(hero_committed);\n"
@@ -241,8 +229,6 @@ def harden_v544_reconstructor_patch():
   }'''
     text = text[:normal_start] + normal_replacement + text[normal_end:]
 
-    # Replace only the normal-state incoming copy after the metadata boundary;
-    # Fantasy has a separate current_incoming variable earlier in this file.
     copy_search_from = normal_start + len(normal_replacement)
     copy_guard = "  if (static_cast<int>(current_incoming.size()) > kOFCMaxIncomingCards) {\n"
     copy_start = text.find(copy_guard, copy_search_from)
@@ -263,10 +249,6 @@ def harden_v544_reconstructor_patch():
     &out->hero_incoming_count);'''
     text = text[:copy_start] + copy_replacement + text[copy_end:]
 
-    # v5.4.2B permits a current-screen bootstrap with 1..3 loose cards. Preserve
-    # that shape while allowing one of those occupied loose positions to be
-    # temporarily unread. A pending UNKNOWN also counts toward visible board
-    # occupancy rather than making the bootstrap look one card short.
     known_guard = "  if (hero_visual.CountKnownCards() != expected_visible) {"
     if text.count(known_guard) != 1:
         raise RuntimeError(
@@ -322,7 +304,7 @@ def harden_v544_reconstructor_patch():
 
     write_source(path, text, eol, bom)
     print("patched OpenHoldem/COFCReconstructor.cpp: UNKNOWN occupancy + partial reconnect preserved")
-'''
+"""
 
     text = text[:rs] + hardened + text[re:]
     write_script(text, eol, bom)
