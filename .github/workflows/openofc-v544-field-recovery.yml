@@ -81,6 +81,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "v5.4.4B cleanup failed: $LASTEXITCODE" }
           python tools/apply_openofc_full_replan_v544c.py
           if ($LASTEXITCODE -ne 0) { throw "v5.4.4C full replan failed: $LASTEXITCODE" }
+          python tools/apply_openofc_provisional_supersession_v544d.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.4D provisional supersession failed: $LASTEXITCODE" }
           Write-Host 'V544_FIELD_RECOVERY_FULL_REPLAN_MATERIALIZATION=PASS'
 
       - name: Setup MSBuild
