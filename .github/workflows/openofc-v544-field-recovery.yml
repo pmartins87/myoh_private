@@ -79,20 +79,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "v5.4.4 field recovery failed: $LASTEXITCODE" }
           python tools/apply_openofc_field_recovery_v544b.py
           if ($LASTEXITCODE -ne 0) { throw "v5.4.4B cleanup failed: $LASTEXITCODE" }
-          Write-Host 'V544_FIELD_RECOVERY_MATERIALIZATION=PASS'
+          python tools/apply_openofc_full_replan_v544c.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.4C full replan failed: $LASTEXITCODE" }
+          Write-Host 'V544_FIELD_RECOVERY_FULL_REPLAN_MATERIALIZATION=PASS'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Run v5.4.4 UNKNOWN regression
+      - name: Run v5.4.4 UNKNOWN/full-replan regression
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
           $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCUnknownToleranceSelftest.cpp /Fe:COFCUnknownToleranceSelftest.exe && COFCUnknownToleranceSelftest.exe'
           cmd.exe /d /s /c $command
-          if ($LASTEXITCODE -ne 0) { throw "UNKNOWN regression failed: $LASTEXITCODE" }
-          Write-Host 'UNKNOWN_OCCUPIED_V544=PASS'
+          if ($LASTEXITCODE -ne 0) { throw "UNKNOWN/full-replan regression failed: $LASTEXITCODE" }
+          Write-Host 'UNKNOWN_OCCUPIED_FULL_REPLAN_V544=PASS'
 
       - name: Run generic Fantasy 14-17 regression
         shell: pwsh
@@ -165,7 +167,7 @@ jobs:
             'source_branch=openofc-v544-field-recovery',
             'configuration=Release',
             'platform=Win32',
-            'patch=OpenOFC_v5.4.4_field_recovery',
+            'patch=OpenOFC_v5.4.4_field_recovery_full_replan',
             'tablemap=USER_V5_4_4_TO_BE_INJECTED_POST_BUILD'
           ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
           $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
