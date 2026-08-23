@@ -8,7 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Iterable
 
-from engine import Action, Board, Card, apply_action, full_deck, legal_actions
+from engine import Action, Board, Card, apply_action, full_deck, legal_actions, resolve_board
 from teacher_search_nondealer import solve_r4_nondealer_uniform_belief
 
 ROW_NAMES = ("top", "middle", "bottom")
@@ -85,6 +85,27 @@ def _draw(deck: list[Card], cursor: int, n: int) -> tuple[tuple[Card, ...], int]
     return tuple(deck[cursor:end]), end
 
 
+def _require_m1b_materialized() -> None:
+    if "row-local semantics" not in (resolve_board.__doc__ or ""):
+        raise RuntimeError(
+            "M1b Joker semantics are not materialized. Run "
+            "`python tools/openofc_solver/apply_m1b_joker_semantics.py` first."
+        )
+
+
+def _has_nonfoul_hero_r4_action(
+    hero_before: Board,
+    incoming: tuple[Card, ...],
+) -> bool:
+    # This cheap gate avoids running the 2,600-packet expectimax for states in
+    # which Hero is already mathematically forced to foul regardless of R4
+    # action. It uses the same certified M1b resolver as the teacher itself.
+    for action in legal_actions(hero_before, incoming, 4):
+        if resolve_board(apply_action(hero_before, incoming, action)) is not None:
+            return True
+    return False
+
+
 def generate_nondealer_r4_state(
     base_seed: int,
     deal_id: int,
@@ -99,9 +120,10 @@ def generate_nondealer_r4_state(
 
     The primary teacher corpus filters states in which every Hero R4 action is
     already foul. Such states are useful for failure-recovery diagnostics but
-    provide no healthy strategic target and dominated the first tiny smoke by
-    chance. `--include-all-foul` keeps them when a diagnostic corpus is desired.
+    provide no healthy strategic target. `--include-all-foul` keeps them when a
+    diagnostic corpus is desired.
     """
+    _require_m1b_materialized()
     seed = _deal_seed(base_seed, deal_id)
     rng = random.Random(seed)
     deck = list(full_deck(2))
@@ -144,6 +166,9 @@ def generate_nondealer_r4_state(
     incoming = tuple(sorted(hero_r4))
     known_discards = tuple(sorted(hero_discards))
 
+    if require_nonfoul_option and not _has_nonfoul_hero_r4_action(hero_before, incoming):
+        return None
+
     result = solve_r4_nondealer_uniform_belief(
         hero_before,
         opponent_before,
@@ -152,7 +177,7 @@ def generate_nondealer_r4_state(
     )
     all_foul = all(value.foul for value in result.all_actions)
     if require_nonfoul_option and all_foul:
-        return None
+        raise AssertionError("non-foul prefilter and exact teacher disagree")
 
     action_values = [
         {
