@@ -5,7 +5,6 @@ import json
 import os
 import random
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict
 from pathlib import Path
 from typing import Iterable
 
@@ -15,6 +14,16 @@ from teacher_search import solve_r4_exact
 ROW_NAMES = ("top", "middle", "bottom")
 CORPUS_VERSION = "openofc-r4-dealer-exact-v1"
 SAMPLER = "UNIFORM_LEGAL_REACHABILITY_ONLY_NOT_TEACHER"
+
+
+def _require_m1b_materialized() -> None:
+    doc = resolve_board.__doc__ or ""
+    if "row-local semantics" not in doc:
+        raise RuntimeError(
+            "M1b Joker semantics are not materialized. Run "
+            "`python tools/openofc_solver/apply_m1b_joker_semantics.py` first; "
+            "refusing to generate teacher data with the superseded Joker evaluator."
+        )
 
 
 def canonical_board(board: Board) -> Board:
@@ -94,6 +103,7 @@ def generate_dealer_r4_state(base_seed: int, deal_id: int) -> dict:
     Therefore the terminal action values are exact with no future-opponent
     information leak.
     """
+    _require_m1b_materialized()
     seed = _deal_seed(base_seed, deal_id)
     rng = random.Random(seed)
     deck = list(full_deck(2))
@@ -185,8 +195,10 @@ def _worker(args: tuple[int, int]) -> dict:
 
 def generate_corpus(base_seed: int, start_deal: int, attempts: int,
                     workers: int, require_nonfoul_option: bool) -> list[dict]:
+    _require_m1b_materialized()
     ids = range(start_deal, start_deal + attempts)
     args = ((base_seed, i) for i in ids)
+    executor = None
     if workers <= 1:
         rows = map(_worker, args)
     else:
@@ -199,7 +211,7 @@ def generate_corpus(base_seed: int, start_deal: int, attempts: int,
                 continue
             out.append(row)
     finally:
-        if workers > 1:
+        if executor is not None:
             executor.shutdown(wait=True)
     return out
 
