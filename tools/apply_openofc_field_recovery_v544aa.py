@@ -28,6 +28,22 @@ def main():
     elif text.count(regex_fixed) != 1:
         raise RuntimeError("v5.4.4AA could not persist stabilization source before regex patch")
 
+    # Keep every continuation line of the generated C++ header annotation a
+    # real comment. The previous generator emitted two bare English lines in
+    # class scope, which MSVC correctly parsed as invalid declarations.
+    bad_comment = '''        + "  // OPENOFC_ROUND_STABILIZATION_V544: no drag is emitted until the\\n"
+          "  Hero semantic fingerprint has remained unchanged for the configured\\n"
+          "  post-deal animation interval.\\n"
+'''
+    good_comment = '''        + "  // OPENOFC_ROUND_STABILIZATION_V544: no drag is emitted until the\\n"
+          "  // Hero semantic fingerprint has remained unchanged for the configured\\n"
+          "  // post-deal animation interval.\\n"
+'''
+    if text.count(bad_comment) == 1:
+        text = text.replace(bad_comment, good_comment, 1)
+    elif text.count(good_comment) != 1:
+        raise RuntimeError("v5.4.4AA stabilization header-comment shape is unknown")
+
     old = r"""    # New hand edge in Tick.
     old = '''    ResetForKnownNewHand(state);
     g_openofc_flow_phase = kOpenOFCFlowRoundActive;
@@ -93,8 +109,8 @@ def main():
 
     # v5.4.4E is itself a source-generating patch. Harden that generator in the
     # same ephemeral materialization workspace before it is executed later in
-    # the chain. This keeps the actual C++ payload deterministic and avoids a
-    # latent plan_.Reset()/logging bug in the generated identity-refinement path.
+    # the chain. This keeps the actual C++ payload deterministic and avoids
+    # source-shape/runtime-API regressions in the identity-refinement path.
     from apply_openofc_identity_refinement_v544ea import main as harden_v544e
     harden_v544e()
 
