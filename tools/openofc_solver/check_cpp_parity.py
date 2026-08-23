@@ -4,17 +4,13 @@ import argparse
 import json
 import random
 import subprocess
-from dataclasses import asdict
 from pathlib import Path
 
 from engine import (
     Board,
-    Card,
     RANKS,
-    SUITS,
     _eval_regular,
     card_from_runtime_value,
-    fantasy_award_from_top,
     resolve_board,
     royalty,
 )
@@ -50,7 +46,7 @@ def parse_rank(text: str) -> tuple[int, int, int, int, int, int, int]:
     fields = tuple(int(x) for x in text.split(","))
     if len(fields) != 7:
         raise ValueError(f"invalid C++ rank payload: {text!r}")
-    return fields  # category, length, tie0..tie4
+    return fields
 
 
 def run_probe(exe: Path, commands: list[str]) -> list[str]:
@@ -103,8 +99,8 @@ def check_nonjoker(exe: Path, seed: int) -> dict:
     commands: list[str] = []
     expectations: list[tuple[str, object]] = []
 
-    # Full 0..53 mapping. This is the regression that catches the historical
-    # rank-major standalone shim: production OpenHoldem is suit*13 + rank.
+    # Full 0..53 mapping. This catches the historical standalone shim bug:
+    # production OpenHoldem is suit*13 + rank, not rank*4 + suit.
     for value in range(54):
         commands.append(f"MAP {value}")
         if value < 52:
@@ -128,13 +124,15 @@ def check_nonjoker(exe: Path, seed: int) -> dict:
     boards: list[list[int]] = []
     for _ in range(1536):
         boards.append(rng.sample(range(52), 13))
-    # Explicit valid/foul/royalty-sensitive boards.
     for text in (
         "Qc Qd 2h 2c 3c 4c 5c 6c 9h Th Jh Qh Kh",
         "Ac Ad 2h Kc Kd 9h 7s 3c 2c 3d 4h 5s 6c",
-        "6c 6d Ah 2c 3d 4h 5s 6c 7c 8c 9c Tc Jc",
+        "6d 6h Ah 2c 3d 4h 5s 6c 7c 8c 9c Tc Jc",
     ):
-        boards.append([runtime_value(x) for x in text.split()])
+        values = [runtime_value(x) for x in text.split()]
+        if len(values) != len(set(values)):
+            raise AssertionError(f"parity regression vector has duplicate physical card: {text}")
+        boards.append(values)
 
     for values in boards:
         commands.append("BOARD " + " ".join(map(str, values)))
@@ -154,8 +152,6 @@ def check_nonjoker(exe: Path, seed: int) -> dict:
             if got != expected:
                 failures.append({"index": index, "kind": kind, "got": got, "expected": expected})
             value = int(parts[1])
-            # Also assert the pure solver's human label is consistent with the
-            # production suit order h,d,c,s.
             if value < 52:
                 expected_label = RANKS[value % 13] + CPP_SUIT_TO_CHAR[value // 13]
                 actual_label = str(card_from_runtime_value(value))
@@ -230,12 +226,10 @@ def check_joker_diagnostic(exe: Path, seed: int, report: Path) -> dict:
     rng = random.Random(seed ^ 0x5A17)
     samples: list[list[int]] = []
 
-    # One live-rule-shaped example: Joker completes the bottom straight.
     samples.append([
         runtime_value(x)
         for x in "Kc Jh Jc Qs Qd Ts 9h 6s 8h 7d JK1 5s 4c".split()
     ])
-    # Top Joker creating trips/Fantasy.
     samples.append([
         runtime_value(x)
         for x in "Ac Ad JK1 2c 3c 4c 5c 6c 9h Th Jh Qh Kh".split()
