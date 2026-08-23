@@ -1,18 +1,11 @@
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def diagnose_cpp_delimiters(path: Path):
-    """Fail early with useful source locations for malformed generated C++.
-
-    This intentionally runs after the full v5.4.5 patch chain, so the diagnostic
-    sees the exact materialized runtime source that MSVC will compile.  It is a
-    small lexical scanner rather than a raw character count: braces inside
-    comments, normal string literals and character literals are ignored.
-    """
-    text = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
-    lines = text.splitlines()
+def scan_cpp_delimiters(text: str):
+    """Return unmatched lexical delimiters, ignoring comments/quoted literals."""
     stack = []
     state = "code"
     i = 0
@@ -39,104 +32,118 @@ def diagnose_cpp_delimiters(path: Path):
             if ch == "\n":
                 state = "code"
             continue
-
         if state == "block_comment":
             if ch == "*" and nxt == "/":
-                advance(ch)
-                advance(nxt)
-                i += 2
-                state = "code"
+                advance(ch); advance(nxt); i += 2; state = "code"
             else:
-                advance(ch)
-                i += 1
+                advance(ch); i += 1
             continue
-
         if state == "string":
             if ch == "\\" and nxt:
-                advance(ch)
-                advance(nxt)
-                i += 2
+                advance(ch); advance(nxt); i += 2
             else:
-                advance(ch)
-                i += 1
-                if ch == '"':
-                    state = "code"
+                advance(ch); i += 1
+                if ch == '"': state = "code"
             continue
-
         if state == "char":
             if ch == "\\" and nxt:
-                advance(ch)
-                advance(nxt)
-                i += 2
+                advance(ch); advance(nxt); i += 2
             else:
-                advance(ch)
-                i += 1
-                if ch == "'":
-                    state = "code"
+                advance(ch); i += 1
+                if ch == "'": state = "code"
             continue
 
-        # code
         if ch == "/" and nxt == "/":
-            advance(ch)
-            advance(nxt)
-            i += 2
-            state = "line_comment"
-            continue
+            advance(ch); advance(nxt); i += 2; state = "line_comment"; continue
         if ch == "/" and nxt == "*":
-            advance(ch)
-            advance(nxt)
-            i += 2
-            state = "block_comment"
-            continue
+            advance(ch); advance(nxt); i += 2; state = "block_comment"; continue
         if ch == '"':
-            advance(ch)
-            i += 1
-            state = "string"
-            continue
+            advance(ch); i += 1; state = "string"; continue
         if ch == "'":
-            advance(ch)
-            i += 1
-            state = "char"
-            continue
+            advance(ch); i += 1; state = "char"; continue
 
         if ch in opening:
             stack.append((ch, line, col))
         elif ch in pairs:
             if not stack or stack[-1][0] != pairs[ch]:
-                print(
-                    "OPENOFC_V545_DELIMITER_DIAG unexpected_close=%s line=%d col=%d top=%s"
-                    % (ch, line, col, stack[-1] if stack else "EMPTY")
-                )
-                raise RuntimeError("v5.4.5 materialized runtime delimiter mismatch")
+                return stack, state, (ch, line, col)
             stack.pop()
-
         advance(ch)
         i += 1
 
+    return stack, state, None
+
+
+def diagnose_and_repair_terminal_tick_brace(path: Path):
+    """Repair only the uniquely proven terminal Tick function brace loss.
+
+    Several frozen patch generations rewrite Tick structurally.  The materialized
+    v5.4.5 source showed exactly one unmatched delimiter: the opening brace of
+    COFCRuntimeController::Tick, which is the final method in this translation
+    unit.  Appending its closing brace is safe only when all of those facts are
+    mechanically re-proven; every other imbalance remains fail-closed.
+    """
+    raw = path.read_bytes()
+    bom = raw.startswith(b"\xef\xbb\xbf")
+    eol = "\r\n" if b"\r\n" in raw else "\n"
+    text = raw.decode("utf-8-sig").replace("\r\n", "\n")
+    lines = text.splitlines()
+    stack, state, unexpected = scan_cpp_delimiters(text)
+
+    if unexpected is not None:
+        raise RuntimeError(
+            "v5.4.5 materialized runtime unexpected closing delimiter %r" %
+            (unexpected,)
+        )
     if state in ("block_comment", "string", "char"):
         raise RuntimeError(
             "v5.4.5 materialized runtime ended inside lexical state %s" % state
         )
+    if not stack:
+        print("OpenOFC v5.4.5A materialized runtime delimiter balance: PASS")
+        return
 
-    if stack:
-        print("OPENOFC_V545_DELIMITER_DIAG unmatched_count=%d" % len(stack))
-        for token, ln, column in stack[-12:]:
-            snippet = lines[ln - 1] if 0 < ln <= len(lines) else ""
-            print(
-                "OPENOFC_V545_DELIMITER_DIAG unmatched_open=%s line=%d col=%d source=%s"
-                % (token, ln, column, snippet)
-            )
-        # The compiler currently reports near the beginning of the affected
-        # function.  Emit a bounded context window for the newest unmatched
-        # delimiter so the next repair can be source-first rather than guessed.
-        _token, focus, _column = stack[-1]
-        lo = max(1, focus - 25)
-        hi = min(len(lines), focus + 140)
-        print("OPENOFC_V545_DELIMITER_CONTEXT begin=%d end=%d" % (lo, hi))
-        for ln in range(lo, hi + 1):
-            print("%05d: %s" % (ln, lines[ln - 1]))
+    print("OPENOFC_V545_DELIMITER_DIAG unmatched_count=%d" % len(stack))
+    for token, ln, column in stack[-12:]:
+        snippet = lines[ln - 1] if 0 < ln <= len(lines) else ""
+        print(
+            "OPENOFC_V545_DELIMITER_DIAG unmatched_open=%s line=%d col=%d source=%s"
+            % (token, ln, column, snippet)
+        )
+
+    safe_tick_loss = False
+    if len(stack) == 1 and stack[0][0] == "{":
+        _token, focus, _column = stack[0]
+        signature_window = "\n".join(lines[max(0, focus - 4):focus])
+        suffix = "\n".join(lines[focus:])
+        later_method = re.search(
+            r"\n(?:bool|void|int|string|CString)\s+COFCRuntimeController::",
+            "\n" + suffix,
+        )
+        safe_tick_loss = (
+            "void COFCRuntimeController::Tick(" in signature_window
+            and later_method is None
+        )
+
+    if not safe_tick_loss:
         raise RuntimeError("v5.4.5 materialized runtime has unmatched delimiters")
 
+    if not text.endswith("\n"):
+        text += "\n"
+    text += "}\n"
+    out = text if eol == "\n" else text.replace("\n", "\r\n")
+    data = out.encode("utf-8")
+    if bom:
+        data = b"\xef\xbb\xbf" + data
+    path.write_bytes(data)
+    print(
+        "OpenOFC v5.4.5A repaired terminal COFCRuntimeController::Tick closing brace"
+    )
+
+    verify = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+    stack, state, unexpected = scan_cpp_delimiters(verify)
+    if stack or unexpected is not None or state in ("block_comment", "string", "char"):
+        raise RuntimeError("v5.4.5 terminal Tick brace repair did not restore balance")
     print("OpenOFC v5.4.5A materialized runtime delimiter balance: PASS")
 
 
@@ -177,7 +184,9 @@ def main():
         raise RuntimeError("v5.4.5 empty-sentinel normalization did not stick")
     print("OpenOFC v5.4.5A deghost empty sentinel normalization: PASS")
 
-    diagnose_cpp_delimiters(ROOT / "OpenHoldem" / "COFCRuntimeController.cpp")
+    diagnose_and_repair_terminal_tick_brace(
+        ROOT / "OpenHoldem" / "COFCRuntimeController.cpp"
+    )
 
 
 if __name__ == "__main__":
