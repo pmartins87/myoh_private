@@ -68,7 +68,7 @@ def main() -> None:
       return false;
     }
     Sleep(20);
-    POINT settled;
+    POINT settled = {0, 0};
     if (!GetCursorPos(&settled)
         || settled.x < point.x - 2 || settled.x > point.x + 2
         || settled.y < point.y - 2 || settled.y > point.y + 2) {
