@@ -74,6 +74,96 @@ def scan_cpp_delimiters(text: str):
     return stack, state, None
 
 
+def dump_tick_semantic_nesting(text: str):
+    """Print active C++ brace owners at key Tick liveness landmarks.
+
+    This is diagnostic only.  It proves whether the normal decision path is
+    accidentally trapped below an earlier conditional even when delimiters can
+    be made lexically balanced by adding one terminal brace.
+    """
+    lines = text.splitlines()
+    tick_line = None
+    for index, source in enumerate(lines, 1):
+        if source.startswith("void COFCRuntimeController::Tick("):
+            tick_line = index
+            break
+    if tick_line is None:
+        print("OPENOFC_V545_NESTING_DIAG Tick signature missing")
+        return
+
+    keys = (
+        "if (IsKnownNewHand(state))",
+        "if (phase_ == kReacquire)",
+        "if (phase_ == kWaitingFinalInfo)",
+        "if (phase_ == kIdle)",
+        "DecisionStabilized(state)",
+        "COFCBaselinePolicy::Choose",
+        "if (phase_ == kArranging)",
+    )
+
+    # Track only braces, but honor C++ comments and literals so log strings do
+    # not contaminate semantic depth.  Each stack item stores owner line/source.
+    stack = []
+    state = "code"
+    i = 0
+    line = 1
+    line_start = 0
+    while i < len(text):
+        if line >= tick_line:
+            for key in keys:
+                if text.startswith(key, i) or (
+                    i == line_start and key in text[i:text.find("\n", i) if "\n" in text[i:] else len(text)]
+                ):
+                    source = lines[line - 1].strip() if line - 1 < len(lines) else ""
+                    owners = ";".join(
+                        "%d:%s" % (ln, src.strip()[:90]) for ln, src in stack[-8:]
+                    )
+                    print(
+                        "OPENOFC_V545_NESTING_DIAG line=%d brace_depth=%d key=%s owners=[%s]"
+                        % (line, len(stack), key, owners)
+                    )
+                    break
+
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < len(text) else ""
+        if state == "line_comment":
+            if ch == "\n": state = "code"
+        elif state == "block_comment":
+            if ch == "*" and nxt == "/":
+                i += 1
+                state = "code"
+        elif state == "string":
+            if ch == "\\" and nxt:
+                i += 1
+            elif ch == '"':
+                state = "code"
+        elif state == "char":
+            if ch == "\\" and nxt:
+                i += 1
+            elif ch == "'":
+                state = "code"
+        else:
+            if ch == "/" and nxt == "/":
+                i += 1
+                state = "line_comment"
+            elif ch == "/" and nxt == "*":
+                i += 1
+                state = "block_comment"
+            elif ch == '"':
+                state = "string"
+            elif ch == "'":
+                state = "char"
+            elif ch == "{":
+                src = lines[line - 1] if line - 1 < len(lines) else ""
+                stack.append((line, src))
+            elif ch == "}" and stack:
+                stack.pop()
+        if ch == "\n":
+            line += 1
+            line_start = i + 1
+        i += 1
+
+
 def diagnose_and_repair_terminal_tick_brace(path: Path):
     """Repair only the uniquely proven terminal Tick function brace loss.
 
@@ -110,6 +200,7 @@ def diagnose_and_repair_terminal_tick_brace(path: Path):
             "OPENOFC_V545_DELIMITER_DIAG unmatched_open=%s line=%d col=%d source=%s"
             % (token, ln, column, snippet)
         )
+    dump_tick_semantic_nesting(text)
 
     safe_tick_loss = False
     if len(stack) == 1 and stack[0][0] == "{":
