@@ -93,7 +93,14 @@ def validate_existing(spec: ShardSpec, base_seed: int) -> dict | None:
         or int(meta.get("records", -1)) != records
     ):
         return None
-    return meta
+    # Normalize provenance fields even when resuming a marker produced by an
+    # older compatible runner. The aggregate manifest must always identify the
+    # exact shard and marker filenames it certifies.
+    return {
+        **meta,
+        "file": spec.path.name,
+        "marker": marker.name,
+    }
 
 
 def run_one(root: Path, spec: ShardSpec, base_seed: int, workers_per_shard: int,
@@ -157,6 +164,7 @@ def run_one(root: Path, spec: ShardSpec, base_seed: int, workers_per_shard: int,
     os.replace(temp, spec.path)
     records = count_records(spec.path)
     first, last = first_last_key(spec.path)
+    marker = spec.path.with_suffix(spec.path.suffix + ".done.json")
     meta = {
         "schema": MANIFEST_VERSION,
         "status": "PASS",
@@ -168,6 +176,8 @@ def run_one(root: Path, spec: ShardSpec, base_seed: int, workers_per_shard: int,
         "first_key": first,
         "last_key": last,
         "sha256": sha256_file(spec.path),
+        "file": spec.path.name,
+        "marker": marker.name,
         "seconds": round(time.time() - started, 3),
         "workers_per_shard": workers_per_shard,
         "include_all_foul": include_all_foul,
@@ -175,7 +185,7 @@ def run_one(root: Path, spec: ShardSpec, base_seed: int, workers_per_shard: int,
         "audit_stdout": audit.stdout.strip(),
         "resumed": False,
     }
-    spec.path.with_suffix(spec.path.suffix + ".done.json").write_text(
+    marker.write_text(
         json.dumps(meta, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
