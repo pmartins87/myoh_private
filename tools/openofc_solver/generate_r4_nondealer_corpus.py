@@ -85,13 +85,22 @@ def _draw(deck: list[Card], cursor: int, n: int) -> tuple[tuple[Card, ...], int]
     return tuple(deck[cursor:end]), end
 
 
-def generate_nondealer_r4_state(base_seed: int, deal_id: int) -> dict:
+def generate_nondealer_r4_state(
+    base_seed: int,
+    deal_id: int,
+    require_nonfoul_option: bool = True,
+) -> dict | None:
     """Generate one reachable non-dealer R4 information set and exact Q vector.
 
     The hidden opponent R4 packet is deliberately never drawn into or persisted
     in the training record. The teacher integrates over all 2,600 packets that
     are compatible with Hero's information. Earlier rounds use uniform legal
     actions only to create reachable states; those actions are not demonstrations.
+
+    The primary teacher corpus filters states in which every Hero R4 action is
+    already foul. Such states are useful for failure-recovery diagnostics but
+    provide no healthy strategic target and dominated the first tiny smoke by
+    chance. `--include-all-foul` keeps them when a diagnostic corpus is desired.
     """
     seed = _deal_seed(base_seed, deal_id)
     rng = random.Random(seed)
@@ -141,6 +150,9 @@ def generate_nondealer_r4_state(base_seed: int, deal_id: int) -> dict:
         incoming,
         known_discards,
     )
+    all_foul = all(value.foul for value in result.all_actions)
+    if require_nonfoul_option and all_foul:
+        return None
 
     action_values = [
         {
@@ -186,7 +198,7 @@ def generate_nondealer_r4_state(base_seed: int, deal_id: int) -> dict:
         "point_optimal_actions": optimal,
         "action_values": action_values,
         "legal_action_count": len(result.all_actions),
-        "all_hero_actions_foul": all(value.foul for value in result.all_actions),
+        "all_hero_actions_foul": all_foul,
         "opponent_hidden_packet_persisted": False,
         "training_note": (
             "Exact current-hand expectimax under the explicit uniform-unseen "
@@ -198,7 +210,7 @@ def generate_nondealer_r4_state(base_seed: int, deal_id: int) -> dict:
     }
 
 
-def _worker(args: tuple[int, int]) -> dict:
+def _worker(args: tuple[int, int, bool]) -> dict | None:
     return generate_nondealer_r4_state(*args)
 
 
@@ -207,9 +219,10 @@ def generate_corpus(
     start_deal: int,
     attempts: int,
     workers: int,
+    require_nonfoul_option: bool = True,
 ) -> list[dict]:
     ids = range(start_deal, start_deal + attempts)
-    args = ((base_seed, i) for i in ids)
+    args = ((base_seed, i, require_nonfoul_option) for i in ids)
     executor = None
     if workers <= 1:
         rows = map(_worker, args)
@@ -218,7 +231,9 @@ def generate_corpus(
         rows = executor.map(_worker, args, chunksize=1)
     out: list[dict] = []
     try:
-        out.extend(rows)
+        for row in rows:
+            if row is not None:
+                out.append(row)
     finally:
         if executor is not None:
             executor.shutdown(wait=True)
@@ -234,11 +249,19 @@ def main() -> None:
     parser.add_argument("--start-deal", type=int, default=0)
     parser.add_argument("--attempts", type=int, default=1)
     parser.add_argument("--workers", type=int, default=max(1, min(4, (os.cpu_count() or 2) - 1)))
+    parser.add_argument("--include-all-foul", action="store_true")
     args = parser.parse_args()
     if args.attempts <= 0 or args.workers <= 0:
         raise SystemExit("attempts/workers must be positive")
 
-    rows = generate_corpus(args.seed, args.start_deal, args.attempts, args.workers)
+    require_nonfoul = not args.include_all_foul
+    rows = generate_corpus(
+        args.seed,
+        args.start_deal,
+        args.attempts,
+        args.workers,
+        require_nonfoul_option=require_nonfoul,
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w", encoding="utf-8", newline="\n") as fh:
         for row in rows:
@@ -251,8 +274,10 @@ def main() -> None:
         "start_deal": args.start_deal,
         "attempts": args.attempts,
         "emitted": len(rows),
+        "filtered_all_foul": args.attempts - len(rows) if require_nonfoul else 0,
         "workers": args.workers,
-        "all_hero_actions_foul": sum(1 for row in rows if row["all_hero_actions_foul"]),
+        "require_nonfoul_option": require_nonfoul,
+        "all_hero_actions_foul_emitted": sum(1 for row in rows if row["all_hero_actions_foul"]),
         "point_tie_states": sum(1 for row in rows if len(row["point_optimal_actions"]) > 1),
     }
     print("OPENOFC_R4_NONDEALER_CORPUS=" + json.dumps(stats, sort_keys=True))
