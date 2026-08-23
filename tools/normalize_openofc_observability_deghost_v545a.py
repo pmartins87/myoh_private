@@ -155,9 +155,9 @@ def assert_tick_semantics(text: str, repaired: bool):
     """Prove that normal decision landmarks are outside kReacquire.
 
     The v5.4.5 materialization bug dropped the inner closing brace of the
-    kReacquire branch.  A previous normalizer appended a brace at EOF, which made
+    kReacquire branch. A previous normalizer appended a brace at EOF, which made
     the translation unit compile but left every subsequent normal decision path
-    nested under `if (phase_ == kReacquire)`.  These structural assertions keep
+    nested under `if (phase_ == kReacquire)`. These structural assertions keep
     that class of liveness bug from ever becoming a green binary again.
     """
     keys = (
@@ -167,7 +167,7 @@ def assert_tick_semantics(text: str, repaired: bool):
         "if (phase_ == kIdle) {",
         "DecisionStabilized(state)",
         "COFCBaselinePolicy::Choose",
-        "if (phase_ == kArranging) {",
+        "if (phase_ == kArranging)",
     )
     hits = cpp_brace_owners_at_lines(text, keys)
     tick = require_unique_hit(hits, keys[0])
@@ -210,8 +210,6 @@ def assert_tick_semantics(text: str, repaired: bool):
         )
         return
 
-    # Pre-repair proof is intentionally narrow.  The waiting branch must be
-    # directly trapped by kReacquire, which is the exact field failure shape.
     owners = waiting[1]
     if not owner_has(owners, "void COFCRuntimeController::Tick("):
         raise RuntimeError("v5.4.5 pre-repair waiting branch is not inside Tick")
@@ -248,8 +246,6 @@ def repair_reacquire_closing_brace(path: Path):
             "v5.4.5 materialized runtime ended inside lexical state %s" % state
         )
 
-    # If materialization is already structurally fixed upstream, accept it only
-    # after the semantic liveness postconditions pass.  Never add a spare brace.
     if not stack:
         assert_tick_semantics(text, repaired=True)
         print("OpenOFC v5.4.5A runtime already structurally balanced: PASS")
@@ -263,10 +259,6 @@ def repair_reacquire_closing_brace(path: Path):
             % (token, ln, column, snippet)
         )
 
-    # The observed broken materialization has one unmatched delimiter: Tick's
-    # outer opening brace.  That happens because Tick's existing final `}` is
-    # consumed by the unterminated inner kReacquire branch.  Prove that exact
-    # shape before touching source.
     if len(stack) != 1 or stack[0][0] != "{":
         raise RuntimeError("v5.4.5 materialized runtime has unexpected delimiter shape")
     _token, focus, _column = stack[0]
@@ -289,8 +281,6 @@ def repair_reacquire_closing_brace(path: Path):
             "v5.4.5 cannot uniquely locate kWaitingFinalInfo insertion boundary"
         )
 
-    # This is the missing *inner* brace.  Do not append at EOF: the final brace
-    # already present in materialized source is Tick's own correct closing brace.
     text = text.replace(
         waiting_token,
         "  }\n\n" + waiting_token,
