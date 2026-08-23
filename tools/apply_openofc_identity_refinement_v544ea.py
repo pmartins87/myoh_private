@@ -67,6 +67,17 @@ def main():
     elif text.count(tolerant_end) != 1:
         raise RuntimeError("v5.4.4EA could not harden AdvanceArrangement terminal boundary")
 
+    # v5.4 continuity deliberately removed the absorbing Block() controller API.
+    # Identity-refinement failures must enter the non-absorbing Recover() path so
+    # a transient verification problem can be reacquired rather than poisoning
+    # every later hand.
+    old_recovery = '      Block("identity-refinement plan supersession failed: " + refinement_error);\n'
+    new_recovery = '      Recover("identity-refinement plan supersession failed: " + refinement_error);\n'
+    if text.count(old_recovery) == 1:
+        text = text.replace(old_recovery, new_recovery, 1)
+    elif text.count(new_recovery) != 1:
+        raise RuntimeError("v5.4.4EA could not migrate identity-refinement Block to Recover")
+
     out = text if eol == "\n" else text.replace("\n", "\r\n")
     data = out.encode("utf-8")
     if bom:
