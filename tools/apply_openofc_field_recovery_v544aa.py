@@ -90,7 +90,15 @@ def main():
     if bom:
         data = b"\xef\xbb\xbf" + data
     V544_PATH.write_bytes(data)
-    print("OpenOFC v5.4.4AA runtime stabilization hardening: PASS")
+
+    # v5.4.4E is itself a source-generating patch. Harden that generator in the
+    # same ephemeral materialization workspace before it is executed later in
+    # the chain. This keeps the actual C++ payload deterministic and avoids a
+    # latent plan_.Reset()/logging bug in the generated identity-refinement path.
+    from apply_openofc_identity_refinement_v544ea import main as harden_v544e
+    harden_v544e()
+
+    print("OpenOFC v5.4.4AA runtime/identity-refinement hardening: PASS")
 
 
 if __name__ == "__main__":
