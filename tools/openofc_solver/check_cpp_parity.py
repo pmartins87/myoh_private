@@ -99,8 +99,6 @@ def check_nonjoker(exe: Path, seed: int) -> dict:
     commands: list[str] = []
     expectations: list[tuple[str, object]] = []
 
-    # Full 0..53 mapping. This catches the historical standalone shim bug:
-    # production OpenHoldem is suit*13 + rank, not rank*4 + suit.
     for value in range(54):
         commands.append(f"MAP {value}")
         if value < 52:
@@ -143,9 +141,20 @@ def check_nonjoker(exe: Path, seed: int) -> dict:
     failures: list[dict] = []
     checked = {"map": 0, "row": 0, "board": 0}
 
-    for index, (line, expected) in enumerate(zip(outputs, expectations)):
+    for index, (line, expectation) in enumerate(zip(outputs, expectations)):
+        expected_kind, expected = expectation
         parts = line.split("|")
         kind = parts[0]
+        if kind != expected_kind:
+            failures.append({
+                "index": index,
+                "kind": "PROTOCOL",
+                "got": kind,
+                "expected": expected_kind,
+                "line": line,
+            })
+            continue
+
         if kind == "MAP":
             checked["map"] += 1
             got = (int(parts[2]), int(parts[3]), int(parts[4]))
