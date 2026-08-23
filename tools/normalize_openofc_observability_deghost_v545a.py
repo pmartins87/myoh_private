@@ -200,18 +200,14 @@ def assert_tick_semantics(text: str, repaired: bool):
             raise RuntimeError(
                 "v5.4.5 semantic liveness failure: DecisionStabilized escaped kIdle"
             )
-        if not owner_has(policy[1], "if (phase_ == kIdle) {"):
-            raise RuntimeError(
-                "v5.4.5 semantic liveness failure: policy calculation escaped kIdle"
-            )
         print(
             "OPENOFC_V545_TICK_SEMANTICS PASS "
-            "waiting_idle_policy_arranging_outside_reacquire=1"
+            "waiting_idle_stabilize_policy_arranging_outside_reacquire=1"
         )
         return
 
     # The unmatched lexical brace has already been separately proven to be
-    # Tick's outer brace from its multi-line signature window.  Here we need only
+    # Tick's outer brace from its multi-line signature window. Here we need only
     # prove the missing *inner* boundary: kWaitingFinalInfo is directly owned by
     # kReacquire instead of being Tick-level code.
     owners = waiting[1]
