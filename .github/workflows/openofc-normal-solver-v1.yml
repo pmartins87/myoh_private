@@ -1,0 +1,25 @@
+name: OpenOFC normal solver v1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - openofc-normal-solver-v1
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-normal-solver-v1.yml'
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-normal-solver-v1.yml'
+
+jobs:
+  exact-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run exact rules and R4 oracle tests
+        run: python tools/openofc_solver/test_engine.py
