@@ -103,8 +103,14 @@ int main() {
   if (!Require(!COFCReconstructor::Reconstruct(
         drift, &stale, &rejected, &error),
         "same-round identity drift must reject stale lineage")) return 1;
-  if (!Require(error.find("identities changed within the same round")
-        != std::string::npos,
+  // v5.4.4E narrows the wording because UNKNOWN->known is now a permitted
+  // monotonic refinement, while known->different-known remains a hard drift.
+  // Keep this older continuity regression valid on both sides of that upgrade.
+  const bool drift_reason_observable =
+    error.find("identities changed within the same round") != std::string::npos
+    || error.find("same-round incoming physical set changed outside monotonic identity refinement")
+        != std::string::npos;
+  if (!Require(drift_reason_observable,
         "field identity-drift reason remains observable")) return 1;
   error.clear();
   if (!Require(COFCReconstructor::ReconstructCurrentScreen(
