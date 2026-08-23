@@ -17,13 +17,31 @@ The pure engine models the rule screens captured from KKPoker:
 
 Fantasy continuation value is **not** represented by arbitrary heuristic points in the solver objective. The engine reports the Fantasy award separately so a later self-play value function can learn the actual continuation EV.
 
-The only rule item intentionally isolated behind a parity gate is the exact tie-breaking semantics for resolving one/two wild Jokers across a complete board. The current implementation exhaustively enumerates distinct unused regular-card substitutions and selects the highest-royalty valid resolution, then bottom/middle/top strength. Long training runs must not be certified until this matches KKPoker/C++ regression evidence.
+## Production parity gate
+
+M1 is deliberately split into non-Joker and Joker parity.
+
+**M1a — PASS.** The Python exact core is now tested against the production C++ evaluator after materializing the standalone C++ test shim with the real OpenHoldem `StdDeck` representation (`value = suit * 13 + rank`, suit order hearts/diamonds/clubs/spades). The old standalone test shim had accidentally used a rank-major `/4` representation, so its previous self-tests were internally consistent but not bit-for-bit representative of production card values.
+
+Authoritative CI run `32625573072` passed both jobs. The C++/Python parity gate checked, with deterministic seed `20260823`:
+
+- all 54 canonical runtime values (52 regular cards + 2 Jokers) for card mapping;
+- 2,060 complete non-Joker rows for rank and royalty parity;
+- 1,539 complete non-Joker 3/5/5 boards for foul, rank, royalty and Fantasy-award parity;
+- the existing native C++ baseline-policy standalone self-test after correcting its test-only card mapping.
+
+That is 3,653 non-Joker parity comparisons with zero mismatches.
+
+**M1b — OPEN.** The diagnostic Joker corpus compared 146 complete boards and found 2 mismatches, both on two-Joker boards. The mismatches isolate one semantic question rather than a generic evaluator disagreement: the production C++ evaluator resolves each row independently, while the first Python implementation treated Joker substitutions as globally unavailable if the represented physical card appeared in another row. KKPoker's rule says the two Jokers can represent any other playing card to form the strongest hand as long as the board is not fouled, but this wording does not explicitly define cross-row substitution identity. Do not start long training runs until M1b is resolved against the rule contract and targeted KKPoker evidence.
+
+The Joker diagnostic is intentionally non-fatal to M1a and is uploaded by CI as `OpenOFC_Joker_Parity_Diagnostic`.
 
 ## Milestones
 
 - **M0 — DONE:** pure cards, hand ranking, royalties, foul/scoop scoring, legal action generator, runtime-card mapping, exact terminal R4 oracle.
 - **M0-LIVE — DONE:** the latest field log yielded a real fully observed R4 state. The exact oracle labels the unique optimum as `Th -> top`, `6s -> middle`, discard `7s`, worth +26 current-hand points.
-- **M1:** parity tests against the production C++ evaluator and additional KKPoker Joker examples.
+- **M1a — DONE:** production OpenHoldem card representation corrected in the standalone parity harness; 3,653 non-Joker C++/Python comparisons PASS.
+- **M1b — OPEN:** settle row-local Joker substitution semantics and certify targeted one/two-Joker parity against KKPoker evidence.
 - **M2:** build a large exact R4 corpus from reachable self-play states and live snapshots.
 - **M3:** solve R3 by chance sampling / backward induction using exact R4 leaves.
 - **M4:** extend backward through R2, R1 and the 232 legal opening placements with information-set self-play.
