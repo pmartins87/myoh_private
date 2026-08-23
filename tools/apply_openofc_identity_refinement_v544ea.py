@@ -44,6 +44,29 @@ def main():
     elif "# Preserve old_unknown for logging before Reset()." in text:
         raise RuntimeError("v5.4.4EA obsolete runtime postprocessor shape changed")
 
+    # v5.4.4D already locates this function successfully using the semantic
+    # signature without assuming an immediate newline after '('. Keep v5.4.4E
+    # equally tolerant of generated formatting.
+    brittle = '    fn_start = text.find("bool COFCRuntimeController::AdvanceArrangement(\\n")\n'
+    robust = '    fn_start = text.find("bool COFCRuntimeController::AdvanceArrangement(")\n'
+    if text.count(brittle) == 1:
+        text = text.replace(brittle, robust, 1)
+    elif text.count(robust) != 1:
+        raise RuntimeError("v5.4.4EA could not harden AdvanceArrangement start boundary")
+
+    # HandlePostConfirm is the preferred terminal, but later generated source
+    # may insert another runtime method between the two. Fall back to Tick only
+    # if the preferred semantic boundary is absent.
+    strict_end = '    fn_end = text.find("\\nbool COFCRuntimeController::HandlePostConfirm(\\n", fn_start)\n'
+    tolerant_end = '''    fn_end = text.find("\\nbool COFCRuntimeController::HandlePostConfirm(", fn_start)
+    if fn_end < 0:
+        fn_end = text.find("\\nvoid COFCRuntimeController::Tick(", fn_start)
+'''
+    if text.count(strict_end) == 1:
+        text = text.replace(strict_end, tolerant_end, 1)
+    elif text.count(tolerant_end) != 1:
+        raise RuntimeError("v5.4.4EA could not harden AdvanceArrangement terminal boundary")
+
     out = text if eol == "\n" else text.replace("\n", "\r\n")
     data = out.encode("utf-8")
     if bom:
