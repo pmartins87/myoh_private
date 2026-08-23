@@ -60,8 +60,6 @@ def harden_v545_status_injector():
     if text.count(helper_marker) != 1:
         raise RuntimeError("v5.4.5 PRE: status helper insertion marker missing")
 
-    # Locate and remove the original brittle region *before* inserting the new
-    # helper, because the helper deliberately reuses the same diagnostic labels.
     first_label = '"surface policy calculation",'
     last_label = '"surface no-preparable-cards wait",'
     function_pos = text.find(helper_marker)
@@ -95,12 +93,15 @@ def harden_v545_status_injector():
         text = text.replace(marker, insertion + marker, 1)
         print(f"patched {rel}: {label}")
 
-    def after_unique(marker: str, insertion: str, label: str):
+    def after_unique(marker: str, insertion: str, label: str, optional: bool = False):
         nonlocal text
         if insertion.strip() in text:
             return
         count = text.count(marker)
         if count != 1:
+            if optional and count == 0:
+                print(f"skipped {rel}: {label} (obsolete materialized branch absent)")
+                return
             raise RuntimeError(
                 f"{label}: semantic marker expected once, got {count}: {marker!r}"
             )
@@ -172,6 +173,7 @@ def harden_v545_status_injector():
         "  if (!state.hero_can_prepare) {\n",
         '    OpenOFCSetUserStatus("AGUARDANDO CARTAS / TRANSICAO");\n',
         "surface no-preparable-cards wait",
+        optional=True,
     )
 
     write_source(path, text, eol, bom)
