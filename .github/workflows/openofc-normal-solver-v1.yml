@@ -42,14 +42,14 @@ jobs:
           test -s artifact/r4_dealer_smoke.jsonl
       - name: Recompute and audit M2a smoke labels
         run: python tools/openofc_solver/audit_r4_dealer_corpus.py artifact/r4_dealer_smoke.jsonl
-      - name: Generate M2b non-dealer information-set smoke corpus
+      - name: Generate filtered M2b non-dealer information-set smoke corpus
         run: |
           python tools/openofc_solver/generate_r4_nondealer_corpus.py \
             --out artifact/r4_nondealer_smoke.jsonl \
             --seed 20260823 \
             --start-deal 500000 \
-            --attempts 2 \
-            --workers 2
+            --attempts 16 \
+            --workers 4
           test -s artifact/r4_nondealer_smoke.jsonl
       - name: Independently recompute M2b smoke Q-vectors
         run: |
