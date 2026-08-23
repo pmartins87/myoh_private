@@ -19,6 +19,7 @@ permissions:
 jobs:
   exact-core:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,11 +42,28 @@ jobs:
           test -s artifact/r4_dealer_smoke.jsonl
       - name: Recompute and audit M2a smoke labels
         run: python tools/openofc_solver/audit_r4_dealer_corpus.py artifact/r4_dealer_smoke.jsonl
-      - name: Upload M2a smoke corpus
+      - name: Generate M2b non-dealer information-set smoke corpus
+        run: |
+          python tools/openofc_solver/generate_r4_nondealer_corpus.py \
+            --out artifact/r4_nondealer_smoke.jsonl \
+            --seed 20260823 \
+            --start-deal 500000 \
+            --attempts 2 \
+            --workers 2
+          test -s artifact/r4_nondealer_smoke.jsonl
+      - name: Independently recompute M2b smoke Q-vectors
+        run: |
+          python tools/openofc_solver/audit_r4_nondealer_corpus.py \
+            artifact/r4_nondealer_smoke.jsonl \
+            --report artifact/r4_nondealer_smoke_audit.json
+      - name: Upload R4 teacher smoke corpora
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOFC_R4_Dealer_Exact_Smoke
-          path: artifact/r4_dealer_smoke.jsonl
+          name: OpenOFC_R4_Exact_Teacher_Smoke
+          path: |
+            artifact/r4_dealer_smoke.jsonl
+            artifact/r4_nondealer_smoke.jsonl
+            artifact/r4_nondealer_smoke_audit.json
           if-no-files-found: error
 
   m2a-medium-scale:
