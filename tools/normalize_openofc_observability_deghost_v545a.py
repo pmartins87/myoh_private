@@ -74,105 +74,163 @@ def scan_cpp_delimiters(text: str):
     return stack, state, None
 
 
-def dump_tick_semantic_nesting(text: str):
-    """Print active C++ brace owners at key Tick liveness landmarks.
-
-    This is diagnostic only.  It proves whether the normal decision path is
-    accidentally trapped below an earlier conditional even when delimiters can
-    be made lexically balanced by adding one terminal brace.
-    """
+def cpp_brace_owners_at_lines(text: str, needles):
+    """Return active lexical brace owners before each landmark line is parsed."""
     lines = text.splitlines()
-    tick_line = None
-    for index, source in enumerate(lines, 1):
-        if source.startswith("void COFCRuntimeController::Tick("):
-            tick_line = index
-            break
-    if tick_line is None:
-        print("OPENOFC_V545_NESTING_DIAG Tick signature missing")
-        return
-
-    keys = (
-        "if (IsKnownNewHand(state))",
-        "if (phase_ == kReacquire)",
-        "if (phase_ == kWaitingFinalInfo)",
-        "if (phase_ == kIdle)",
-        "DecisionStabilized(state)",
-        "COFCBaselinePolicy::Choose",
-        "if (phase_ == kArranging)",
-    )
-
-    # Track only braces, but honor C++ comments and literals so log strings do
-    # not contaminate semantic depth.  Each stack item stores owner line/source.
+    hits = {needle: [] for needle in needles}
     stack = []
     state = "code"
-    i = 0
-    line = 1
-    line_start = 0
-    while i < len(text):
-        if line >= tick_line:
-            for key in keys:
-                if text.startswith(key, i) or (
-                    i == line_start and key in text[i:text.find("\n", i) if "\n" in text[i:] else len(text)]
-                ):
-                    source = lines[line - 1].strip() if line - 1 < len(lines) else ""
-                    owners = ";".join(
-                        "%d:%s" % (ln, src.strip()[:90]) for ln, src in stack[-8:]
-                    )
-                    print(
-                        "OPENOFC_V545_NESTING_DIAG line=%d brace_depth=%d key=%s owners=[%s]"
-                        % (line, len(stack), key, owners)
-                    )
-                    break
 
-        ch = text[i]
-        nxt = text[i + 1] if i + 1 < len(text) else ""
-        if state == "line_comment":
-            if ch == "\n": state = "code"
-        elif state == "block_comment":
-            if ch == "*" and nxt == "/":
-                i += 1
-                state = "code"
-        elif state == "string":
-            if ch == "\\" and nxt:
-                i += 1
-            elif ch == '"':
-                state = "code"
-        elif state == "char":
-            if ch == "\\" and nxt:
-                i += 1
-            elif ch == "'":
-                state = "code"
-        else:
+    for line_number, source in enumerate(lines, 1):
+        for needle in needles:
+            if needle in source:
+                hits[needle].append((line_number, list(stack), source.strip()))
+
+        i = 0
+        while i < len(source):
+            ch = source[i]
+            nxt = source[i + 1] if i + 1 < len(source) else ""
+
+            if state == "block_comment":
+                if ch == "*" and nxt == "/":
+                    state = "code"
+                    i += 2
+                else:
+                    i += 1
+                continue
+            if state == "string":
+                if ch == "\\" and nxt:
+                    i += 2
+                else:
+                    if ch == '"': state = "code"
+                    i += 1
+                continue
+            if state == "char":
+                if ch == "\\" and nxt:
+                    i += 2
+                else:
+                    if ch == "'": state = "code"
+                    i += 1
+                continue
+
             if ch == "/" and nxt == "/":
-                i += 1
-                state = "line_comment"
-            elif ch == "/" and nxt == "*":
-                i += 1
+                break
+            if ch == "/" and nxt == "*":
                 state = "block_comment"
-            elif ch == '"':
+                i += 2
+                continue
+            if ch == '"':
                 state = "string"
-            elif ch == "'":
+                i += 1
+                continue
+            if ch == "'":
                 state = "char"
-            elif ch == "{":
-                src = lines[line - 1] if line - 1 < len(lines) else ""
-                stack.append((line, src))
-            elif ch == "}" and stack:
-                stack.pop()
-        if ch == "\n":
-            line += 1
-            line_start = i + 1
-        i += 1
+                i += 1
+                continue
+            if ch == "{":
+                stack.append((line_number, source.strip()))
+            elif ch == "}":
+                if stack:
+                    stack.pop()
+            i += 1
+
+    return hits
 
 
-def diagnose_and_repair_terminal_tick_brace(path: Path):
-    """Repair only the uniquely proven terminal Tick function brace loss.
+def owner_has(owners, marker: str) -> bool:
+    return any(marker in source for _line, source in owners)
 
-    Several frozen patch generations rewrite Tick structurally.  The materialized
-    v5.4.5 source showed exactly one unmatched delimiter: the opening brace of
-    COFCRuntimeController::Tick, which is the final method in this translation
-    unit.  Appending its closing brace is safe only when all of those facts are
-    mechanically re-proven; every other imbalance remains fail-closed.
+
+def require_unique_hit(hits, needle: str):
+    found = hits.get(needle, [])
+    if len(found) != 1:
+        raise RuntimeError(
+            "v5.4.5 Tick semantic guard expected one %r landmark, got %d"
+            % (needle, len(found))
+        )
+    return found[0]
+
+
+def assert_tick_semantics(text: str, repaired: bool):
+    """Prove that normal decision landmarks are outside kReacquire.
+
+    The v5.4.5 materialization bug dropped the inner closing brace of the
+    kReacquire branch.  A previous normalizer appended a brace at EOF, which made
+    the translation unit compile but left every subsequent normal decision path
+    nested under `if (phase_ == kReacquire)`.  These structural assertions keep
+    that class of liveness bug from ever becoming a green binary again.
     """
+    keys = (
+        "void COFCRuntimeController::Tick(",
+        "if (phase_ == kReacquire) {",
+        "if (phase_ == kWaitingFinalInfo) {",
+        "if (phase_ == kIdle) {",
+        "DecisionStabilized(state)",
+        "COFCBaselinePolicy::Choose",
+        "if (phase_ == kArranging) {",
+    )
+    hits = cpp_brace_owners_at_lines(text, keys)
+    tick = require_unique_hit(hits, keys[0])
+    reacquire = require_unique_hit(hits, keys[1])
+    waiting = require_unique_hit(hits, keys[2])
+    idle = require_unique_hit(hits, keys[3])
+    stabilized = require_unique_hit(hits, keys[4])
+    policy = require_unique_hit(hits, keys[5])
+    arranging = require_unique_hit(hits, keys[6])
+
+    tick_line = tick[0]
+    reacquire_line = reacquire[0]
+    if not (tick_line < reacquire_line < waiting[0] < idle[0] < arranging[0]):
+        raise RuntimeError("v5.4.5 Tick landmarks are not in expected execution order")
+
+    if repaired:
+        for label, hit in (
+            ("kWaitingFinalInfo", waiting),
+            ("kIdle", idle),
+            ("DecisionStabilized", stabilized),
+            ("COFCBaselinePolicy::Choose", policy),
+            ("kArranging", arranging),
+        ):
+            if owner_has(hit[1], "if (phase_ == kReacquire) {"):
+                raise RuntimeError(
+                    "v5.4.5 semantic liveness failure: %s remains nested under kReacquire"
+                    % label
+                )
+        if not owner_has(stabilized[1], "if (phase_ == kIdle) {"):
+            raise RuntimeError(
+                "v5.4.5 semantic liveness failure: DecisionStabilized escaped kIdle"
+            )
+        if not owner_has(policy[1], "if (phase_ == kIdle) {"):
+            raise RuntimeError(
+                "v5.4.5 semantic liveness failure: policy calculation escaped kIdle"
+            )
+        print(
+            "OPENOFC_V545_TICK_SEMANTICS PASS "
+            "waiting_idle_policy_arranging_outside_reacquire=1"
+        )
+        return
+
+    # Pre-repair proof is intentionally narrow.  The waiting branch must be
+    # directly trapped by kReacquire, which is the exact field failure shape.
+    owners = waiting[1]
+    if not owner_has(owners, "void COFCRuntimeController::Tick("):
+        raise RuntimeError("v5.4.5 pre-repair waiting branch is not inside Tick")
+    if not owner_has(owners, "if (phase_ == kReacquire) {"):
+        raise RuntimeError(
+            "v5.4.5 unmatched Tick brace is not explained by kReacquire nesting"
+        )
+    if owners[-1][0] != reacquire_line:
+        raise RuntimeError(
+            "v5.4.5 kWaitingFinalInfo is not directly owned by kReacquire"
+        )
+    print(
+        "OPENOFC_V545_TICK_SEMANTICS PRE_REPAIR_PROOF "
+        "waiting_nested_directly_under_reacquire=1"
+    )
+
+
+def repair_reacquire_closing_brace(path: Path):
+    """Restore the uniquely proven missing inner kReacquire closing brace."""
     raw = path.read_bytes()
     bom = raw.startswith(b"\xef\xbb\xbf")
     eol = "\r\n" if b"\r\n" in raw else "\n"
@@ -182,15 +240,19 @@ def diagnose_and_repair_terminal_tick_brace(path: Path):
 
     if unexpected is not None:
         raise RuntimeError(
-            "v5.4.5 materialized runtime unexpected closing delimiter %r" %
-            (unexpected,)
+            "v5.4.5 materialized runtime unexpected closing delimiter %r"
+            % (unexpected,)
         )
     if state in ("block_comment", "string", "char"):
         raise RuntimeError(
             "v5.4.5 materialized runtime ended inside lexical state %s" % state
         )
+
+    # If materialization is already structurally fixed upstream, accept it only
+    # after the semantic liveness postconditions pass.  Never add a spare brace.
     if not stack:
-        print("OpenOFC v5.4.5A materialized runtime delimiter balance: PASS")
+        assert_tick_semantics(text, repaired=True)
+        print("OpenOFC v5.4.5A runtime already structurally balanced: PASS")
         return
 
     print("OPENOFC_V545_DELIMITER_DIAG unmatched_count=%d" % len(stack))
@@ -200,42 +262,58 @@ def diagnose_and_repair_terminal_tick_brace(path: Path):
             "OPENOFC_V545_DELIMITER_DIAG unmatched_open=%s line=%d col=%d source=%s"
             % (token, ln, column, snippet)
         )
-    dump_tick_semantic_nesting(text)
 
-    safe_tick_loss = False
-    if len(stack) == 1 and stack[0][0] == "{":
-        _token, focus, _column = stack[0]
-        signature_window = "\n".join(lines[max(0, focus - 4):focus])
-        suffix = "\n".join(lines[focus:])
-        later_method = re.search(
-            r"\n(?:bool|void|int|string|CString)\s+COFCRuntimeController::",
-            "\n" + suffix,
+    # The observed broken materialization has one unmatched delimiter: Tick's
+    # outer opening brace.  That happens because Tick's existing final `}` is
+    # consumed by the unterminated inner kReacquire branch.  Prove that exact
+    # shape before touching source.
+    if len(stack) != 1 or stack[0][0] != "{":
+        raise RuntimeError("v5.4.5 materialized runtime has unexpected delimiter shape")
+    _token, focus, _column = stack[0]
+    signature_window = "\n".join(lines[max(0, focus - 4):focus])
+    suffix = "\n".join(lines[focus:])
+    later_method = re.search(
+        r"\n(?:bool|void|int|string|CString)\s+COFCRuntimeController::",
+        "\n" + suffix,
+    )
+    if "void COFCRuntimeController::Tick(" not in signature_window or later_method is not None:
+        raise RuntimeError(
+            "v5.4.5 unmatched delimiter is not the proven final Tick outer brace"
         )
-        safe_tick_loss = (
-            "void COFCRuntimeController::Tick(" in signature_window
-            and later_method is None
+
+    assert_tick_semantics(text, repaired=False)
+
+    waiting_token = "  if (phase_ == kWaitingFinalInfo) {\n"
+    if text.count(waiting_token) != 1:
+        raise RuntimeError(
+            "v5.4.5 cannot uniquely locate kWaitingFinalInfo insertion boundary"
         )
 
-    if not safe_tick_loss:
-        raise RuntimeError("v5.4.5 materialized runtime has unmatched delimiters")
+    # This is the missing *inner* brace.  Do not append at EOF: the final brace
+    # already present in materialized source is Tick's own correct closing brace.
+    text = text.replace(
+        waiting_token,
+        "  }\n\n" + waiting_token,
+        1,
+    )
 
-    if not text.endswith("\n"):
-        text += "\n"
-    text += "}\n"
+    verify_stack, verify_state, verify_unexpected = scan_cpp_delimiters(text)
+    if (verify_stack or verify_unexpected is not None
+            or verify_state in ("block_comment", "string", "char")):
+        raise RuntimeError(
+            "v5.4.5 kReacquire brace repair did not restore lexical balance"
+        )
+    assert_tick_semantics(text, repaired=True)
+
     out = text if eol == "\n" else text.replace("\n", "\r\n")
     data = out.encode("utf-8")
     if bom:
         data = b"\xef\xbb\xbf" + data
     path.write_bytes(data)
     print(
-        "OpenOFC v5.4.5A repaired terminal COFCRuntimeController::Tick closing brace"
+        "OpenOFC v5.4.5A repaired missing inner kReacquire closing brace; "
+        "normal Tick decision path restored"
     )
-
-    verify = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
-    stack, state, unexpected = scan_cpp_delimiters(verify)
-    if stack or unexpected is not None or state in ("block_comment", "string", "char"):
-        raise RuntimeError("v5.4.5 terminal Tick brace repair did not restore balance")
-    print("OpenOFC v5.4.5A materialized runtime delimiter balance: PASS")
 
 
 def main():
@@ -275,7 +353,7 @@ def main():
         raise RuntimeError("v5.4.5 empty-sentinel normalization did not stick")
     print("OpenOFC v5.4.5A deghost empty sentinel normalization: PASS")
 
-    diagnose_and_repair_terminal_tick_brace(
+    repair_reacquire_closing_brace(
         ROOT / "OpenHoldem" / "COFCRuntimeController.cpp"
     )
 
