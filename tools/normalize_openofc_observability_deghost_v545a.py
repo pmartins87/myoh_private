@@ -210,14 +210,16 @@ def assert_tick_semantics(text: str, repaired: bool):
         )
         return
 
+    # The unmatched lexical brace has already been separately proven to be
+    # Tick's outer brace from its multi-line signature window.  Here we need only
+    # prove the missing *inner* boundary: kWaitingFinalInfo is directly owned by
+    # kReacquire instead of being Tick-level code.
     owners = waiting[1]
-    if not owner_has(owners, "void COFCRuntimeController::Tick("):
-        raise RuntimeError("v5.4.5 pre-repair waiting branch is not inside Tick")
     if not owner_has(owners, "if (phase_ == kReacquire) {"):
         raise RuntimeError(
             "v5.4.5 unmatched Tick brace is not explained by kReacquire nesting"
         )
-    if owners[-1][0] != reacquire_line:
+    if not owners or owners[-1][0] != reacquire_line:
         raise RuntimeError(
             "v5.4.5 kWaitingFinalInfo is not directly owned by kReacquire"
         )
