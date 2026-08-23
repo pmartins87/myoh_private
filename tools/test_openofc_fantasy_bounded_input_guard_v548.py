@@ -36,7 +36,10 @@ def main() -> None:
     assert "guard=FOCUS_CURSOR_FAIL_CLOSED_V548" in bounded
 
     required = (
-        "GetForegroundWindow() != hwnd",
+        "GetAncestor(hwnd, GA_ROOT)",
+        "foreground_target",
+        "SetForegroundWindow(foreground_target)",
+        "GetForegroundWindow() != foreground_target",
         "FOREGROUND_NOT_ACQUIRED",
         "FOREGROUND_LOST",
         "GetCursorPos(&settled)",
@@ -47,6 +50,7 @@ def main() -> None:
         "settled.y > point.y + 2",
         "release_cursor_ok",
         "release_focus_ok",
+        "GetForegroundWindow() == foreground_target",
         "INTERFERENCE_WHILE_HELD",
         "emergency_release=1",
         "Sleep(15)",
@@ -90,7 +94,7 @@ def main() -> None:
 
     print(
         "OPENOFC_FANTASY_BOUNDED_INPUT_GUARD_V548_REGRESSION=PASS "
-        "focus=FAIL_CLOSED cursor_before_down=FAIL_CLOSED "
+        "focus_root=FAIL_CLOSED cursor_before_down=FAIL_CLOSED "
         "interference_while_held=EMERGENCY_RELEASE_THEN_STOP "
         "mouse_dll=ABSENT loops=FINITE normal_confirm=UNCHANGED"
     )
