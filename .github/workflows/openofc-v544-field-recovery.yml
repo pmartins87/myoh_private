@@ -1,4 +1,4 @@
-name: OpenOFC v5.4.4 field recovery
+name: OpenOFC v5.4.5 field recovery + observability
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
         shell: pwsh
         run: |
           $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          Write-Host "V544_HEAD actual=$head event=$env:GITHUB_EVENT_NAME sha=$env:GITHUB_SHA"
+          Write-Host "V545_HEAD actual=$head event=$env:GITHUB_EVENT_NAME sha=$env:GITHUB_SHA"
           if ($env:GITHUB_EVENT_NAME -eq 'push' -and $head -ne $env:GITHUB_SHA.ToLowerInvariant()) { throw 'push checkout does not match GITHUB_SHA' }
 
       - name: Apply frozen v5.3 chain
@@ -56,7 +56,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "smart baseline v5.3 failed: $LASTEXITCODE" }
           Write-Host 'V53_MATERIALIZATION=PASS'
 
-      - name: Apply v5.4 through v5.4.4 field recovery
+      - name: Apply v5.4 through v5.4.5 field recovery
         shell: pwsh
         run: |
           python tools/run_openofc_runtime_continuity_v54.py
@@ -85,12 +85,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "v5.4.4D provisional supersession failed: $LASTEXITCODE" }
           python tools/apply_openofc_identity_refinement_v544e.py
           if ($LASTEXITCODE -ne 0) { throw "v5.4.4E identity refinement failed: $LASTEXITCODE" }
-          Write-Host 'V544_FIELD_RECOVERY_FULL_REPLAN_IDENTITY_REFINEMENT_MATERIALIZATION=PASS'
+          python tools/apply_openofc_observability_deghost_v545.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.5 observability/deghost failed: $LASTEXITCODE" }
+          Write-Host 'V545_FIELD_RECOVERY_OBSERVABILITY_DEGHOST_MATERIALIZATION=PASS'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Run v5.4.4 UNKNOWN/full-replan regression
+      - name: Run UNKNOWN/full-replan regression
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
@@ -98,7 +100,7 @@ jobs:
           $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCUnknownToleranceSelftest.cpp /Fe:COFCUnknownToleranceSelftest.exe && COFCUnknownToleranceSelftest.exe'
           cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { throw "UNKNOWN/full-replan regression failed: $LASTEXITCODE" }
-          Write-Host 'UNKNOWN_OCCUPIED_FULL_REPLAN_IDENTITY_REFINEMENT_V544=PASS'
+          Write-Host 'UNKNOWN_OCCUPIED_FULL_REPLAN_IDENTITY_REFINEMENT=PASS'
 
       - name: Run generic Fantasy 14-17 regression
         shell: pwsh
@@ -108,7 +110,7 @@ jobs:
           $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCGenericFantasySelftest.cpp /Fe:COFCGenericFantasySelftest.exe && COFCGenericFantasySelftest.exe'
           cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { throw "generic Fantasy regression failed: $LASTEXITCODE" }
-          Write-Host 'GENERIC_FANTASY_14_17_V544=PASS'
+          Write-Host 'GENERIC_FANTASY_14_17=PASS'
 
       - name: Run runtime continuity regressions
         shell: pwsh
@@ -124,7 +126,7 @@ jobs:
           $c3 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
           cmd.exe /d /s /c $c3
           if ($LASTEXITCODE -ne 0) { throw "dealer recovery regression failed: $LASTEXITCODE" }
-          Write-Host 'RUNTIME_CONTINUITY_V544=PASS'
+          Write-Host 'RUNTIME_CONTINUITY=PASS'
 
       - name: Build dependency chain
         shell: pwsh
@@ -156,12 +158,12 @@ jobs:
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
           if ($LASTEXITCODE -ne 0) { throw "OpenHoldem Win32 build failed: $LASTEXITCODE" }
           if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
-          Write-Host 'OPENOFC_V544_RELEASE_WIN32=PASS'
+          Write-Host 'OPENOFC_V545_RELEASE_WIN32=PASS'
 
       - name: Assemble field-test binary package
         shell: pwsh
         run: |
-          $out = 'artifact/OpenOFC_v544_FIELD_TEST'
+          $out = 'artifact/OpenOFC_v545_FIELD_TEST'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item 'Release/OpenHoldem.exe' $out
           Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
@@ -171,8 +173,8 @@ jobs:
             'source_branch=openofc-v544-field-recovery',
             'configuration=Release',
             'platform=Win32',
-            'patch=OpenOFC_v5.4.4_field_recovery_full_replan_identity_refinement',
-            'tablemap=USER_V5_4_4_TO_BE_INJECTED_POST_BUILD'
+            'patch=OpenOFC_v5.4.5_field_recovery_observability_exact_lineage_deghost',
+            'tablemap=USER_V5_4_4_COMPATIBLE'
           ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
           $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
           $lines = foreach ($file in $files) {
@@ -182,11 +184,11 @@ jobs:
           }
           $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
           $exeHash = (Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant()
-          Write-Host "OPENOFC_V544_EXE_SHA256=$exeHash"
+          Write-Host "OPENOFC_V545_EXE_SHA256=$exeHash"
 
       - name: Upload field-test binary package
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOFC_v544_FIELD_TEST_BINARY
-          path: artifact/OpenOFC_v544_FIELD_TEST
+          name: OpenOFC_v545_FIELD_TEST_BINARY
+          path: artifact/OpenOFC_v545_FIELD_TEST
           if-no-files-found: error
