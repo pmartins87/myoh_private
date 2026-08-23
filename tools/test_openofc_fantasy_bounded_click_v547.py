@@ -61,7 +61,7 @@ def main() -> None:
         "WaitForSingleObject",
     ):
         assert forbidden not in bounded, f"unbounded/legacy primitive leaked: {forbidden}"
-    # The only loop is count-bounded and count itself is hard-capped at 16.
+    # The only loops are finite count-bounded loops and count itself is capped at 16.
     assert bounded.count("for (") == 2, "expected validation + click loops only"
 
     clear = function_body(batch, "bool COFCFantasyBatchExecutor::SendClearRow(")
@@ -74,19 +74,32 @@ def main() -> None:
     assert "bounded Fantasy select-and-check sequence" in select
 
     confirm = function_body(runtime, "bool COFCRuntimeController::SendConfirm(")
-    assert "fantasy_confirm_click" in confirm
+    # v5.4.3H owns Fantasy double-confirm protection. v5.4.7 is allowed to
+    # replace only the physical dispatch primitive selected inside that guarded
+    # transaction; the fence/guard semantics must survive byte-semantically.
+    for guard_marker in (
+        "OPENOFC_FANTASY_CONFIRM_GUARD_V543H",
+        "COFCFantasyConfirmGuard::Validate",
+        "fantasy_confirm_fence_.CanDispatch",
+        "fantasy_confirm_fence_.MarkDispatched",
+        "physical_dispatch=1",
+    ):
+        assert guard_marker in confirm, f"Fantasy Confirm guard lost: {guard_marker}"
+    assert "const bool confirm_click_dispatched" in confirm
+    assert "fantasy_confirm" in confirm
     assert "? p_casino_interface->ClickRectBoundedOFC(rect)" in confirm
     assert ": p_casino_interface->ClickRectSafely(rect)" in confirm
     assert "bounded Fantasy Confirm click" in confirm
-    # This proves normal Confirm retained its old path while only Fantasy was
-    # rerouted around mouse.dll.
+    # Normal Confirm retains the legacy safe path; only Fantasy bypasses the
+    # potentially unbounded mouse.dll click loop.
     assert confirm.count("ClickRectBoundedOFC") == 1
     assert confirm.count("ClickRectSafely") == 1
 
     print(
         "OPENOFC_FANTASY_BOUNDED_CLICK_V547_REGRESSION=PASS "
         "clear=BOUNDED select=BOUNDED fantasy_confirm=BOUNDED normal_confirm=UNCHANGED "
-        "mouse_dll_click=ABSENT_FROM_BOUNDED_PATH max_targets=16 gap_cap_ms=250"
+        "fantasy_confirm_fence=PRESERVED mouse_dll_click=ABSENT_FROM_BOUNDED_PATH "
+        "max_targets=16 gap_cap_ms=250"
     )
 
 
