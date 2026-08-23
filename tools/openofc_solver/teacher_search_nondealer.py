@@ -29,6 +29,17 @@ class R4NonDealerOracleResult:
     all_actions: tuple[R4NonDealerActionValue, ...]
 
 
+def _require_m1b_materialized() -> None:
+    doc = resolve_board.__doc__ or ""
+    if "row-local semantics" not in doc:
+        raise RuntimeError(
+            "M1b Joker semantics are not materialized. Run "
+            "`python tools/openofc_solver/apply_m1b_joker_semantics.py` first; "
+            "refusing to compute information-set teacher values with the "
+            "superseded Joker evaluator."
+        )
+
+
 def _score_points_from_resolved(
     hero: ResolvedBoard | None,
     opponent: ResolvedBoard | None,
@@ -95,6 +106,7 @@ def solve_r4_nondealer_uniform_belief(
     Fantasy continuation EV is deliberately not converted into heuristic points.
     Later self-play must replace the reachability belief with a strategic belief.
     """
+    _require_m1b_materialized()
     if hero_before.count() != 11 or opponent_before.count() != 11:
         raise ValueError("non-dealer R4 requires 11 placed cards for both players")
     if len(hero_incoming) != 3:
