@@ -51,13 +51,24 @@ Heads-up KKPoker OFC is not one information state. The player left of the button
 
 M2 is therefore split into an exact dealer-R4 teacher corpus first, then an information-set non-dealer R4 teacher once an opponent response model/search policy exists. This prevents hidden future information from leaking into training labels.
 
+## M2a exact dealer-R4 corpus
+
+Authoritative smoke run `32647659339` is GREEN. It generated 128 deterministic reachable deals and emitted 71 dealer/button R4 states after the default filter removed states with no non-fouled action. A second independent pass recomputed every stored action value and label from the state description and certified all 71 records. The sample contained 55 states involving at least one Joker, legal-action counts of 3 or 6, and best immediate scores from -10 to +16.
+
+The smoke also exposed an important training-design property: **63 of 71 states had more than one point-optimal action**. In this sample every such point tie also had the same zero Fantasy award, so these are legitimate terminal equivalences for the current-hand objective, not a reason to manufacture a single arbitrary class label. M2 therefore stores the complete action-value vector plus the full set of point-optimal actions. Distillation must optimize values / set-valued targets rather than force one arbitrary action when several are mathematically tied.
+
+The reachability sampler used for rounds 0-3 is explicitly tagged `UNIFORM_LEGAL_REACHABILITY_ONLY_NOT_TEACHER`. Its earlier random legal actions exist only to generate reachable R4 states; they must never be treated as demonstrations of good strategy.
+
+The large-corpus path is resumable and auditable through `run_r4_dealer_shards.py`. Every shard has a deterministic deal-id range, SHA-256 completion marker and independent exact-label recomputation before it is accepted. The generator itself fails closed if the certified M1b Joker materialization is absent.
+
 ## Milestones
 
 - **M0 — DONE:** pure cards, hand ranking, royalties, foul/scoop scoring, legal action generator, runtime-card mapping, exact terminal R4 oracle.
 - **M0-LIVE — DONE:** the latest field log yielded a real fully observed R4 state. The exact oracle labels the unique optimum as `Th -> top`, `6s -> middle`, discard `7s`, worth +26 current-hand points.
 - **M1a — DONE:** production OpenHoldem card representation corrected in the standalone parity harness; 3,653 non-Joker C++/Python comparisons PASS.
 - **M1b — DONE:** row-local Joker semantics certified; targeted tests PASS; 770 Joker board comparisons PASS with zero mismatches.
-- **M2a — IN PROGRESS:** generate reachable **dealer/button R4** states and exact labels without hidden-information leakage.
+- **M2a-SMOKE — DONE:** deterministic reachable dealer-R4 corpus generated, fully recomputed/audited, artifact published by CI.
+- **M2a-SCALE — IN PROGRESS:** certify resumable shards, then generate a medium corpus before a large Ryzen run.
 - **M2b:** build the non-dealer R4 information-set teacher using chance sampling plus an opponent response policy/search.
 - **M3:** solve R3 by chance sampling / backward induction using R4 teachers as leaves, preserving dealer/non-dealer information sets.
 - **M4:** extend backward through R2, R1 and the 232 legal opening placements with information-set self-play.
@@ -71,6 +82,21 @@ From the repository root the CI materializes the M1b rule semantics first, then 
 ```bash
 python tools/openofc_solver/test_engine.py
 python tools/openofc_solver/test_m1b_joker_semantics.py
+python tools/openofc_solver/test_r4_dealer_corpus.py
+```
+
+Generate and independently audit a dealer/button R4 corpus:
+
+```bash
+python tools/openofc_solver/apply_m1b_joker_semantics.py
+python tools/openofc_solver/generate_r4_dealer_corpus.py --out r4.jsonl --attempts 1000
+python tools/openofc_solver/audit_r4_dealer_corpus.py r4.jsonl
+```
+
+For resumable multi-core generation:
+
+```bash
+python tools/openofc_solver/run_r4_dealer_shards.py --out-dir runs/r4_dealer --attempts 100000 --attempts-per-shard 10000 --parallel-shards 1 --workers-per-shard 15
 ```
 
 Label exact fully-observed R4 states in an OpenOFC log:
