@@ -185,26 +185,39 @@ def patch_batch() -> None:
 
 def patch_runtime_confirm() -> None:
     text = RUNTIME.read_text(encoding="utf-8")
-    if "fantasy_confirm_click" in text:
+    if "confirm_click_dispatched" in text:
         print("COFCRuntimeController.cpp: v5.4.7 already materialized")
         return
-    old = "if (p_casino_interface == NULL || !p_casino_interface->ClickRectSafely(rect)) {\n    Block(\"safe Confirm click was refused after transaction start\");\n    return false;\n  }"
-    new = '''const bool fantasy_confirm_click =
-    state.players[state.hero_chair].fantasy;
-  const bool confirm_clicked = p_casino_interface != NULL
-    && (fantasy_confirm_click
+
+    old_condition = "  if (p_casino_interface == NULL || !p_casino_interface->ClickRectSafely(rect)) {\n"
+    new_condition = '''  const bool confirm_click_dispatched = p_casino_interface != NULL
+    && (fantasy_confirm
       ? p_casino_interface->ClickRectBoundedOFC(rect)
       : p_casino_interface->ClickRectSafely(rect));
-  if (!confirm_clicked) {
-    Block(fantasy_confirm_click
-      ? "bounded Fantasy Confirm click was refused after transaction start"
-      : "safe Confirm click was refused after transaction start");
-    return false;
-  }'''
-    require_once(text, old, "COFCRuntimeController.cpp confirm")
-    text = text.replace(old, new, 1)
+  if (!confirm_click_dispatched) {
+'''
+    require_once(text, old_condition, "COFCRuntimeController.cpp confirm condition")
+    text = text.replace(old_condition, new_condition, 1)
+
+    old_recover = '    Recover("safe Confirm click was refused before mouse dispatch");\n'
+    new_recover = '''    Recover(fantasy_confirm
+      ? "bounded Fantasy Confirm click was refused before physical dispatch"
+      : "safe Confirm click was refused before mouse dispatch");
+'''
+    require_once(text, old_recover, "COFCRuntimeController.cpp confirm refusal")
+    text = text.replace(old_recover, new_recover, 1)
+
+    old_comment = '''    // ClickRectSafely returns false only before invoking the mouse DLL. A fresh
+    // stable replan may therefore retry without creating a duplicate click.
+'''
+    new_comment = '''    // Both click APIs return false before a successful physical dispatch. A
+    // fresh stable replan may therefore retry without creating a duplicate click.
+'''
+    require_once(text, old_comment, "COFCRuntimeController.cpp confirm refusal comment")
+    text = text.replace(old_comment, new_comment, 1)
+
     RUNTIME.write_text(text, encoding="utf-8")
-    print("COFCRuntimeController.cpp: Fantasy Confirm uses bounded click; normal Confirm unchanged")
+    print("COFCRuntimeController.cpp: Fantasy Confirm bounded; normal Confirm/fence semantics preserved")
 
 
 def main() -> None:
