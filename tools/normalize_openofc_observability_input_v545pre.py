@@ -53,20 +53,31 @@ def normalize_main_tick_guard():
 
 
 def harden_v545_status_injector():
-    """Replace brittle post-policy exact anchors in the v5.4.5 patch script.
-
-    The frozen materialization chain deliberately injects extra diagnostic lines
-    (notably SMART_BASELINE_V53) between declarations and calls.  Those lines are
-    semantically useful and must not be erased merely to satisfy an exact text
-    anchor.  This PRE layer rewrites only the status-injection portion of the
-    patch script so it finds stable semantic tokens in the materialized source.
-    """
     path = ROOT / "tools" / "apply_openofc_observability_deghost_v545.py"
     text, eol, bom = read_text(path)
 
     helper_marker = "def patch_visible_runtime_status():\n"
     if text.count(helper_marker) != 1:
         raise RuntimeError("v5.4.5 PRE: status helper insertion marker missing")
+
+    # Locate and remove the original brittle region *before* inserting the new
+    # helper, because the helper deliberately reuses the same diagnostic labels.
+    first_label = '"surface policy calculation",'
+    last_label = '"surface no-preparable-cards wait",'
+    function_pos = text.find(helper_marker)
+    first_pos = text.find(first_label, function_pos)
+    last_pos = text.find(last_label, first_pos + 1)
+    if first_pos < 0 or last_pos < 0:
+        raise RuntimeError("v5.4.5 PRE: brittle status replacement range missing")
+
+    start = text.rfind("    replace_once(\n", function_pos, first_pos)
+    if start < 0:
+        raise RuntimeError("v5.4.5 PRE: first brittle replace_once start missing")
+    end = text.find("    )\n", last_pos)
+    if end < 0:
+        raise RuntimeError("v5.4.5 PRE: last brittle replace_once terminator missing")
+    end += len("    )\n")
+    text = text[:start] + "    patch_remaining_statuses_structurally()\n" + text[end:]
 
     helper = r'''def patch_remaining_statuses_structurally():
     rel = "OpenHoldem/COFCRuntimeController.cpp"
@@ -100,9 +111,10 @@ def harden_v545_status_injector():
         nonlocal text
         if insertion.strip() in text:
             return
-        if text.count(token) != 1:
+        count = text.count(token)
+        if count != 1:
             raise RuntimeError(
-                f"{label}: log token expected once, got {text.count(token)}: {token!r}"
+                f"{label}: log token expected once, got {count}: {token!r}"
             )
         pos = text.find(token)
         starts = [
@@ -116,56 +128,46 @@ def harden_v545_status_injector():
         text = text[:start] + insertion + text[start:]
         print(f"patched {rel}: {label}")
 
-    # Policy logging injected by v5.3 is intentionally preserved. Anchor on
-    # the actual policy call rather than the declarations that precede it.
     before_unique(
         "  if (!COFCBaselinePolicy::Choose(state, &action, &error)) {\n",
         '  OpenOFCSetUserStatus("CALCULANDO JOGADA");\n',
         "surface policy calculation",
     )
-
     before_unique(
         "  if (!orchestrator_.StartTurn(\n",
         '  OpenOFCSetUserStatus("EXECUTANDO JOGADA");\n',
         "surface arrangement execution",
     )
-
     after_unique(
         "    ++drag_wait_cycles_;\n",
         '    OpenOFCSetUserStatus("VERIFICANDO MOVIMENTO");\n',
         "surface drag verification wait",
     )
-
     before_log_token(
         "[DeepOFC CONFIRM] sending region=%s rect=(%ld,%ld,%ld,%ld) round=%d fantasy=%d",
         '  OpenOFCSetUserStatus("CONFIRMANDO JOGADA");\n',
         "surface Confirm send",
     )
-
     after_unique(
         "  phase_ = kConfirmSent;\n",
         '  OpenOFCSetUserStatus("CONFIRM ENVIADO - aguardando proxima rodada");\n',
         "surface post-Confirm wait",
     )
-
     after_unique(
         "    if (!state.decision_finalizable) {\n",
         '      OpenOFCSetUserStatus("AGUARDANDO OPONENTE - Confirm retido");\n',
         "surface dealer provisional wait",
     )
-
     before_log_token(
         "[OpenOFC PROVISIONAL] opponent_final_info=1 reanalyze=1 timer=%d",
         '    OpenOFCSetUserStatus("OPONENTE FINALIZOU - recalculando");\n',
         "surface dealer final replan",
     )
-
     before_log_token(
         "[OpenOFC UNKNOWN] action=WAIT reason=OPENING_IDENTITY_UNREAD",
         '      OpenOFCSetUserStatus("RECUPERANDO CARTA INICIAL - identidade ilegivel");\n',
         "surface opening UNKNOWN wait",
     )
-
     after_unique(
         "  if (!state.hero_can_prepare) {\n",
         '    OpenOFCSetUserStatus("AGUARDANDO CARTAS / TRANSICAO");\n',
@@ -177,23 +179,6 @@ def harden_v545_status_injector():
 
 '''
     text = text.replace(helper_marker, helper + helper_marker, 1)
-
-    first_label = '"surface policy calculation",'
-    last_label = '"surface no-preparable-cards wait",'
-    first_pos = text.find(first_label)
-    last_pos = text.find(last_label, first_pos + 1)
-    if first_pos < 0 or last_pos < 0:
-        raise RuntimeError("v5.4.5 PRE: brittle status replacement range missing")
-
-    start = text.rfind("    replace_once(\n", 0, first_pos)
-    if start < 0:
-        raise RuntimeError("v5.4.5 PRE: first brittle replace_once start missing")
-    end = text.find("    )\n", last_pos)
-    if end < 0:
-        raise RuntimeError("v5.4.5 PRE: last brittle replace_once terminator missing")
-    end += len("    )\n")
-
-    text = text[:start] + "    patch_remaining_statuses_structurally()\n" + text[end:]
     write_text(path, text, eol, bom)
 
     verify = path.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
