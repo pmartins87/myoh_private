@@ -133,7 +133,7 @@ def patch_runtime_replan_edge():
     string replan_error;
     if (!orchestrator_.SupersedeProvisionalPlanAfterFreshScrape(
           state, &replan_error)) {
-      Block("provisional plan supersession failed: " + replan_error);
+      Recover("provisional plan supersession failed: " + replan_error);
       return false;
     }
     plan_.Reset();
@@ -184,10 +184,13 @@ def assert_contract():
         (orch_cpp, "in-flight provisional drag could not be certified before replan"),
         (runtime, "OPPONENT_FINAL_INFO_REPLAN"),
         (runtime, "final_info_arrived_mid_arrangement=1"),
+        (runtime, 'Recover("provisional plan supersession failed: " + replan_error)'),
     ]
     for text, token in required:
         if token not in text:
             raise RuntimeError(f"provisional supersession contract missing: {token}")
+    if 'Block("provisional plan supersession failed:' in runtime:
+        raise RuntimeError("absorbing Block survived provisional replan path")
     print("OpenOFC v5.4.4D provisional supersession source contract: PASS")
 
 
