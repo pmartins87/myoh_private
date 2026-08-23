@@ -13,6 +13,9 @@ on:
       - 'tools/openofc_solver/**'
       - '.github/workflows/openofc-normal-solver-v1.yml'
 
+permissions:
+  contents: read
+
 jobs:
   exact-core:
     runs-on: ubuntu-latest
@@ -23,3 +26,51 @@ jobs:
           python-version: '3.11'
       - name: Run exact rules and R4 oracle tests
         run: python tools/openofc_solver/test_engine.py
+
+  cpp-production-parity:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Materialize standalone evaluator with production card mapping
+        shell: pwsh
+        run: |
+          python tools/openofc_solver/materialize_cpp_parity.py
+          if ($LASTEXITCODE -ne 0) { throw "C++ parity materialization failed: $LASTEXITCODE" }
+
+      - name: Compile and run existing production policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Production policy selftest failed: $LASTEXITCODE" }
+
+      - name: Compile C++ parity probe
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /I OpenHoldem tools\openofc_solver\cpp_parity_probe.cpp /Fe:cpp_parity_probe.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "C++ parity probe build failed: $LASTEXITCODE" }
+
+      - name: Compare Python exact core against production C++ evaluator
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          python tools/openofc_solver/check_cpp_parity.py .\cpp_parity_probe.exe --joker-report artifact\joker_parity_report.json
+          if ($LASTEXITCODE -ne 0) { throw "C++/Python non-Joker parity failed: $LASTEXITCODE" }
+
+      - name: Upload Joker parity diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_Joker_Parity_Diagnostic
+          path: artifact/joker_parity_report.json
+          if-no-files-found: warn
