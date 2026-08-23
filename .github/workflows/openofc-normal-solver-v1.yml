@@ -30,6 +30,19 @@ jobs:
         run: python tools/openofc_solver/test_engine.py
       - name: Run targeted M1b Joker semantics tests
         run: python tools/openofc_solver/test_m1b_joker_semantics.py
+      - name: Run M2a dealer-R4 corpus tests
+        run: python tools/openofc_solver/test_r4_dealer_corpus.py
+      - name: Generate deterministic M2a smoke corpus
+        run: |
+          mkdir -p artifact
+          python tools/openofc_solver/generate_r4_dealer_corpus.py --out artifact/r4_dealer_smoke.jsonl --seed 20260823 --start-deal 0 --attempts 128 --workers 2
+          test -s artifact/r4_dealer_smoke.jsonl
+      - name: Upload M2a smoke corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_R4_Dealer_Exact_Smoke
+          path: artifact/r4_dealer_smoke.jsonl
+          if-no-files-found: error
 
   cpp-production-parity:
     runs-on: windows-2022
