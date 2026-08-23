@@ -53,7 +53,7 @@ jobs:
           python tools/apply_openofc_opponent_history_v52.py
           if ($LASTEXITCODE -ne 0) { throw "opponent history v5.2 failed: $LASTEXITCODE" }
           python tools/run_openofc_smart_policy_v53.py
-          if ($LASTEXITCODE -ne 0) { throw "smart policy v5.3 failed: $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "smart baseline v5.3 failed: $LASTEXITCODE" }
           Write-Host 'V53_MATERIALIZATION=PASS'
 
       - name: Apply v5.4 through v5.4.4 field recovery
@@ -83,7 +83,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "v5.4.4C full replan failed: $LASTEXITCODE" }
           python tools/apply_openofc_provisional_supersession_v544d.py
           if ($LASTEXITCODE -ne 0) { throw "v5.4.4D provisional supersession failed: $LASTEXITCODE" }
-          Write-Host 'V544_FIELD_RECOVERY_FULL_REPLAN_MATERIALIZATION=PASS'
+          python tools/apply_openofc_identity_refinement_v544e.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.4E identity refinement failed: $LASTEXITCODE" }
+          Write-Host 'V544_FIELD_RECOVERY_FULL_REPLAN_IDENTITY_REFINEMENT_MATERIALIZATION=PASS'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -96,7 +98,7 @@ jobs:
           $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCUnknownToleranceSelftest.cpp /Fe:COFCUnknownToleranceSelftest.exe && COFCUnknownToleranceSelftest.exe'
           cmd.exe /d /s /c $command
           if ($LASTEXITCODE -ne 0) { throw "UNKNOWN/full-replan regression failed: $LASTEXITCODE" }
-          Write-Host 'UNKNOWN_OCCUPIED_FULL_REPLAN_V544=PASS'
+          Write-Host 'UNKNOWN_OCCUPIED_FULL_REPLAN_IDENTITY_REFINEMENT_V544=PASS'
 
       - name: Run generic Fantasy 14-17 regression
         shell: pwsh
@@ -169,7 +171,7 @@ jobs:
             'source_branch=openofc-v544-field-recovery',
             'configuration=Release',
             'platform=Win32',
-            'patch=OpenOFC_v5.4.4_field_recovery_full_replan',
+            'patch=OpenOFC_v5.4.4_field_recovery_full_replan_identity_refinement',
             'tablemap=USER_V5_4_4_TO_BE_INJECTED_POST_BUILD'
           ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
           $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
