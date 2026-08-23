@@ -19,9 +19,9 @@ Fantasy continuation value is **not** represented by arbitrary heuristic points 
 
 ## Production parity gate
 
-M1 is deliberately split into non-Joker and Joker parity.
+M1 is complete.
 
-**M1a — PASS.** The Python exact core is now tested against the production C++ evaluator after materializing the standalone C++ test shim with the real OpenHoldem `StdDeck` representation (`value = suit * 13 + rank`, suit order hearts/diamonds/clubs/spades). The old standalone test shim had accidentally used a rank-major `/4` representation, so its previous self-tests were internally consistent but not bit-for-bit representative of production card values.
+**M1a — PASS.** The Python exact core is tested against the production C++ evaluator after materializing the standalone C++ test shim with the real OpenHoldem `StdDeck` representation (`value = suit * 13 + rank`, suit order hearts/diamonds/clubs/spades). The old standalone test shim had accidentally used a rank-major `/4` representation, so its previous self-tests were internally consistent but not bit-for-bit representative of production card values.
 
 Authoritative CI run `32625573072` passed both jobs. The C++/Python parity gate checked, with deterministic seed `20260823`:
 
@@ -32,28 +32,45 @@ Authoritative CI run `32625573072` passed both jobs. The C++/Python parity gate 
 
 That is 3,653 non-Joker parity comparisons with zero mismatches.
 
-**M1b — OPEN.** The diagnostic Joker corpus compared 146 complete boards and found 2 mismatches, both on two-Joker boards. The mismatches isolate one semantic question rather than a generic evaluator disagreement: the production C++ evaluator resolves each row independently, while the first Python implementation treated Joker substitutions as globally unavailable if the represented physical card appeared in another row. KKPoker's rule says the two Jokers can represent any other playing card to form the strongest hand as long as the board is not fouled, but this wording does not explicitly define cross-row substitution identity. Do not start long training runs until M1b is resolved against the rule contract and targeted KKPoker evidence.
+**M1b — PASS.** The KKPoker rule contract is now interpreted as row-local Joker substitution because each row is scored separately. Physical dealt cards remain globally unique, while a Joker may represent a card identity visible in another row. Within a single row, exact represented playing cards must remain distinct, preventing impossible constructs such as a double-Ace flush. See `RULE_CONTRACT_M1B_JOKERS.md`.
 
-The Joker diagnostic is intentionally non-fatal to M1a and is uploaded by CI as `OpenOFC_Joker_Parity_Diagnostic`.
+Authoritative strict run `32647078283` passed the targeted M1b semantic tests and a widened deterministic Joker parity corpus. After materializing the same rule contract into Python and C++:
+
+- 512 one-Joker random complete boards;
+- 256 two-Joker random complete boards;
+- 2 targeted historical mismatch boards;
+
+were compared for a total of **770 Joker boards with zero mismatches**. Combined with M1a, the exact Python core and materialized C++ evaluator now agree on the certified rule surface used to start teacher-data generation.
+
+## Position/information asymmetry
+
+Heads-up KKPoker OFC is not one information state. The player left of the button acts first in a round and the button acts last. Therefore:
+
+- **Dealer/button R4:** opponent has already completed the round. The opponent final 13-card board is public, so the terminal R4 decision can be solved exactly by exhaustive action enumeration.
+- **Non-dealer R4:** opponent's current 3-card packet and final placements are still unknown when Hero acts. This is an information-set decision and must optimize expectation over chance plus opponent policy; it is not legitimately labelable by the fully observed R4 oracle.
+
+M2 is therefore split into an exact dealer-R4 teacher corpus first, then an information-set non-dealer R4 teacher once an opponent response model/search policy exists. This prevents hidden future information from leaking into training labels.
 
 ## Milestones
 
 - **M0 — DONE:** pure cards, hand ranking, royalties, foul/scoop scoring, legal action generator, runtime-card mapping, exact terminal R4 oracle.
 - **M0-LIVE — DONE:** the latest field log yielded a real fully observed R4 state. The exact oracle labels the unique optimum as `Th -> top`, `6s -> middle`, discard `7s`, worth +26 current-hand points.
 - **M1a — DONE:** production OpenHoldem card representation corrected in the standalone parity harness; 3,653 non-Joker C++/Python comparisons PASS.
-- **M1b — OPEN:** settle row-local Joker substitution semantics and certify targeted one/two-Joker parity against KKPoker evidence.
-- **M2:** build a large exact R4 corpus from reachable self-play states and live snapshots.
-- **M3:** solve R3 by chance sampling / backward induction using exact R4 leaves.
+- **M1b — DONE:** row-local Joker semantics certified; targeted tests PASS; 770 Joker board comparisons PASS with zero mismatches.
+- **M2a — IN PROGRESS:** generate reachable **dealer/button R4** states and exact labels without hidden-information leakage.
+- **M2b:** build the non-dealer R4 information-set teacher using chance sampling plus an opponent response policy/search.
+- **M3:** solve R3 by chance sampling / backward induction using R4 teachers as leaves, preserving dealer/non-dealer information sets.
 - **M4:** extend backward through R2, R1 and the 232 legal opening placements with information-set self-play.
 - **M5:** distill teacher search into a fast policy/value model; keep search as an audit oracle.
 - **M6:** integrate the trained policy behind the OpenOFC strategy interface and measure loss versus teacher, foul rate, points/hand, royalties, Fantasy entry and multi-seed stability.
 
 ## Smoke tests
 
-From the repository root:
+From the repository root the CI materializes the M1b rule semantics first, then runs:
 
 ```bash
 python tools/openofc_solver/test_engine.py
+python tools/openofc_solver/test_m1b_joker_semantics.py
 ```
 
 Label exact fully-observed R4 states in an OpenOFC log:
