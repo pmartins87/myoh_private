@@ -33,11 +33,15 @@ def main() -> None:
   // v5.4.7 removed the legacy mouse.dll wait/restart loop. v5.4.8 restores
   // user-interference safety without restoring liveness risk: acquire/check the
   // attached table once, then fail closed immediately if focus is unavailable.
-  SetForegroundWindow(hwnd);
+  // The connector normally attaches a top-level table HWND, but guarding its
+  // GA_ROOT as well keeps the primitive correct if a child HWND is ever used.
+  HWND foreground_target = GetAncestor(hwnd, GA_ROOT);
+  if (foreground_target == NULL) foreground_target = hwnd;
+  SetForegroundWindow(foreground_target);
   SetFocus(hwnd);
   SetActiveWindow(hwnd);
   Sleep(20);
-  if (GetForegroundWindow() != hwnd) {
+  if (GetForegroundWindow() != foreground_target) {
     write_log(k_always_log_errors,
       "[OpenOFC BOUNDED_CLICK] result=REFUSED reason=FOREGROUND_NOT_ACQUIRED bounded=1\\n");
     return false;
@@ -56,7 +60,7 @@ def main() -> None:
 
     INPUT down;
 '''
-    settle_new = '''    if (GetForegroundWindow() != hwnd) {
+    settle_new = '''    if (GetForegroundWindow() != foreground_target) {
       write_log(k_always_log_errors,
         "[OpenOFC BOUNDED_CLICK] result=REFUSED reason=FOREGROUND_LOST index=%d bounded=1\\n",
         i);
@@ -99,7 +103,7 @@ def main() -> None:
     const bool release_cursor_ok = GetCursorPos(&before_release) != FALSE
       && before_release.x >= point.x - 2 && before_release.x <= point.x + 2
       && before_release.y >= point.y - 2 && before_release.y <= point.y + 2;
-    const bool release_focus_ok = GetForegroundWindow() == hwnd;
+    const bool release_focus_ok = GetForegroundWindow() == foreground_target;
     if (!release_cursor_ok || !release_focus_ok) {
       // LEFTDOWN has already happened. Release exactly once immediately and
       // stop the transaction; never wait/retry while a mouse button may be held.
