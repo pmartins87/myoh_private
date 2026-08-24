@@ -22,6 +22,7 @@ def main() -> None:
     run("tools/apply_openofc_fantasy_counted_text_v550.py")
     run("tools/apply_openofc_fantasy_counted_text_optin_v550a.py")
     run("tools/test_openofc_fantasy_counted_text_v550.py")
+    run("tools/test_openofc_fantasy_counted_text_optin_v550a.py")
     print(
         "OPENOFC_V550_MATERIALIZATION=PASS "
         "v5410_lineage=PASS loose_count=GEOMETRY_ONLY identity=TABLEMAP_T7 "
