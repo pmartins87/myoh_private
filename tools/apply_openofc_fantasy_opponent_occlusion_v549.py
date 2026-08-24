@@ -4,9 +4,8 @@ from pathlib import Path
 
 SCRAPER = Path("OpenHoldem/COFCScraper.cpp")
 MARKER = "OPENOFC_FANTASY_OPPONENT_OCCLUSION_V549"
-
-START = "  // Opponent board geometry does not move while Hero arranges Fantasy.\n"
-END = "\n  std::vector<RECT> arrangement_rects;"
+FUNCTION = "bool CScraper::ScrapeOFCFantasyVisualObservation(int player_count, int hero_chair) {"
+BOUNDARY = "  const int row_counts[3] = {3, 5, 5};"
 
 REPLACEMENT = r'''  // OPENOFC_FANTASY_OPPONENT_OCCLUSION_V549
   // Live KKPoker evidence proves that normal opponent-row TableMap geometry is
@@ -31,6 +30,7 @@ REPLACEMENT = r'''  // OPENOFC_FANTASY_OPPONENT_OCCLUSION_V549
     "[OpenOFC FANTASY OPPONENT] visibility=OCCLUDED "
     "source=NORMAL_TABLEMAP action=IGNORE_OPPONENT_BOARD "
     "hero_fantasy_nonblocking=1 contamination_guard=RESET_WHOLE_BOARD\\n");
+
 '''
 
 
@@ -42,15 +42,24 @@ def main() -> None:
         print("COFCScraper.cpp: v5.4.9 Fantasy opponent occlusion already materialized")
         return
 
-    start_count = text.count(START)
-    if start_count != 1:
+    function_start = text.find(FUNCTION)
+    if function_start < 0 or text.count(FUNCTION) != 1:
+        raise SystemExit("v5.4.9 Fantasy scraper function anchor is missing/non-unique")
+
+    comments = (
+        "  // Opponent board geometry is stable while Hero arranges Fantasy.\n",
+        "  // Opponent board geometry does not move while Hero arranges Fantasy.\n",
+    )
+    starts = [text.find(comment, function_start) for comment in comments]
+    starts = [pos for pos in starts if pos >= 0]
+    if len(starts) != 1:
         raise SystemExit(
-            f"v5.4.9 expected exactly one legacy Fantasy opponent anchor, got {start_count}"
+            f"v5.4.9 expected one post-generic Fantasy opponent block, got {len(starts)}"
         )
-    start = text.find(START)
-    end = text.find(END, start)
+    start = starts[0]
+    end = text.find(BOUNDARY, start)
     if end < 0:
-        raise SystemExit("v5.4.9 could not find Fantasy arrangement boundary after opponent block")
+        raise SystemExit("v5.4.9 could not find row-count boundary after opponent block")
 
     old = text[start:end]
     required_old = (
@@ -63,7 +72,7 @@ def main() -> None:
     )
     for needle in required_old:
         if needle not in old:
-            raise SystemExit(f"v5.4.9 legacy opponent block shape changed: missing {needle!r}")
+            raise SystemExit(f"v5.4.9 opponent block shape changed: missing {needle!r}")
 
     text = text[:start] + REPLACEMENT + text[end:]
     SCRAPER.write_text(text, encoding="utf-8")
