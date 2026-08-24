@@ -4,9 +4,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-import tools.apply_openofc_runtime_repair as runtime_repair
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import tools.apply_openofc_runtime_repair as runtime_repair
 
 SCRIPTS = [
     "tools/apply_openofc_log248_repair.py",
