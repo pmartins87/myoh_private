@@ -1,4 +1,4 @@
-name: OpenOFC v5.5.0 counted-text authoritative PR gate
+name: OpenOFC v5.5.1 paired-TableMap authoritative PR gate
 
 on:
   pull_request:
@@ -9,37 +9,39 @@ permissions:
   contents: read
 
 jobs:
-  v550-authoritative:
+  v551-authoritative:
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - name: Checkout PR merge
         uses: actions/checkout@v4
 
-      - name: Materialize v5.3 through v5.5.0
+      - name: Materialize v5.3 through v5.5.1
         shell: pwsh
         run: |
           # The v5.5 wrapper first materializes v5.4.10 and runs its historical
           # source-shape regressions BEFORE v5.5 intentionally replaces the
           # loose-hand identity route. Re-running v5.4.10's scraper-shape test
           # after that replacement would be a false failure, not a regression.
-          python tools/run_openofc_fantasy_counted_text_v550.py
-          if ($LASTEXITCODE -ne 0) { throw "v5.5.0 materialization failed: $LASTEXITCODE" }
-          Write-Host 'V550_MATERIALIZATION=PASS'
+          python tools/run_openofc_fantasy_paired_bundle_v551.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.5.1 materialization failed: $LASTEXITCODE" }
+          Write-Host 'V551_MATERIALIZATION=PASS'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: Run v5.5.0 counted-text regressions on final source shape
+      - name: Run v5.5.1 paired runtime and TableMap regressions
         shell: pwsh
         run: |
           python tools/test_openofc_fantasy_counted_text_v550.py
           if ($LASTEXITCODE -ne 0) { throw "v5.5.0 counted-text regression failed: $LASTEXITCODE" }
           python tools/test_openofc_fantasy_counted_text_optin_v550a.py
           if ($LASTEXITCODE -ne 0) { throw "v5.5.0 TableMap opt-in regression failed: $LASTEXITCODE" }
-          Write-Host 'V550_COUNTED_TEXT_FINAL_SOURCE=PASS'
+          python tools/test_openofc_v551_paired_field_bundle.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.5.1 paired TableMap/UI regression failed: $LASTEXITCODE" }
+          Write-Host 'V551_PAIRED_RUNTIME_TABLEMAP=PASS'
 
-      - name: Run Fantasy 14-17 canonical regression after v5.5.0
+      - name: Run Fantasy 14-17 canonical regression after v5.5.1
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
@@ -47,9 +49,9 @@ jobs:
           $cmd = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCGenericFantasySelftest.cpp /Fe:COFCGenericFantasySelftest.exe && COFCGenericFantasySelftest.exe'
           cmd.exe /d /s /c $cmd
           if ($LASTEXITCODE -ne 0) { throw "Fantasy 14-17 regression failed: $LASTEXITCODE" }
-          Write-Host 'GENERIC_FANTASY_14_17_POST_V550=PASS'
+          Write-Host 'GENERIC_FANTASY_14_17_POST_V551=PASS'
 
-      - name: Run UNKNOWN and continuity regressions after v5.5.0
+      - name: Run UNKNOWN and continuity regressions after v5.5.1
         shell: pwsh
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
@@ -66,7 +68,7 @@ jobs:
           $c3 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
           cmd.exe /d /s /c $c3
           if ($LASTEXITCODE -ne 0) { throw "dealer recovery regression failed: $LASTEXITCODE" }
-          Write-Host 'V550_CONTINUITY_POST_V550=PASS'
+          Write-Host 'V550_CONTINUITY_POST_V551=PASS'
 
       - name: Build dependencies
         shell: pwsh
@@ -98,24 +100,31 @@ jobs:
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
           if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
           if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
-          Write-Host 'OPENOFC_V550_RELEASE_WIN32=PASS'
+          Write-Host 'OPENOFC_V551_RELEASE_WIN32=PASS'
 
       - name: Assemble field-test artifact
         shell: pwsh
         run: |
-          $out = 'artifact/OpenOFC_v550_FIELD_TEST'
+          $out = 'artifact/OpenOFC_v551_FIELD_TEST'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item 'Release/OpenHoldem.exe' $out
           Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
           if (Test-Path 'Release/tessdata') { Copy-Item 'Release/tessdata' "$out/tessdata" -Recurse }
+          $tm = 'OpenOFC/TableMaps/KKPoker_Chines_v5_5_1_FANTASY_COUNTED_TEXT.tm'
+          if (-not (Test-Path $tm)) { throw "Paired v5.5.1 TableMap missing: $tm" }
+          Copy-Item $tm $out
+          Copy-Item 'docs/openofc/FANTASY_V551_LIVE_FAILURE_ROOT_CAUSE.md' "$out/READ_ME_FIRST_FANTASY_V551.md"
+          $tmHash = (Get-FileHash -Algorithm SHA256 $tm).Hash.ToLowerInvariant()
           @(
             "source_commit=$env:GITHUB_SHA",
             'source_pr=13',
             'source_branch=openofc-v544-field-recovery',
             'configuration=Release',
             'platform=Win32',
-            'patch=OpenOFC_v5.5.0_counted_tablemap_text_fantasy',
-            'tablemap=FANTASY_COUNTED_TEXT_V550_TEST_REQUIRED',
+            'patch=OpenOFC_v5.5.1_paired_counted_tablemap_text_fantasy',
+            'tablemap=KKPoker_Chines_v5_5_1_FANTASY_COUNTED_TEXT.tm',
+            "tablemap_sha256=$tmHash",
+            'paired_tablemap_in_artifact=1',
             'fantasy17=FAIL_CLOSED_UNTIL_CALIBRATED'
           ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
           $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
@@ -125,11 +134,12 @@ jobs:
             "$hash  $rel"
           }
           $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
-          Write-Host "OPENOFC_V550_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
+          Write-Host "OPENOFC_V551_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
+          Write-Host "OPENOFC_V551_TM_SHA256=$tmHash"
 
       - name: Upload field-test binary
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOFC_v550_FIELD_TEST_BINARY
-          path: artifact/OpenOFC_v550_FIELD_TEST
+          name: OpenOFC_v551_PAIRED_FIELD_TEST
+          path: artifact/OpenOFC_v551_FIELD_TEST
           if-no-files-found: error
