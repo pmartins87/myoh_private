@@ -69,12 +69,14 @@ def main() -> None:
 
     # Hero Fantasy perception itself remains strict and native. The repair is
     # not a threshold relaxation and does not accept guessed Hero identities.
+    # v5.4.3 generalized the old Fantasy15 recognizer to the 14..17 count path.
     for needle in (
-        "COFCFantasy15PixelRecognizer::RecognizeArrangementSlots(",
-        "COFCFantasy15PixelRecognizer::RecognizeInitialFanObjects(",
-        "COFCFantasy15PixelRecognizer::RecognizeCurrentLooseObjects(",
+        "COFCFantasyPixelRecognizer::RecognizeArrangementSlots(",
+        "COFCFantasyPixelRecognizer::RecognizeLooseObjectsUnbound(",
+        "COFCFantasyPixelRecognizer::RecognizeLooseObjectsBound(",
         "DeepOFCObservationHasUniqueKnownCards(obs)",
-        "arrangement_count + static_cast<int>(loose.size()) != 15",
+        "detected_count < 14 || detected_count > 17",
+        "obs->fantasy_card_count = detected_count",
     ):
         assert needle in fantasy, f"strict Hero Fantasy gate lost: {needle}"
 
