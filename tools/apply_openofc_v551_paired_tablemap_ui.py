@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -26,19 +27,44 @@ def replace_once(relative: str, old: str, new: str) -> None:
     print(f"patched {relative}")
 
 
+def regex_replace_once(relative: str, pattern: str, new: str, label: str) -> None:
+    path = ROOT / relative
+    raw = path.read_bytes()
+    bom = raw.startswith(b"\xef\xbb\xbf")
+    source = raw.decode("utf-8-sig").replace("\r\n", "\n")
+    eol = "\r\n" if b"\r\n" in raw else "\n"
+    source, count = re.subn(pattern, new, source, count=1, flags=re.MULTILINE)
+    if count != 1:
+        matches = [
+            line for line in source.splitlines()
+            if any(token in line for token in ("contract_ok", "CString actor", "CString action"))
+        ]
+        raise SystemExit(
+            f"{relative}: {label} expected exactly one semantic target, got {count}; "
+            f"nearby={matches!r}"
+        )
+    out = source if eol == "\n" else source.replace("\n", "\r\n")
+    data = out.encode("utf-8")
+    if bom:
+        data = b"\xef\xbb\xbf" + data
+    path.write_bytes(data)
+    print(f"patched {relative}: {label}", flush=True)
+
+
 def patch_statusbar() -> None:
-    replace_once(
+    regex_replace_once(
         "OpenHoldem/COpenHoldemStatusbar.cpp",
-        "    const bool contract_ok = contract == 1;\n",
+        r'^    const bool contract_ok = contract == [0-9]+;$',
         '''    const bool contract_ok = contract == 5;
     const bool counted_text_ok =
       p_tablemap->GetTMSymbol("openofc_fantasy_tablemap_text_by_count", 0) == 1;
     const bool paired_tablemap_ok = contract_ok && counted_text_ok;
 ''',
+        "pair contract and counted-text TableMap",
     )
-    replace_once(
+    regex_replace_once(
         "OpenHoldem/COpenHoldemStatusbar.cpp",
-        '    CString actor = contract_ok ? "Actor: ?" : "TM BLOCKED";\n',
+        r'^    CString actor = .*;$',
         '''    CString actor = "Actor: ?";
     if (!contract_ok) {
       actor.Format("TM CONTRACT %d/5", contract);
@@ -46,16 +72,19 @@ def patch_statusbar() -> None:
       actor = "TM V551 REQUIRED";
     }
 ''',
+        "explain TableMap pairing blocker",
     )
-    replace_once(
+    regex_replace_once(
         "OpenHoldem/COpenHoldemStatusbar.cpp",
-        '    CString action = contract_ok ? LastAction() : "OFC BLOQUEADO";\n',
+        r'^    CString action = .*;$',
         '    CString action = paired_tablemap_ok ? LastAction() : "OFC BLOQUEADO";\n',
+        "gate visible action on paired TableMap",
     )
-    replace_once(
+    regex_replace_once(
         "OpenHoldem/COpenHoldemStatusbar.cpp",
-        "      if (contract_ok) {\n",
-        "      if (paired_tablemap_ok) {\n",
+        r'^      if \(contract_ok\) \{$',
+        "      if (paired_tablemap_ok) {",
+        "gate canonical actor on paired TableMap",
     )
 
 
