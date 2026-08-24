@@ -1,0 +1,152 @@
+name: OpenOFC v5.5.0 counted-text authoritative PR gate
+
+on:
+  pull_request:
+    branches:
+      - 'openofc-v543-field-resilience'
+
+permissions:
+  contents: read
+
+jobs:
+  v550-authoritative:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout PR merge
+        uses: actions/checkout@v4
+
+      - name: Materialize v5.3 through v5.5.0
+        shell: pwsh
+        run: |
+          python tools/run_openofc_fantasy_counted_text_v550.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.5.0 materialization failed: $LASTEXITCODE" }
+          Write-Host 'V550_MATERIALIZATION=PASS'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Run v5.5.0 counted-text regression
+        shell: pwsh
+        run: |
+          python tools/test_openofc_fantasy_counted_text_v550.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.5.0 counted-text regression failed: $LASTEXITCODE" }
+          Write-Host 'V550_COUNTED_TEXT=PASS'
+
+      - name: Run v5.4.10 field fan and lineage regression
+        shell: pwsh
+        run: |
+          python tools/test_openofc_fantasy_field_v5410.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.10 field regression failed: $LASTEXITCODE" }
+
+      - name: Run v5.4.9 opponent-occlusion regression
+        shell: pwsh
+        run: |
+          python tools/test_openofc_fantasy_opponent_occlusion_v549.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.9 opponent occlusion regression failed: $LASTEXITCODE" }
+
+      - name: Run bounded-input and field-recognition regressions
+        shell: pwsh
+        run: |
+          python tools/test_openofc_fantasy_bounded_input_guard_v548.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.8 bounded input regression failed: $LASTEXITCODE" }
+          python tools/test_openofc_fantasy_bounded_click_v547.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.7 bounded click regression failed: $LASTEXITCODE" }
+          python tools/test_openofc_fantasy_field_v546.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.4.6 field regression failed: $LASTEXITCODE" }
+          Write-Host 'V546_V547_V548_V549_V5410_REGRESSIONS=PASS'
+
+      - name: Run Fantasy 14-17 canonical regression
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $cmd = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCGenericFantasySelftest.cpp /Fe:COFCGenericFantasySelftest.exe && COFCGenericFantasySelftest.exe'
+          cmd.exe /d /s /c $cmd
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy 14-17 regression failed: $LASTEXITCODE" }
+          Write-Host 'GENERIC_FANTASY_14_17=PASS'
+
+      - name: Run UNKNOWN and continuity regressions
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $u = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCUnknownToleranceSelftest.cpp /Fe:COFCUnknownToleranceSelftest.exe && COFCUnknownToleranceSelftest.exe'
+          cmd.exe /d /s /c $u
+          if ($LASTEXITCODE -ne 0) { throw "UNKNOWN/full-replan regression failed: $LASTEXITCODE" }
+          $c1 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRuntimeContinuitySelftest.cpp /Fe:COFCRuntimeContinuitySelftest.exe && COFCRuntimeContinuitySelftest.exe'
+          cmd.exe /d /s /c $c1
+          if ($LASTEXITCODE -ne 0) { throw "runtime continuity regression failed: $LASTEXITCODE" }
+          $c2 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCPartialReconnectSelftest.cpp /Fe:COFCPartialReconnectSelftest.exe && COFCPartialReconnectSelftest.exe'
+          cmd.exe /d /s /c $c2
+          if ($LASTEXITCODE -ne 0) { throw "partial reconnect regression failed: $LASTEXITCODE" }
+          $c3 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
+          cmd.exe /d /s /c $c3
+          if ($LASTEXITCODE -ne 0) { throw "dealer recovery regression failed: $LASTEXITCODE" }
+          Write-Host 'V550_CONTINUITY_REGRESSIONS=PASS'
+
+      - name: Build dependencies
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
+          Write-Host 'OPENOFC_V550_RELEASE_WIN32=PASS'
+
+      - name: Assemble field-test artifact
+        shell: pwsh
+        run: |
+          $out = 'artifact/OpenOFC_v550_FIELD_TEST'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item 'Release/OpenHoldem.exe' $out
+          Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path 'Release/tessdata') { Copy-Item 'Release/tessdata' "$out/tessdata" -Recurse }
+          @(
+            "source_commit=$env:GITHUB_SHA",
+            'source_pr=13',
+            'source_branch=openofc-v544-field-recovery',
+            'configuration=Release',
+            'platform=Win32',
+            'patch=OpenOFC_v5.5.0_counted_tablemap_text_fantasy',
+            'tablemap=FANTASY_COUNTED_TEXT_V550_TEST_REQUIRED',
+            'fantasy17=FAIL_CLOSED_UNTIL_CALIBRATED'
+          ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
+          $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
+          $lines = foreach ($file in $files) {
+            $rel = $file.FullName.Substring((Resolve-Path $out).Path.Length + 1).Replace('\','/')
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $rel"
+          }
+          $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
+          Write-Host "OPENOFC_V550_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
+
+      - name: Upload field-test binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v550_FIELD_TEST_BINARY
+          path: artifact/OpenOFC_v550_FIELD_TEST
+          if-no-files-found: error
