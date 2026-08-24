@@ -65,7 +65,7 @@ def main() -> None:
         289.0, 316.0, 343.0, 370.0, 396.0,
     ]
     regular = regular_grid_residual(actual)
-    offset, scale, profile = affine_profile_residual(expected, actual)
+    _, scale, profile = affine_profile_residual(expected, actual)
     assert regular > 3.5, (regular, "old regular-grid gate must reject this exact field fan")
     assert math.isclose(regular, 3.75, abs_tol=1e-9), regular
     assert 0.97 <= scale <= 1.03, scale
@@ -90,6 +90,16 @@ def main() -> None:
     assert "24.0, 42.0, 5.5" in recognizer_cpp
     assert "RecognizeArrangementOccupancy" in generic
 
+    # v5.4.10b must consume every v5.4.6 exemplar when the exact lineage is
+    # already known; the historical expected matcher used only the first 13.
+    assert "BestUprightTemplateDistance" in recognizer_cpp
+    assert "BestFanTemplateDistance" in recognizer_cpp
+    assert "sizeof(kDeepOFCUprightLargeRankTemplates)" in recognizer_cpp
+    assert "sizeof(kDeepOFCFantasy15FanRankTemplates)" in recognizer_cpp
+    assert "CardFromExpectedLineageFeature" in recognizer_cpp
+    assert "const double safe_bound = upright ? 0.70 : 0.65" in recognizer_cpp
+    assert "direct_in_lineage" in recognizer_cpp
+
     # Strict rank thresholds remain unchanged; v5.4.10 gains robustness from
     # occupancy/lineage constraints, not from globally accepting weak glyphs.
     assert "upright ? 0.36 : kDeepOFCFanRankMaxDistance" in recognizer_cpp
@@ -112,7 +122,8 @@ def main() -> None:
         "OPENOFC_FANTASY_FIELD_V5410_REGRESSION=PASS "
         f"field_regular_residual={regular:.2f} field_profile_residual={profile:.3f} "
         f"field_profile_scale={scale:.6f} empty_slot_gate=PASS occupied_card_gate=PASS "
-        "partial_lineage=CONSTRAINED global_thresholds=UNCHANGED"
+        "partial_lineage=CONSTRAINED weak_glyph_lineage=CONSTRAINED "
+        "multi_exemplar=FULL global_thresholds=UNCHANGED"
     )
 
 
