@@ -27,31 +27,31 @@ def replace_once(relative: str, old: str, new: str) -> None:
 
 
 def patch_statusbar() -> None:
-    old = '''    const int contract = p_tablemap->GetTMSymbol("openofc_contract", 0);
-    const bool contract_ok = contract == 1;
-
-    CString round = "Round: ?";
-    CString actor = contract_ok ? "Actor: ?" : "TM BLOCKED";
-    CString action = contract_ok ? LastAction() : "OFC BLOQUEADO";
-'''
-    new = '''    const int contract = p_tablemap->GetTMSymbol("openofc_contract", 0);
-    const bool contract_ok = contract == 5;
+    replace_once(
+        "OpenHoldem/COpenHoldemStatusbar.cpp",
+        "    const bool contract_ok = contract == 1;\n",
+        '''    const bool contract_ok = contract == 5;
     const bool counted_text_ok =
       p_tablemap->GetTMSymbol("openofc_fantasy_tablemap_text_by_count", 0) == 1;
     const bool paired_tablemap_ok = contract_ok && counted_text_ok;
-
-    CString round = "Round: ?";
-    CString actor = "Actor: ?";
-    CString action = LastAction();
+''',
+    )
+    replace_once(
+        "OpenHoldem/COpenHoldemStatusbar.cpp",
+        '    CString actor = contract_ok ? "Actor: ?" : "TM BLOCKED";\n',
+        '''    CString actor = "Actor: ?";
     if (!contract_ok) {
       actor.Format("TM CONTRACT %d/5", contract);
-      action = "OFC BLOQUEADO";
     } else if (!counted_text_ok) {
       actor = "TM V551 REQUIRED";
-      action = "OFC BLOQUEADO";
     }
-'''
-    replace_once("OpenHoldem/COpenHoldemStatusbar.cpp", old, new)
+''',
+    )
+    replace_once(
+        "OpenHoldem/COpenHoldemStatusbar.cpp",
+        '    CString action = contract_ok ? LastAction() : "OFC BLOQUEADO";\n',
+        '    CString action = paired_tablemap_ok ? LastAction() : "OFC BLOQUEADO";\n',
+    )
     replace_once(
         "OpenHoldem/COpenHoldemStatusbar.cpp",
         "      if (contract_ok) {\n",
