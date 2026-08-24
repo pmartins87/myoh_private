@@ -10,6 +10,24 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8-sig")
 
 
+def function_body(text: str, signature: str) -> str:
+    start = text.find(signature)
+    if start < 0:
+        raise AssertionError(f"missing function: {signature}")
+    brace = text.find("{", start)
+    if brace < 0:
+        raise AssertionError(f"missing opening brace: {signature}")
+    depth = 0
+    for i in range(brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+    raise AssertionError(f"unclosed function: {signature}")
+
+
 def median(values):
     ordered = sorted(values)
     n = len(ordered)
@@ -83,12 +101,35 @@ def main() -> None:
     assert "measured initial Fantasy fan profile residual is too high" in geometry
 
     assert "RecognizeArrangementOccupancy" in recognizer_h
-    assert "bright_face_pixels * 5 < face_pixels" in recognizer_cpp
+    assert "HasBrightFantasyCardFace" in recognizer_cpp
+    assert "bright_face_pixels * 5 >= face_pixels" in recognizer_cpp
     assert "mean >= 165.0" in recognizer_cpp
     assert "FitMeasuredInitialFan15" in recognizer_cpp
     assert "!original_fantasy_cards.empty()" in recognizer_cpp
     assert "24.0, 42.0, 5.5" in recognizer_cpp
     assert "RecognizeArrangementOccupancy" in generic
+
+    # v5.4.10c keeps the brightness occupancy concept strictly inside Fantasy
+    # arrangement functions. Shared upright extraction is used by normal-card
+    # recovery and must not inherit this UI-specific precondition.
+    upright_raw = function_body(recognizer_cpp, "bool ExtractUprightRaw(")
+    strict_arrangement = function_body(
+        recognizer_cpp,
+        "bool COFCFantasy15PixelRecognizer::RecognizeArrangementSlots(",
+    )
+    expected_arrangement = function_body(
+        recognizer_cpp,
+        "bool COFCFantasy15PixelRecognizer::RecognizeArrangementSlotsAgainstExpected(",
+    )
+    occupancy_only = function_body(
+        recognizer_cpp,
+        "bool COFCFantasy15PixelRecognizer::RecognizeArrangementOccupancy(",
+    )
+    assert "HasBrightFantasyCardFace" not in upright_raw
+    assert "bright_face_pixels" not in upright_raw
+    assert "HasBrightFantasyCardFace" in strict_arrangement
+    assert "HasBrightFantasyCardFace" in expected_arrangement
+    assert "HasBrightFantasyCardFace" in occupancy_only
 
     # v5.4.10b must consume every v5.4.6 exemplar when the exact lineage is
     # already known; the historical expected matcher used only the first 13.
@@ -123,7 +164,7 @@ def main() -> None:
         f"field_regular_residual={regular:.2f} field_profile_residual={profile:.3f} "
         f"field_profile_scale={scale:.6f} empty_slot_gate=PASS occupied_card_gate=PASS "
         "partial_lineage=CONSTRAINED weak_glyph_lineage=CONSTRAINED "
-        "multi_exemplar=FULL global_thresholds=UNCHANGED"
+        "multi_exemplar=FULL normal_upright=UNCHANGED global_thresholds=UNCHANGED"
     )
 
 
