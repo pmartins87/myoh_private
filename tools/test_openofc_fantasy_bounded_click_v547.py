@@ -48,11 +48,20 @@ def main() -> None:
         "SendInput(1, &down",
         "SendInput(1, &up",
         "Sleep(20)",
-        "Sleep(30)",
         "gap_ms > 250",
         "visual_verification=NEXT_SCRAPE",
     ):
         assert required in bounded, f"bounded primitive missing contract: {required}"
+
+    # v5.4.7 originally held LEFTDOWN for 30 ms. v5.4.8 intentionally shortens
+    # that bounded hold to 15 ms so it can perform an interference check before
+    # LEFTUP. Accept exactly the timing that belongs to the materialized lineage;
+    # do not force a stale v5.4.7 literal after the v5.4.8 safety upgrade.
+    if "OPENOFC_FANTASY_BOUNDED_INPUT_GUARD_V548" in bounded:
+        assert "Sleep(15)" in bounded, "v5.4.8 guarded hold timing missing"
+    else:
+        assert "Sleep(30)" in bounded, "v5.4.7 bounded hold timing missing"
+
     for forbidden in (
         "_dll_mouse_click",
         "MoveMouseHuman",
