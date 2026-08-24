@@ -30,8 +30,13 @@ def main() -> None:
     runtime = RUNTIME.read_text(encoding="utf-8")
     batch = BATCH.read_text(encoding="utf-8")
 
+    # v5.4.7 owns the primitive and v5.4.8 rewrites part of its function body.
+    # The v5.4.7 lineage marker is intentionally immediately before the
+    # function, not necessarily inside the brace-delimited body after a later
+    # rewrite. Assert the lineage at translation-unit scope and the v5.4.8
+    # contract inside the function itself.
+    assert "OPENOFC_FANTASY_BOUNDED_CLICK_V547" in cpp
     bounded = function_body(cpp, "bool CCasinoInterface::ClickRectsBoundedOFC(")
-    assert "OPENOFC_FANTASY_BOUNDED_CLICK_V547" in bounded
     assert "OPENOFC_FANTASY_BOUNDED_INPUT_GUARD_V548" in bounded
     assert "guard=FOCUS_CURSOR_FAIL_CLOSED_V548" in bounded
 
