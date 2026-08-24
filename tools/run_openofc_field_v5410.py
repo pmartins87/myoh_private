@@ -19,11 +19,13 @@ def main() -> None:
     run("tools/run_openofc_field_v549.py")
     run("tools/apply_openofc_fantasy_field_v5410.py")
     run("tools/apply_openofc_fantasy_lineage_match_v5410b.py")
+    run("tools/apply_openofc_fantasy_arrangement_occupancy_scope_v5410c.py")
     run("tools/test_openofc_fantasy_field_v5410.py")
     print(
         "OPENOFC_V5410_MATERIALIZATION=PASS "
         "v549_lineage=PASS field_fan_profile=PASS "
-        "empty_slot_gate=PASS partial_lineage=PASS weak_glyph_lineage=PASS"
+        "empty_slot_gate=PASS partial_lineage=PASS weak_glyph_lineage=PASS "
+        "normal_upright=UNCHANGED"
     )
 
 
