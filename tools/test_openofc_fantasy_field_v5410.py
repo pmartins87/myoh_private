@@ -10,6 +10,14 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8-sig")
 
 
+def median(values):
+    ordered = sorted(values)
+    n = len(ordered)
+    if n % 2:
+        return ordered[n // 2]
+    return 0.5 * (ordered[n // 2 - 1] + ordered[n // 2])
+
+
 def affine_profile_residual(expected, actual):
     n = float(len(expected))
     sx = sum(expected)
@@ -26,11 +34,15 @@ def affine_profile_residual(expected, actual):
 def regular_grid_residual(actual):
     ordered = sorted(actual)
     deltas = [ordered[i] - ordered[i - 1] for i in range(1, len(ordered))]
-    pitch = sorted(deltas)[len(deltas) // 2 - 1:len(deltas) // 2 + 1]
-    pitch = sum(pitch) / len(pitch)
-    center = sum(ordered) / len(ordered)
-    start = center - 0.5 * (len(ordered) - 1) * pitch
-    return max(abs(x - (start + i * pitch)) for i, x in enumerate(ordered))
+    pitch = median(deltas)
+    half = (len(ordered) - 1) / 2.0
+    implied_centers = [ordered[i] - (i - half) * pitch for i in range(len(ordered))]
+    center = median(implied_centers)
+    residual = max(
+        abs(ordered[i] - (center + (i - half) * pitch))
+        for i in range(len(ordered))
+    )
+    return residual
 
 
 def main() -> None:
