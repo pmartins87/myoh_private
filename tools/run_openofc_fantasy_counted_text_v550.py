@@ -20,11 +20,12 @@ def main() -> None:
     # the bounded-input, opponent-occlusion, arrangement or continuity gates.
     run("tools/run_openofc_field_v5410.py")
     run("tools/apply_openofc_fantasy_counted_text_v550.py")
+    run("tools/apply_openofc_fantasy_counted_text_optin_v550a.py")
     run("tools/test_openofc_fantasy_counted_text_v550.py")
     print(
         "OPENOFC_V550_MATERIALIZATION=PASS "
         "v5410_lineage=PASS loose_count=GEOMETRY_ONLY identity=TABLEMAP_T7 "
-        "stable_counts=6,7,8,9,11,12,13,14,15,16,17 "
+        "tablemap_opt_in=EXPLICIT stable_counts=6,7,8,9,11,12,13,14,15,16,17 "
         "final_1_4=LINEAGE_COMPLEMENT"
     )
 
