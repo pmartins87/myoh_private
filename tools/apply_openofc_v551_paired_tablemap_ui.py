@@ -32,7 +32,7 @@ def patch_statusbar() -> None:
 
     CString round = "Round: ?";
     CString actor = contract_ok ? "Actor: ?" : "TM BLOCKED";
-    CString action = contract_ok ? "OpenOFC" : "OFC BLOCKED";
+    CString action = contract_ok ? LastAction() : "OFC BLOQUEADO";
 '''
     new = '''    const int contract = p_tablemap->GetTMSymbol("openofc_contract", 0);
     const bool contract_ok = contract == 5;
@@ -42,13 +42,13 @@ def patch_statusbar() -> None:
 
     CString round = "Round: ?";
     CString actor = "Actor: ?";
-    CString action = "OpenOFC";
+    CString action = LastAction();
     if (!contract_ok) {
       actor.Format("TM CONTRACT %d/5", contract);
-      action = "OFC BLOCKED";
+      action = "OFC BLOQUEADO";
     } else if (!counted_text_ok) {
       actor = "TM V551 REQUIRED";
-      action = "OFC BLOCKED";
+      action = "OFC BLOQUEADO";
     }
 '''
     replace_once("OpenHoldem/COpenHoldemStatusbar.cpp", old, new)
