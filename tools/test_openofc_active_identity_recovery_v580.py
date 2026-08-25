@@ -77,7 +77,10 @@ def main() -> None:
     require("if (phase_ == kReacquire) {\n    if (!state.valid" not in runtime,
             "absorbing/empty reacquire block returned")
 
-    tm_hash = hashlib.sha256(TM.read_bytes()).hexdigest()
+    # Git for Windows may check text TableMaps out with CRLF. Hash the canonical
+    # content, exactly like the v5.7 gate, so EOL conversion is not misreported
+    # as a semantic TableMap edit.
+    tm_hash = hashlib.sha256(TM.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
     require(tm_hash == EXPECTED_TM_SHA256,
             f"paired TableMap changed unexpectedly: {tm_hash}")
     print(
