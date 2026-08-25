@@ -1,0 +1,29 @@
+name: OpenOFC temporary source snapshot
+
+on:
+  pull_request:
+    branches:
+      - 'openofc-v543-field-resilience'
+
+permissions:
+  contents: read
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload exact PR checkout
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v570_SOURCE_SNAPSHOT
+          path: |
+            .
+            !.git
+            !Release
+            !Debug
+            !artifact
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
