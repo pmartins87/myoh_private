@@ -29,7 +29,11 @@ def main() -> None:
     assert tm.count("s$openofc_contract          5") == 1
     assert tm.count("s$openofc_fantasy_tablemap_text_by_count 1") == 1
     assert tm.count("s$openofc_fantasy17_calibrated 0") == 1
-    assert tm.count("s$ofc_tablemap_stage           openofc_v5_5_0_counted_text_field_test") == 1
+    assert re.search(
+        r"^s\$ofc_tablemap_stage\s+openofc_v5_5_0_counted_text_field_test$",
+        tm,
+        re.MULTILINE,
+    )
     assert "r$IsFantasy15" in tm
 
     found = set()
@@ -46,9 +50,14 @@ def main() -> None:
     assert len(found) == 256
     assert not any(count in (1, 2, 3, 4, 5, 10) for count, _, _ in found)
 
-    begin = tm.count("// BEGIN OPENOFC_V550_STABLE_REPLAY_T7")
-    end = tm.count("// END OPENOFC_V550_STABLE_REPLAY_T7")
-    assert begin == 1 and end == 1
+    # The field-edited v5.5.1 is the authoritative calibration baseline. The
+    # TableMap editor may remove comments and normalize spacing/record order,
+    # so validate its semantic payload instead of serialization markers.
+    region_lines = [line for line in tm.splitlines() if line.startswith("r$")]
+    font_lines = [line for line in tm.splitlines() if re.match(r"^t\d+\$", line)]
+    assert len(region_lines) == 455
+    assert len(font_lines) == 540
+    assert "t7$A 7a003 7ffff ffffe 3f076 1f866 3ec0 fc0 3fc fc 38 18 18" in tm
 
     print(
         "OPENOFC_V551_PAIRED_FIELD_BUNDLE=PASS "

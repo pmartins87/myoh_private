@@ -44,6 +44,11 @@ pair. Do not reuse a v5.5.1 or older TableMap with this executable.
 - `KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm`
 - the DLLs shipped beside the executable
 
+The paired v5.5.2 TableMap is derived from the user's latest field-edited
+v5.5.1. It preserves all 65 manual region adjustments and all 13 additional
+font samples present in that file. The first v5.5.2 field package predating
+this consolidation must not be used.
+
 The main window must display `TABLEMAP PAIRED V552=OK`. If it displays a v5.5.2
 TableMap requirement, close the table connection, load the TableMap shipped in
 this package, and reconnect.

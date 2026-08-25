@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 
@@ -10,6 +11,12 @@ TM = (
     / "OpenOFC"
     / "TableMaps"
     / "KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm"
+)
+TM_V551 = (
+    ROOT
+    / "OpenOFC"
+    / "TableMaps"
+    / "KKPoker_Chines_v5_5_1_FANTASY_COUNTED_TEXT.tm"
 )
 
 
@@ -113,14 +120,39 @@ def source_contracts() -> None:
 
 def tablemap_contract() -> None:
     tm = TM.read_text(encoding="ascii")
+    calibrated_v551 = TM_V551.read_text(encoding="ascii")
     assert tm.count("s$ofc_fantasy_select_gap_ms 250") == 1
     assert tm.count("s$openofc_fantasy_live_recovery 1") == 1
     assert tm.count("s$openofc_fantasy_tablemap_text_by_count 1") == 1
     assert tm.count("s$openofc_contract          5") == 1
     assert tm.count("s$openofc_fantasy17_calibrated 0") == 1
-    assert tm.count(
-        "s$ofc_tablemap_stage           openofc_v5_5_2_fantasy_live_recovery"
-    ) == 1
+    assert re.search(
+        r"^s\$ofc_tablemap_stage\s+openofc_v5_5_2_fantasy_live_recovery$",
+        tm,
+        re.MULTILINE,
+    )
+
+    # v5.5.2 changes the runtime-pairing symbols only. Every manually adjusted
+    # region and learned font from the user's field-edited v5.5.1 must survive
+    # byte-for-byte at the record level.
+    def region_records(source: str) -> dict[str, str]:
+        return {
+            line.split()[0]: line
+            for line in source.splitlines()
+            if line.startswith("r$")
+        }
+
+    def font_records(source: str) -> Counter[str]:
+        return Counter(
+            line
+            for line in source.splitlines()
+            if re.match(r"^t\d+\$", line)
+        )
+
+    assert region_records(tm) == region_records(calibrated_v551)
+    assert font_records(tm) == font_records(calibrated_v551)
+    assert len(region_records(tm)) == 455
+    assert sum(font_records(tm).values()) == 540
 
 
 def main() -> None:
