@@ -4,11 +4,24 @@ from engine import Board, Card, score_heads_up
 from hu_continuation import (
     AUTHORITY,
     HUContinuationState,
+    KERNEL_FANTASY_FANTASY,
+    KERNEL_NORMAL_FANTASY,
+    KERNEL_NORMAL_NORMAL,
+    PLAYER_EXCHANGE_ORBIT_COUNT,
     STATE_COUNT,
     all_states,
+    canonical_player_exchange,
+    canonical_states,
     continuation_adjusted_terminal_utility,
+    expand_antisymmetric_values,
+    hand_kernel_kind,
+    identity_for_role,
+    modes_in_role_order,
     next_state_from_terminal_boards,
     normalize_relative_values,
+    role_for_identity,
+    swap_players,
+    utility_from_nondealer_perspective_to_p0,
     zero_continuation_values,
 )
 
@@ -41,6 +54,55 @@ def test_catalog_is_exactly_50_hu_states() -> None:
     assert {state.button for state in states} == {0, 1}
     assert {state.p0_fantasy_cards for state in states} == {0, 14, 15, 16, 17}
     assert {state.p1_fantasy_cards for state in states} == {0, 14, 15, 16, 17}
+
+
+def test_exact_player_exchange_reduces_50_to_25_signed_states() -> None:
+    reps = canonical_states()
+    assert PLAYER_EXCHANGE_ORBIT_COUNT == 25
+    assert len(reps) == 25
+    for state in all_states():
+        partner = swap_players(state)
+        assert partner != state
+        assert swap_players(partner) == state
+        canonical, sign = canonical_player_exchange(state)
+        assert canonical in reps
+        assert sign in (-1, 1)
+        partner_canonical, partner_sign = canonical_player_exchange(partner)
+        assert partner_canonical == canonical
+        assert partner_sign == -sign
+
+    canonical_values = {state: float(i + 1) / 7.0 for i, state in enumerate(reps)}
+    full = expand_antisymmetric_values(canonical_values)
+    assert len(full) == 50
+    for state in all_states():
+        assert abs(full[state] + full[swap_players(state)]) < 1e-12
+
+
+def test_kernel_partition_and_relative_role_mapping() -> None:
+    counts = {
+        KERNEL_NORMAL_NORMAL: 0,
+        KERNEL_NORMAL_FANTASY: 0,
+        KERNEL_FANTASY_FANTASY: 0,
+    }
+    for state in all_states():
+        counts[hand_kernel_kind(state)] += 1
+    assert counts == {
+        KERNEL_NORMAL_NORMAL: 2,
+        KERNEL_NORMAL_FANTASY: 16,
+        KERNEL_FANTASY_FANTASY: 32,
+    }
+
+    state = HUContinuationState(button=0, p0_fantasy_cards=15, p1_fantasy_cards=0)
+    assert identity_for_role(state, 0) == 1  # nondealer
+    assert identity_for_role(state, 1) == 0  # dealer/button
+    assert role_for_identity(state, 0) == 1
+    assert role_for_identity(state, 1) == 0
+    assert modes_in_role_order(state) == (0, 15)
+    assert utility_from_nondealer_perspective_to_p0(state, 3.5) == -3.5
+
+    swapped_button = HUContinuationState(button=1, p0_fantasy_cards=15, p1_fantasy_cards=0)
+    assert modes_in_role_order(swapped_button) == (15, 0)
+    assert utility_from_nondealer_perspective_to_p0(swapped_button, 3.5) == 3.5
 
 
 def test_exact_dual_player_transition() -> None:
@@ -86,6 +148,8 @@ def test_relative_value_normalization_covers_all_states() -> None:
 
 def main() -> None:
     test_catalog_is_exactly_50_hu_states()
+    test_exact_player_exchange_reduces_50_to_25_signed_states()
+    test_kernel_partition_and_relative_role_mapping()
     test_exact_dual_player_transition()
     test_parameterized_terminal_backup_is_zero_sum()
     test_relative_value_normalization_covers_all_states()

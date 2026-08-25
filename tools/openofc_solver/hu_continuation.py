@@ -13,6 +13,12 @@ A later one-hand equilibrium oracle can therefore optimize
 
 without hard-coding a Fantasy bonus. The continuation vector is an explicit
 input until the outer average-reward/fixed-point solve is implemented.
+
+Player exchange is also an exact zero-sum automorphism for this state surface:
+swapping player identities and the button maps every state to a partner whose
+player-0 value has the opposite sign. None of the 50 states is self-mapped
+because the button changes, so only 25 signed canonical representatives need to
+be solved while table funds are not part of the state.
 """
 
 from dataclasses import dataclass
@@ -29,7 +35,12 @@ from fantasy_transition import (
 NORMAL = 0
 HU_MODES: tuple[int, ...] = (NORMAL, *VALID_FANTASY_COUNTS)
 STATE_COUNT = 2 * len(HU_MODES) * len(HU_MODES)
+PLAYER_EXCHANGE_ORBIT_COUNT = STATE_COUNT // 2
 AUTHORITY = "EXACT_HU_CONTINUATION_STATE_TRANSITION"
+
+KERNEL_NORMAL_NORMAL = "NORMAL_NORMAL"
+KERNEL_NORMAL_FANTASY = "NORMAL_FANTASY_ASYMMETRIC"
+KERNEL_FANTASY_FANTASY = "FANTASY_FANTASY"
 
 
 @dataclass(frozen=True, order=True)
@@ -75,6 +86,99 @@ def all_states() -> tuple[HUContinuationState, ...]:
     if len(states) != STATE_COUNT or len(set(states)) != STATE_COUNT:
         raise AssertionError("HU continuation catalog must contain 50 states")
     return states
+
+
+def hand_kernel_kind(state: HUContinuationState) -> str:
+    """Classify which strategic one-hand kernel owns a meta-state."""
+    f0 = state.p0_fantasy_cards > 0
+    f1 = state.p1_fantasy_cards > 0
+    if not f0 and not f1:
+        return KERNEL_NORMAL_NORMAL
+    if f0 != f1:
+        return KERNEL_NORMAL_FANTASY
+    return KERNEL_FANTASY_FANTASY
+
+
+def identity_for_role(state: HUContinuationState, role: int) -> int:
+    """Map relative one-hand role 0=nondealer, 1=dealer to persistent identity."""
+    if role == 0:
+        return 1 - state.button
+    if role == 1:
+        return state.button
+    raise ValueError("HU role must be 0=nondealer or 1=dealer")
+
+
+def role_for_identity(state: HUContinuationState, player: int) -> int:
+    if player not in (0, 1):
+        raise ValueError("HU player must be 0 or 1")
+    return 1 if player == state.button else 0
+
+
+def modes_in_role_order(state: HUContinuationState) -> tuple[int, int]:
+    """Return (nondealer_mode, dealer_mode) for relative-role one-hand solvers."""
+    return (
+        state.mode_for(identity_for_role(state, 0)),
+        state.mode_for(identity_for_role(state, 1)),
+    )
+
+
+def utility_from_nondealer_perspective_to_p0(
+    state: HUContinuationState,
+    nondealer_utility: float,
+) -> float:
+    """Convert a relative-role HU zero-sum utility to persistent player 0."""
+    return (
+        float(nondealer_utility)
+        if identity_for_role(state, 0) == 0
+        else -float(nondealer_utility)
+    )
+
+
+def swap_players(state: HUContinuationState) -> HUContinuationState:
+    """Exact player-label exchange automorphism."""
+    return HUContinuationState(
+        button=1 - state.button,
+        p0_fantasy_cards=state.p1_fantasy_cards,
+        p1_fantasy_cards=state.p0_fantasy_cards,
+    )
+
+
+def canonical_player_exchange(
+    state: HUContinuationState,
+) -> tuple[HUContinuationState, int]:
+    """Return canonical player-exchange representative and player-0 value sign.
+
+    If sign is +1, V(state)=V(canonical). If sign is -1,
+    V(state)=-V(canonical). This reduction is exact for the declared zero-sum
+    50-state model; if asymmetric table funds are later added, funds must also be
+    swapped before this automorphism remains valid.
+    """
+    partner = swap_players(state)
+    if state <= partner:
+        return state, 1
+    return partner, -1
+
+
+def canonical_states() -> tuple[HUContinuationState, ...]:
+    representatives = tuple(sorted({canonical_player_exchange(s)[0] for s in all_states()}))
+    if len(representatives) != PLAYER_EXCHANGE_ORBIT_COUNT:
+        raise AssertionError("HU player exchange must reduce 50 states to 25 orbits")
+    return representatives
+
+
+def expand_antisymmetric_values(
+    canonical_values: Mapping[HUContinuationState, float],
+) -> dict[HUContinuationState, float]:
+    """Expand 25 canonical persistent-player values to the full 50-state map."""
+    reps = canonical_states()
+    missing = [state for state in reps if state not in canonical_values]
+    if missing:
+        raise ValueError(f"canonical continuation map is incomplete: {len(missing)} missing")
+    out: dict[HUContinuationState, float] = {}
+    for state in all_states():
+        canonical, sign = canonical_player_exchange(state)
+        out[state] = sign * float(canonical_values[canonical])
+    return out
 
 
 def default_next_button(current_button: int) -> int:
