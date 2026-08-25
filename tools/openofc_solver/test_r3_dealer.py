@@ -121,6 +121,10 @@ class DealerR3BackupTests(unittest.TestCase):
         self.assertEqual(row["known_card_count"], 25)
         self.assertEqual(row["unseen_count"], 29)
         self.assertFalse(row["hidden_world_persisted"])
+        self.assertEqual(
+            row["informative_action_values"],
+            row["distinct_action_interval_count"] > 1,
+        )
         forbidden = {
             "opponent_hidden_discards",
             "opponent_r3_packet",

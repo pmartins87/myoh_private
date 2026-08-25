@@ -67,6 +67,14 @@ def audit_row(row: dict) -> dict:
         raise RuntimeError("dealer R3 unseen-card count mismatch")
     if int(row.get("legal_action_count", -1)) != len(result.all_actions):
         raise RuntimeError("dealer R3 legal-action count mismatch")
+    distinct_intervals = len({
+        (value.lower_points_sum, value.upper_points_sum)
+        for value in result.all_actions
+    })
+    if int(row.get("distinct_action_interval_count", -1)) != distinct_intervals:
+        raise RuntimeError("dealer R3 distinct-action interval count mismatch")
+    if bool(row.get("informative_action_values")) != (distinct_intervals > 1):
+        raise RuntimeError("dealer R3 informative-action flag mismatch")
 
     expected_values = [
         {
@@ -109,6 +117,7 @@ def audit_row(row: dict) -> dict:
         "samples": result.samples,
         "legal_actions": len(result.all_actions),
         "certified": result.certified_unique_best is not None,
+        "informative": distinct_intervals > 1,
         "opponent_tie_worlds": max(
             value.opponent_r4_tie_worlds for value in result.all_actions
         ),
@@ -145,6 +154,9 @@ def main() -> None:
         "unique_keys": len(seen),
         "samples_per_action": sorted({row["samples"] for row in audited}),
         "certified_unique_best": sum(row["certified"] for row in audited),
+        "informative_action_value_records": sum(
+            row["informative"] for row in audited
+        ),
         "legal_action_histogram": {
             str(count): sum(
                 1 for row in audited if row["legal_actions"] == count

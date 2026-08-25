@@ -203,6 +203,10 @@ def generate_dealer_r3_state(
     certified = None
     if result.certified_unique_best is not None:
         certified = action_payload(result.certified_unique_best.action, incoming)
+    distinct_action_intervals = len({
+        (value.lower_points_sum, value.upper_points_sum)
+        for value in result.all_actions
+    })
 
     known = (
         dealer_before.top + dealer_before.middle + dealer_before.bottom
@@ -231,6 +235,8 @@ def generate_dealer_r3_state(
         "hoeffding_margin": result.hoeffding_margin,
         "action_values": action_values,
         "legal_action_count": len(result.all_actions),
+        "distinct_action_interval_count": distinct_action_intervals,
+        "informative_action_values": distinct_action_intervals > 1,
         "empirical_robust_best_actions": empirical,
         "certified_unique_best_action": certified,
         "certified_unique_best": certified is not None,
@@ -321,6 +327,9 @@ def main() -> None:
         "workers": args.workers,
         "certified_unique_best": sum(
             1 for row in rows if row["certified_unique_best"]
+        ),
+        "informative_action_values": sum(
+            1 for row in rows if row["informative_action_values"]
         ),
     }
     print("OPENOFC_R3_DEALER_CORPUS=" + json.dumps(stats, sort_keys=True))
