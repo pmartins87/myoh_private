@@ -67,6 +67,12 @@ def main() -> None:
     require("COFCIdentityRecoveryCache.cpp" in project
             and "COFCUnknownCardProbe.cpp" in project,
             "new recovery sources absent from Release project")
+    for source in ("COFCIdentityRecoveryCache.cpp", "COFCUnknownCardProbe.cpp"):
+        compile_block = project.split(f'<ClCompile Include="{source}">', 1)
+        require(len(compile_block) == 2
+                and "<PrecompiledHeader>NotUsing</PrecompiledHeader>"
+                    in compile_block[1].split("</ClCompile>", 1)[0],
+                f"{source} must compile without the OpenHoldem PCH")
 
     duplicate_arm = (
         'ArmDecisionStabilization(state, "NEW_HAND_EDGE");\n'
