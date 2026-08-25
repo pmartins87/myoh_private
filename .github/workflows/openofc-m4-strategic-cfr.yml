@@ -35,6 +35,8 @@ jobs:
         run: python tools/openofc_solver/test_strategic_runner.py
       - name: Validate HU-only resource-feasibility instrumentation
         run: python tools/openofc_solver/test_strategic_feasibility.py
+      - name: Validate deterministic multi-seed orchestration
+        run: python tools/openofc_solver/test_strategic_multiseed.py
       - name: Run bounded HU feasibility smoke
         run: |
           mkdir -p artifact
@@ -58,6 +60,28 @@ jobs:
           assert p['max_actions'] == 232
           assert p['budget_status'] == 'PASS'
           print('OPENOFC_M4_HU_FEASIBILITY=PASS')
+          PY
+      - name: Exercise two-worker independent HU training
+        run: |
+          python tools/openofc_solver/strategic_multiseed.py \
+            --seeds 20260825,20260826 \
+            --iterations 1 \
+            --checkpoint-every 1 \
+            --epsilon 0.6 \
+            --workers 2 \
+            --output-dir artifact/multiseed \
+            --manifest artifact/multiseed_manifest.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/multiseed_manifest.json', encoding='utf-8'))
+          assert p['authority'] == 'STRATEGIC_APPROX_MULTI_SEED_HU'
+          assert p['scope'] == 'HU_ONLY' and p['player_count'] == 2
+          assert p['solver_kind'] == 'suit24-exact'
+          assert p['parallel_workers'] == 2 and p['member_count'] == 2
+          assert p['ensemble']['regrets_merged'] is False
+          assert p['ensemble']['selection_scope'] == 'SELECT_ONE_MEMBER_AT_HAND_START'
+          assert all(x['iterations'] == 1 and x['max_actions'] == 232 for x in p['members'])
+          print('OPENOFC_M4_MULTI_SEED_PARALLEL=PASS')
           PY
       - name: Run suit-canonical strategic smoke and checkpoint
         run: |
@@ -116,6 +140,8 @@ jobs:
           path: |
             artifact/strategic_feasibility_n3.json.gz
             artifact/strategic_feasibility_n3.json
+            artifact/multiseed/*.json.gz
+            artifact/multiseed_manifest.json
             artifact/strategic_cfr_n5.json.gz
             artifact/strategic_cfr_smoke_summary.json
             artifact/strategic_cfr_resumed.json.gz
