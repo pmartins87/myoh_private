@@ -57,7 +57,7 @@ def main() -> None:
         "ClickRectBoundedOFC",
         "EvaluateOFCRecoveryLiveness",
         "BOUNDED_REACQUIRE_RELEASE",
-        "EXACT_FANTASY_R4_IDREC_V580",
+        "engine=EXACT_FANTASY_R4_V570 identity_recovery=ACTIVE_V580",
     ):
         require(token in runtime, f"missing runtime token {token}")
 
