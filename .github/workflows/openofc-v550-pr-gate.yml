@@ -1,4 +1,4 @@
-name: OpenOFC v5.7.0 exact-Fantasy intelligence authoritative PR gate
+name: OpenOFC v5.8.0 active identity-recovery authoritative PR gate
 
 on:
   pull_request:
@@ -9,23 +9,23 @@ permissions:
   contents: read
 
 jobs:
-  v570-authoritative:
+  v580-authoritative:
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - name: Checkout PR merge
         uses: actions/checkout@v4
 
-      - name: Materialize v5.3 through v5.7.0
+      - name: Materialize v5.3 through v5.8.0
         shell: pwsh
         run: |
           # The v5.5 wrapper first materializes v5.4.10 and runs its historical
           # source-shape regressions BEFORE v5.5 intentionally replaces the
           # loose-hand identity route. Re-running v5.4.10's scraper-shape test
           # after that replacement would be a false failure, not a regression.
-          python tools/run_openofc_exact_fantasy_v570.py
-          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 materialization failed: $LASTEXITCODE" }
-          Write-Host 'V570_MATERIALIZATION=PASS'
+          python tools/run_openofc_active_identity_recovery_v580.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.0 materialization failed: $LASTEXITCODE" }
+          Write-Host 'V580_MATERIALIZATION=PASS'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -90,7 +90,13 @@ jobs:
           $c3 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
           cmd.exe /d /s /c $c3
           if ($LASTEXITCODE -ne 0) { throw "dealer recovery regression failed: $LASTEXITCODE" }
-          Write-Host 'V550_CONTINUITY_POST_V552=PASS'
+          $id = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_IDENTITY_RECOVERY_STANDALONE /I OpenHoldem OpenHoldem\COFCIdentityRecoveryCache.cpp OpenHoldem\COFCUnknownCardProbe.cpp OpenHoldem\COFCUnknownCardProbeSelftest.cpp /Fe:COFCUnknownCardProbeSelftest.exe && COFCUnknownCardProbeSelftest.exe'
+          cmd.exe /d /s /c $id
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.0 active identity-recovery regression failed: $LASTEXITCODE" }
+          $live = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /I OpenHoldem OpenHoldem\COFCRecoveryLivenessSelftest.cpp /Fe:COFCRecoveryLivenessSelftest.exe && COFCRecoveryLivenessSelftest.exe'
+          cmd.exe /d /s /c $live
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.0 bounded recovery-liveness regression failed: $LASTEXITCODE" }
+          Write-Host 'V580_IDENTITY_AND_CONTINUITY=PASS'
 
       - name: Build dependencies
         shell: pwsh
@@ -122,12 +128,12 @@ jobs:
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
           if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
           if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
-          Write-Host 'OPENOFC_V570_RELEASE_WIN32=PASS'
+          Write-Host 'OPENOFC_V580_RELEASE_WIN32=PASS'
 
       - name: Assemble field-test artifact
         shell: pwsh
         run: |
-          $out = 'artifact/OpenOFC_v570_EXACT_FANTASY_FIELD_TEST'
+          $out = 'artifact/OpenOFC_v580_ACTIVE_IDENTITY_RECOVERY_FIELD_TEST'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item 'Release/OpenHoldem.exe' $out
           Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
@@ -138,6 +144,7 @@ jobs:
           Copy-Item 'docs/openofc/FANTASY_V552_LIVE_RECOVERY.md' "$out/READ_ME_FIRST_FANTASY_V552.md"
           Copy-Item 'docs/openofc/INTELLIGENCE_V560_EXACT_R4_TEACHER.md' "$out/READ_ME_INTELLIGENCE_V560.md"
           Copy-Item 'docs/openofc/INTELLIGENCE_V570_EXACT_FANTASY_KERNEL.md' "$out/READ_ME_INTELLIGENCE_V570.md"
+          Copy-Item 'docs/openofc/PERCEPTION_V580_ACTIVE_IDENTITY_RECOVERY.md' "$out/READ_ME_FIRST_V580_IDENTITY_RECOVERY.md"
           Copy-Item 'exact_joker_parity_v570.json' "$out/EXACT_JOKER_PARITY_V570.json"
           $tmHash = (Get-FileHash -Algorithm SHA256 $tm).Hash.ToLowerInvariant()
           @(
@@ -146,9 +153,13 @@ jobs:
             'source_branch=openofc-v544-field-recovery',
             'configuration=Release',
             'platform=Win32',
-            'patch=OpenOFC_v5.7.0_exact_fantasy_kernel',
-            'policy_engine=EXACT_FANTASY_R4_V570',
+            'patch=OpenOFC_v5.8.0_active_identity_recovery',
+            'policy_engine=EXACT_FANTASY_R4_IDREC_V580',
             'exact_scope=TERMINAL_RULES_FANTASY_14_17_AND_COMPLETE_OPPONENT_R4',
+            'identity_recovery=NORMAL_UNIQUE_BOARD_DELTA_AND_FANTASY_REVERSIBLE_PROBE',
+            'identity_ambiguity=MULTI_UNKNOWN_OR_DUPLICATE_FAIL_CLOSED',
+            'tm_fault_capture=REPLAY_BMP_HTML',
+            'runtime_reacquire=BOUNDED_NONABSORBING',
             'fantasy_authority=UNIVERSAL_DOMINANCE_UNTIL_EV_CALIBRATION',
             'fallback=SMART_BASELINE_V53',
             'tablemap=KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm',
@@ -163,12 +174,12 @@ jobs:
             "$hash  $rel"
           }
           $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
-          Write-Host "OPENOFC_V570_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
-          Write-Host "OPENOFC_V570_TM_SHA256=$tmHash"
+          Write-Host "OPENOFC_V580_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
+          Write-Host "OPENOFC_V580_TM_SHA256=$tmHash"
 
       - name: Upload field-test binary
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOFC_v570_EXACT_FANTASY_INTELLIGENCE_FIELD_TEST
-          path: artifact/OpenOFC_v570_EXACT_FANTASY_FIELD_TEST
+          name: OpenOFC_v580_ACTIVE_IDENTITY_RECOVERY_FIELD_TEST
+          path: artifact/OpenOFC_v580_ACTIVE_IDENTITY_RECOVERY_FIELD_TEST
           if-no-files-found: error
