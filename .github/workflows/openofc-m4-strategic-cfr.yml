@@ -1,0 +1,73 @@
+name: OpenOFC M4 strategic imperfect-information CFR gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4-strategic-cfr.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  m4-strategic-authoritative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Materialize certified row-local Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+      - name: Revalidate exact engine
+        run: python tools/openofc_solver/test_engine.py
+      - name: Validate exact Fantasy state transitions
+        run: python tools/openofc_solver/test_fantasy_transition.py
+      - name: Validate strategic information-state and MCCFR mechanics
+        run: python tools/openofc_solver/test_strategic_cfr.py
+      - name: Run full-action strategic smoke and checkpoint
+        run: |
+          mkdir -p artifact
+          python tools/openofc_solver/strategic_cfr.py \
+            --iterations 5 \
+            --seed 20260825 \
+            --epsilon 0.6 \
+            --checkpoint artifact/strategic_cfr_smoke.json.gz \
+            --summary artifact/strategic_cfr_smoke_summary.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/strategic_cfr_smoke_summary.json', encoding='utf-8'))
+          s=p['stats']
+          assert p['authority'] == 'STRATEGIC_CURRENT_HAND_HU_MCCFR_NOT_YET_ZERO_EXPLOITABILITY'
+          assert s['iterations'] == 5 and s['episodes'] == 10
+          assert s['infosets'] > 0 and s['total_visits'] > 0
+          assert s['max_actions'] == 232
+          print('OPENOFC_M4_STRATEGIC_SMOKE=PASS')
+          PY
+      - name: Prove checkpoint can resume
+        run: |
+          python tools/openofc_solver/strategic_cfr.py \
+            --iterations 1 \
+            --epsilon 0.6 \
+            --resume artifact/strategic_cfr_smoke.json.gz \
+            --checkpoint artifact/strategic_cfr_resumed.json.gz \
+            --summary artifact/strategic_cfr_resumed_summary.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/strategic_cfr_resumed_summary.json', encoding='utf-8'))
+          assert p['stats']['iterations'] == 6
+          assert p['stats']['episodes'] == 12
+          print('OPENOFC_M4_STRATEGIC_RESUME=PASS')
+          PY
+      - name: Upload strategic smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4_Strategic_CFR_Smoke
+          path: |
+            artifact/strategic_cfr_smoke.json.gz
+            artifact/strategic_cfr_smoke_summary.json
+            artifact/strategic_cfr_resumed.json.gz
+            artifact/strategic_cfr_resumed_summary.json
+          if-no-files-found: error
