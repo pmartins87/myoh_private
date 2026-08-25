@@ -46,8 +46,9 @@ jobs:
       - name: Run v5.8.1 exact terminal, Fantasy and R4 regressions
         shell: pwsh
         run: |
-          python tools/test_openofc_exact_r4_teacher_v560.py
-          if ($LASTEXITCODE -ne 0) { throw "v5.6.0 exact-R4 source regression failed: $LASTEXITCODE" }
+          # The v5.6 source-shape regression already ran inside the v5.8.1
+          # materialization, before v5.8.1 intentionally replaces the
+          # missing-opponent R4 contract with exact Hero non-foul safety.
           python tools/test_openofc_exact_fantasy_v570.py
           if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact-Fantasy source regression failed: $LASTEXITCODE" }
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
