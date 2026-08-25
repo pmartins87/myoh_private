@@ -25,6 +25,8 @@ jobs:
         run: python tools/openofc_solver/test_engine.py
       - name: Validate exact Fantasy state transitions
         run: python tools/openofc_solver/test_fantasy_transition.py
+      - name: Validate 2/3-player scoring order and table-fund caps
+        run: python tools/openofc_solver/test_table_scoring.py
       - name: Validate strategic information-state and MCCFR mechanics
         run: python tools/openofc_solver/test_strategic_cfr.py
       - name: Run full-action strategic smoke and checkpoint
