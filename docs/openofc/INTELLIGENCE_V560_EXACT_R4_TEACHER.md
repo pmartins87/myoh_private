@@ -82,7 +82,7 @@ The deterministic standalone suite covers:
 - baseline preservation without a terminal opponent;
 - production-policy composition through the same Pareto contract.
 
-The source regression pins the production TableMap SHA-256 to
+The source regression pins the LF-normalized production TableMap SHA-256 to
 `28587f10d3f8436880e6ef98280b5f86d85e26b674f15cfe61f5a03bc5751ee6`.
 
 ## Solver roadmap

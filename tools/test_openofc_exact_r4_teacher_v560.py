@@ -67,7 +67,10 @@ def source_contracts() -> None:
 def tablemap_contract() -> None:
     # v5.6.0 is intelligence-only. Pin the exact field-calibrated v5.5.2 TM so
     # no region, font or click source can drift under an intelligence change.
-    digest = hashlib.sha256(TM.read_bytes()).hexdigest()
+    # Git's Windows checkout uses CRLF while the repository blob uses LF, so
+    # hash the canonical LF representation on every platform.
+    canonical = TM.read_bytes().replace(b"\r\n", b"\n")
+    digest = hashlib.sha256(canonical).hexdigest()
     assert digest == "28587f10d3f8436880e6ef98280b5f86d85e26b674f15cfe61f5a03bc5751ee6"
 
 
