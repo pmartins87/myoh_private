@@ -14,7 +14,7 @@ RAM growth, information-set growth and checkpoint size.
 The solver may reduce cost only with transformations that preserve the declared
 HU game or with approximations whose loss is separately bounded. The preferred
 path is therefore exact suit symmetry, exact canonicalization, variance
-reduction, resumable sampling and parallelism before any abstraction.
+reduction, resumable sampling and safe parallelism before any abstraction.
 
 ## Why this run exists
 
@@ -41,6 +41,7 @@ python tools/openofc_solver/test_strategic_cfr.py
 python tools/openofc_solver/test_strategic_suit_symmetry.py
 python tools/openofc_solver/test_strategic_runner.py
 python tools/openofc_solver/test_strategic_feasibility.py
+python tools/openofc_solver/test_strategic_multiseed.py
 ```
 
 Do not start a long run unless all commands pass on the target Python version.
@@ -112,6 +113,36 @@ python tools/openofc_solver/strategic_cfr_runner.py \
 
 The resumed checkpoint remembers that it is `suit24-exact`; a raw solver cannot
 silently replace it.
+
+## Phase 2B — use Ryzen cores safely with independent seeds
+
+A single CFR regret table is intentionally not updated concurrently with
+uncontrolled shared writes. That would improve apparent CPU usage while changing
+the algorithm and making exact resume/certification ambiguous. Parallelism is
+instead applied across independent deterministic seeds:
+
+```bash
+python tools/openofc_solver/strategic_multiseed.py \
+  --seeds 20260825,20260826,20260827,20260828,20260829,20260830,20260831,20260832 \
+  --iterations 10000 \
+  --checkpoint-every 1000 \
+  --epsilon 0.6 \
+  --workers 8 \
+  --output-dir runs/strategic_hu/multiseed_n10k \
+  --manifest runs/strategic_hu/multiseed_n10k/manifest.json
+```
+
+Each worker owns a complete independent checkpoint and exact PRNG stream. A
+later `--resume` continues every existing member deterministically.
+
+The runner **does not sum regret tables**: CFR regret updates are nonlinear, so
+that merge would have no certified meaning. For an optional ensemble it defines
+a uniform root mixture instead: select one member once at the start of the hand
+and keep that member for the whole hand. This is a valid mixed HU strategy and
+also gives independent multi-seed evidence without corrupting each solver.
+
+The exact number of workers should come from the Phase 1 RAM/throughput probe.
+More workers are useful only while total memory bandwidth/RAM remain healthy.
 
 ## Phase 3 — evidence before more CPU
 
