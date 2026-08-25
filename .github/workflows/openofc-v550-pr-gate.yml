@@ -1,4 +1,4 @@
-name: OpenOFC v5.8.0 active identity-recovery authoritative PR gate
+name: OpenOFC v5.8.1 Fantasy-lineage and R4-safety authoritative PR gate
 
 on:
   pull_request:
@@ -9,23 +9,23 @@ permissions:
   contents: read
 
 jobs:
-  v580-authoritative:
+  v581-authoritative:
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - name: Checkout PR merge
         uses: actions/checkout@v4
 
-      - name: Materialize v5.3 through v5.8.0
+      - name: Materialize v5.3 through v5.8.1
         shell: pwsh
         run: |
           # The v5.5 wrapper first materializes v5.4.10 and runs its historical
           # source-shape regressions BEFORE v5.5 intentionally replaces the
           # loose-hand identity route. Re-running v5.4.10's scraper-shape test
           # after that replacement would be a false failure, not a regression.
-          python tools/run_openofc_active_identity_recovery_v580.py
-          if ($LASTEXITCODE -ne 0) { throw "v5.8.0 materialization failed: $LASTEXITCODE" }
-          Write-Host 'V580_MATERIALIZATION=PASS'
+          python tools/run_openofc_field_corrections_v581.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.1 materialization failed: $LASTEXITCODE" }
+          Write-Host 'V581_MATERIALIZATION=PASS'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -39,9 +39,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "v5.5.0 TableMap opt-in regression failed: $LASTEXITCODE" }
           python tools/test_openofc_fantasy_live_recovery_v552.py
           if ($LASTEXITCODE -ne 0) { throw "v5.5.2 live-recovery regression failed: $LASTEXITCODE" }
-          Write-Host 'V552_FANTASY_LIVE_RECOVERY=PASS'
+          python tools/test_openofc_field_corrections_v581.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.1 field-correction regression failed: $LASTEXITCODE" }
+          Write-Host 'V581_FANTASY_LINEAGE_AND_R4_SAFETY=PASS'
 
-      - name: Run v5.7.0 exact terminal, Fantasy and R4 regressions
+      - name: Run v5.8.1 exact terminal, Fantasy and R4 regressions
         shell: pwsh
         run: |
           python tools/test_openofc_exact_r4_teacher_v560.py
@@ -128,12 +130,12 @@ jobs:
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
           if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
           if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
-          Write-Host 'OPENOFC_V580_RELEASE_WIN32=PASS'
+          Write-Host 'OPENOFC_V581_RELEASE_WIN32=PASS'
 
       - name: Assemble field-test artifact
         shell: pwsh
         run: |
-          $out = 'artifact/OpenOFC_v580_ACTIVE_IDENTITY_RECOVERY_FIELD_TEST'
+          $out = 'artifact/OpenOFC_v581_FANTASY_LINEAGE_R4_SAFETY_FIELD_TEST'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item 'Release/OpenHoldem.exe' $out
           Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
@@ -145,6 +147,7 @@ jobs:
           Copy-Item 'docs/openofc/INTELLIGENCE_V560_EXACT_R4_TEACHER.md' "$out/READ_ME_INTELLIGENCE_V560.md"
           Copy-Item 'docs/openofc/INTELLIGENCE_V570_EXACT_FANTASY_KERNEL.md' "$out/READ_ME_INTELLIGENCE_V570.md"
           Copy-Item 'docs/openofc/PERCEPTION_V580_ACTIVE_IDENTITY_RECOVERY.md' "$out/READ_ME_FIRST_V580_IDENTITY_RECOVERY.md"
+          Copy-Item 'docs/openofc/FIELD_FIX_V581_FANTASY_LINEAGE_R4_SAFETY.md' "$out/READ_ME_FIRST_V581_FIELD_FIX.md"
           Copy-Item 'exact_joker_parity_v570.json' "$out/EXACT_JOKER_PARITY_V570.json"
           $tmHash = (Get-FileHash -Algorithm SHA256 $tm).Hash.ToLowerInvariant()
           @(
@@ -153,11 +156,12 @@ jobs:
             'source_branch=openofc-v544-field-recovery',
             'configuration=Release',
             'platform=Win32',
-            'patch=OpenOFC_v5.8.0_active_identity_recovery',
-            'policy_engine=EXACT_FANTASY_R4_V570_PLUS_ACTIVE_IDENTITY_RECOVERY_V580',
-            'exact_scope=TERMINAL_RULES_FANTASY_14_17_AND_COMPLETE_OPPONENT_R4',
+            'patch=OpenOFC_v5.8.1_fantasy_lineage_r4_safety',
+            'policy_engine=EXACT_FANTASY_R4_V570_PLUS_ACTIVE_IDENTITY_RECOVERY_V580_PLUS_FIELD_FIX_V581',
+            'exact_scope=TERMINAL_RULES_FANTASY_14_17_COMPLETE_OPPONENT_R4_AND_HIDDEN_OPPONENT_NONFOUL_SAFETY',
             'identity_recovery=NORMAL_UNIQUE_BOARD_DELTA_AND_FANTASY_REVERSIBLE_PROBE',
             'identity_ambiguity=MULTI_UNKNOWN_OR_DUPLICATE_FAIL_CLOSED',
+            'fantasy_stage_lineage=SINGLE_VALID_LOOKING_DELTA_EXACT_SET_RECOVERY',
             'tm_fault_capture=REPLAY_BMP_HTML',
             'runtime_reacquire=BOUNDED_NONABSORBING',
             'fantasy_authority=UNIVERSAL_DOMINANCE_UNTIL_EV_CALIBRATION',
@@ -174,12 +178,12 @@ jobs:
             "$hash  $rel"
           }
           $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
-          Write-Host "OPENOFC_V580_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
-          Write-Host "OPENOFC_V580_TM_SHA256=$tmHash"
+          Write-Host "OPENOFC_V581_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
+          Write-Host "OPENOFC_V581_TM_SHA256=$tmHash"
 
       - name: Upload field-test binary
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOFC_v580_ACTIVE_IDENTITY_RECOVERY_FIELD_TEST
-          path: artifact/OpenOFC_v580_ACTIVE_IDENTITY_RECOVERY_FIELD_TEST
+          name: OpenOFC_v581_FANTASY_LINEAGE_R4_SAFETY_FIELD_TEST
+          path: artifact/OpenOFC_v581_FANTASY_LINEAGE_R4_SAFETY_FIELD_TEST
           if-no-files-found: error
