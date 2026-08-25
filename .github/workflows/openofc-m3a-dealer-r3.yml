@@ -1,0 +1,52 @@
+name: OpenOFC M3a dealer R3 backward-induction gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m3a-dealer-r3.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  m3a-authoritative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Materialize certified row-local Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+      - name: Revalidate M2b non-dealer R4 leaf teacher
+        run: python tools/openofc_solver/test_r4_nondealer.py
+      - name: Run M3a information-set and backward-backup tests
+        run: python tools/openofc_solver/test_r3_dealer.py
+      - name: Generate action-informative dealer-R3 smoke backup
+        run: |
+          mkdir -p artifact
+          python tools/openofc_solver/generate_r3_dealer_corpus.py \
+            --out artifact/r3_dealer_informative_smoke.jsonl \
+            --seed 20260825 \
+            --start-deal 700004 \
+            --attempts 1 \
+            --samples 4 \
+            --workers 1
+          python -c "import json; r=json.loads(open('artifact/r3_dealer_informative_smoke.jsonl', encoding='utf-8').read()); assert r['informative_action_values'] and r['distinct_action_interval_count'] > 1; print('OPENOFC_M3A_INFORMATIVE_ACTION_VALUES=PASS')"
+      - name: Independently recompute hidden-world Q intervals
+        run: |
+          python tools/openofc_solver/audit_r3_dealer_corpus.py \
+            artifact/r3_dealer_informative_smoke.jsonl \
+            --report artifact/r3_dealer_informative_smoke_audit.json
+          python -c "import json; r=json.load(open('artifact/r3_dealer_informative_smoke_audit.json', encoding='utf-8')); assert r['status'] == 'PASS' and r['informative_action_value_records'] == 1; print('OPENOFC_M3A_RECOMPUTATION=PASS')"
+      - name: Upload auditable M3a smoke corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M3a_Dealer_R3_Informative_Smoke
+          path: |
+            artifact/r3_dealer_informative_smoke.jsonl
+            artifact/r3_dealer_informative_smoke_audit.json
+          if-no-files-found: error
