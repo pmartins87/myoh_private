@@ -38,7 +38,8 @@ the cards or belief model.
 The report records:
 
 - robust-best set exact stability and overlap;
-- regret of the N-sample selected set when evaluated at kN;
+- best- and worst-member regret of the complete N-sample selected set when
+  evaluated at kN (thresholds use the conservative worst member);
 - maximum drift of lower/upper empirical means;
 - certificate retention and new certificates;
 - the Hoeffding margin contraction, exactly `1/sqrt(k)`.

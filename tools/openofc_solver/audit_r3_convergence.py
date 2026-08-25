@@ -114,8 +114,13 @@ def compare_row(row: dict, multiplier: int) -> dict:
         key: value.lower_mean for key, value in expanded_by_action.items()
     }
     expanded_optimum = max(expanded_lower.values())
-    selected_value = max(expanded_lower[key] for key in base_best)
-    selection_regret = expanded_optimum - selected_value
+    selected_best_value = max(expanded_lower[key] for key in base_best)
+    selected_worst_value = min(expanded_lower[key] for key in base_best)
+    # The corpus deliberately keeps set-valued targets.  Until distillation
+    # defines a tie breaker, convergence must protect against *any* member of
+    # the N-sample best set being chosen, not only its most convenient member.
+    optimistic_regret = expanded_optimum - selected_best_value
+    conservative_regret = expanded_optimum - selected_worst_value
 
     base_certified = row.get("certified_unique_best_action")
     expanded_certified = None
@@ -147,7 +152,9 @@ def compare_row(row: dict, multiplier: int) -> dict:
         }) > 1,
         "best_set_exactly_stable": base_best == expanded_best,
         "best_set_overlap": bool(base_best.intersection(expanded_best)),
-        "selection_regret_at_expanded_n": selection_regret,
+        "selection_regret_at_expanded_n": conservative_regret,
+        "selection_regret_best_case_at_expanded_n": optimistic_regret,
+        "selection_regret_worst_case_at_expanded_n": conservative_regret,
         "max_lower_or_upper_mean_drift": max(mean_drifts),
         "mean_lower_or_upper_mean_drift": statistics.fmean(mean_drifts),
         "base_max_confidence_width": max(base_widths),
