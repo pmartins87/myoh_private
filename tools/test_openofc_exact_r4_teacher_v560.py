@@ -53,7 +53,13 @@ def source_contracts() -> None:
     assert "return true;" in decision  # teacher unavailability preserves baseline
     assert '#include "COFCDecisionPolicy.h"' in runtime
     assert "COFCDecisionPolicy::Choose" in runtime
-    assert "engine=HYBRID_EXACT_R4_V560" in runtime
+    # The v5.6 contract remains present when a later composed policy wraps the
+    # exact R4 teacher.  Accept the original marker or the v5.7 superset marker
+    # so this regression can be run after the complete materialization chain.
+    assert (
+        "engine=HYBRID_EXACT_R4_V560" in runtime
+        or "engine=EXACT_FANTASY_R4_V570" in runtime
+    )
     assert "[OpenOFC EXACT R4]" in runtime
 
     for source in (
