@@ -35,6 +35,8 @@ jobs:
         run: python tools/openofc_solver/test_r4_dealer_corpus.py
       - name: Run M2b non-dealer R4 information-set oracle tests
         run: python tools/openofc_solver/test_r4_nondealer.py
+      - name: Run M3a dealer-R3 backward-backup tests
+        run: python tools/openofc_solver/test_r3_dealer.py
       - name: Generate deterministic M2a smoke corpus
         run: |
           mkdir -p artifact
@@ -56,14 +58,31 @@ jobs:
           python tools/openofc_solver/audit_r4_nondealer_corpus.py \
             artifact/r4_nondealer_smoke.jsonl \
             --report artifact/r4_nondealer_smoke_audit.json
-      - name: Upload R4 teacher smoke corpora
+      - name: Generate M3a dealer-R3 sampled-backup smoke corpus
+        run: |
+          python tools/openofc_solver/generate_r3_dealer_corpus.py \
+            --out artifact/r3_dealer_smoke.jsonl \
+            --seed 20260825 \
+            --start-deal 700000 \
+            --attempts 1 \
+            --samples 4 \
+            --workers 1
+          test -s artifact/r3_dealer_smoke.jsonl
+      - name: Recompute M3a smoke hidden-world Q intervals
+        run: |
+          python tools/openofc_solver/audit_r3_dealer_corpus.py \
+            artifact/r3_dealer_smoke.jsonl \
+            --report artifact/r3_dealer_smoke_audit.json
+      - name: Upload R4 and R3 teacher smoke corpora
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOFC_R4_Exact_Teacher_Smoke
+          name: OpenOFC_R4_Exact_and_R3_Backup_Teacher_Smoke
           path: |
             artifact/r4_dealer_smoke.jsonl
             artifact/r4_nondealer_smoke.jsonl
             artifact/r4_nondealer_smoke_audit.json
+            artifact/r3_dealer_smoke.jsonl
+            artifact/r3_dealer_smoke_audit.json
           if-no-files-found: error
 
   m2a-medium-scale:

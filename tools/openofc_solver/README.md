@@ -49,7 +49,7 @@ Heads-up KKPoker OFC is not one information state. The player left of the button
 - **Dealer/button R4:** opponent has already completed the round. The opponent final 13-card board is public, so the terminal R4 decision can be solved exactly by exhaustive action enumeration.
 - **Non-dealer R4:** opponent's current 3-card packet and final placements are still unknown when Hero acts. This is an information-set decision and must optimize expectation over chance plus opponent policy; it is not legitimately labelable by the fully observed R4 oracle.
 
-M2 is therefore split into an exact dealer-R4 teacher corpus first, then an information-set non-dealer R4 teacher once an opponent response model/search policy exists. This prevents hidden future information from leaking into training labels.
+M2 is therefore split into an exact dealer-R4 teacher corpus and an information-set non-dealer R4 teacher. This prevents hidden future information from leaking into training labels.
 
 ## M2a exact dealer-R4 corpus
 
@@ -61,6 +61,32 @@ The reachability sampler used for rounds 0-3 is explicitly tagged `UNIFORM_LEGAL
 
 The large-corpus path is resumable and auditable through `run_r4_dealer_shards.py`. Every shard has a deterministic deal-id range, SHA-256 completion marker and independent exact-label recomputation before it is accepted. The generator itself fails closed if the certified M1b Joker materialization is absent.
 
+## M2b exact-current-hand non-dealer R4 teacher
+
+M2b-v1 is implemented and tested. For each non-dealer R4 information set it
+enumerates all `C(26,3) = 2,600` hidden dealer packets and every legal dealer
+response. Q values are exact integer numerators with common denominator 2,600.
+The particular shuffled-world opponent packet is never read into the label.
+See `M2B_INFORMATION_SET_CONTRACT.md`.
+
+This is exact for current-hand points under the explicit uniform-unseen belief
+induced by the card-blind reachability sampler. Strategic self-play and
+Fantasy continuation EV remain separate later milestones.
+
+## M3a dealer/button R3 backward backup
+
+M3a-v1 now backs dealer/button R3 actions through both R4 teachers. It freezes
+the legal 25-card R3 information set, samples disjoint hidden opponent discards
+and R4 packets, reuses the same worlds for every R3 action, calls M2b for the
+non-dealer R4 move and the exact fully observed oracle for the dealer response.
+
+Every exact R4 leaf is preserved. The R3 chance integral is sampled and stores
+lower/upper Q intervals across point-optimal opponent ties plus simultaneous
+Hoeffding bounds. A unique class is certified only when one lower confidence
+bound strictly exceeds every competing upper bound. Overlapping states keep
+their complete value vectors without fabricating an optimum. See
+`M3A_DEALER_R3_BACKUP_CONTRACT.md`.
+
 ## Milestones
 
 - **M0 — DONE:** pure cards, hand ranking, royalties, foul/scoop scoring, legal action generator, runtime-card mapping, exact terminal R4 oracle.
@@ -69,8 +95,10 @@ The large-corpus path is resumable and auditable through `run_r4_dealer_shards.p
 - **M1b — DONE:** row-local Joker semantics certified; targeted tests PASS; 770 Joker board comparisons PASS with zero mismatches.
 - **M2a-SMOKE — DONE:** deterministic reachable dealer-R4 corpus generated, fully recomputed/audited, artifact published by CI.
 - **M2a-SCALE — IN PROGRESS:** certify resumable shards, then generate a medium corpus before a large Ryzen run.
-- **M2b:** build the non-dealer R4 information-set teacher using chance sampling plus an opponent response policy/search.
-- **M3:** solve R3 by chance sampling / backward induction using R4 teachers as leaves, preserving dealer/non-dealer information sets.
+- **M2b — DONE (explicit v1 belief):** exact 2,600-packet non-dealer R4 expectimax, leakage guards, deterministic corpus and independent Q-vector audit.
+- **M3a — DONE (kernel/smoke):** dealer/button R3 sampled backup through both R4 teachers, common random worlds, opponent-tie intervals and conservative confidence certificate.
+- **M3a-SCALE — NEXT:** adaptive/resumable multi-seed R3 corpus and convergence audit on Ryzen.
+- **M3b:** solve the earlier-acting non-dealer R3 information set without future dealer R3 leakage.
 - **M4:** extend backward through R2, R1 and the 232 legal opening placements with information-set self-play.
 - **M5:** distill teacher search into a fast policy/value model; keep search as an audit oracle.
 - **M6:** integrate the trained policy behind the OpenOFC strategy interface and measure loss versus teacher, foul rate, points/hand, royalties, Fantasy entry and multi-seed stability.
@@ -83,6 +111,8 @@ From the repository root the CI materializes the M1b rule semantics first, then 
 python tools/openofc_solver/test_engine.py
 python tools/openofc_solver/test_m1b_joker_semantics.py
 python tools/openofc_solver/test_r4_dealer_corpus.py
+python tools/openofc_solver/test_r4_nondealer.py
+python tools/openofc_solver/test_r3_dealer.py
 ```
 
 Generate and independently audit a dealer/button R4 corpus:
@@ -97,6 +127,13 @@ For resumable multi-core generation:
 
 ```bash
 python tools/openofc_solver/run_r4_dealer_shards.py --out-dir runs/r4_dealer --attempts 100000 --attempts-per-shard 10000 --parallel-shards 1 --workers-per-shard 15
+```
+
+Generate and recompute one M3a dealer-R3 smoke backup:
+
+```bash
+python tools/openofc_solver/generate_r3_dealer_corpus.py --out r3.jsonl --attempts 1 --samples 16 --workers 1
+python tools/openofc_solver/audit_r3_dealer_corpus.py r3.jsonl
 ```
 
 Label exact fully-observed R4 states in an OpenOFC log:
