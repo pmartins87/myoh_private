@@ -43,6 +43,7 @@ def source_contracts() -> None:
     assert "COFCFantasyExactSolver::ImproveUniversally" in decision
     assert "engine=EXACT_FANTASY_R4_V570" in runtime
     assert "[OpenOFC EXACT FANTASY]" in runtime
+    assert 'reason=\\"%s\\"\\n"' in runtime
     assert '<ClCompile Include="COFCFantasyExactSolver.cpp">' in project
     assert "KKPoker row-local semantics" in python_engine
     assert "COFCExactEvaluator::EvaluateBoard" in parity_probe

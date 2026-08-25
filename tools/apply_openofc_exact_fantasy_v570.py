@@ -50,7 +50,7 @@ def main() -> None:
       "[OpenOFC EXACT FANTASY] available=%d applied=%d incoming=%d "
       "mask_pairs=%llu legal=%llu universal=%llu "
       "baseline_royalties=%d selected_royalties=%d "
-      "baseline_refantasy=%d selected_refantasy=%d reason=\"%s\"\\n",
+      "baseline_refantasy=%d selected_refantasy=%d reason=\\\"%s\\\"\\n",
       policy_report.exact_fantasy.exact_available ? 1 : 0,
       policy_report.exact_fantasy.applied ? 1 : 0,
       policy_report.exact_fantasy.incoming_count,
