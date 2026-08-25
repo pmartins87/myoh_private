@@ -418,6 +418,9 @@
     <ClCompile Include="COFCExactEvaluator.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="COFCFantasyExactSolver.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="COFCR4ExactTeacher.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>

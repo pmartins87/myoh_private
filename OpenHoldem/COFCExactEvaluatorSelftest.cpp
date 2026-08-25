@@ -12,7 +12,7 @@
 namespace {
 
 int Card(int rank, int suit) {
-  return (rank - 2) * 4 + suit;
+  return suit * 13 + (rank - 2);
 }
 
 bool Require(bool condition, const std::string &message) {
@@ -89,6 +89,29 @@ bool TestJokerResolutionAndRefantasy() {
     return false;
   return Require(result.royalties == 28 && result.fantasy_cards == 17
       && result.refantasy, "Joker trips/straight/flush exact rewards drifted");
+}
+
+bool TestProductionCardMappingAndSameRowJokerUniqueness() {
+  if (!Require(Card(12, 2) == 36 && Card(14, 3) == 51,
+        "selftest must use production OpenHoldem suit-major card values"))
+    return false;
+
+  std::vector<int> row;
+  row.push_back(Card(14, 0));
+  row.push_back(Card(13, 0));
+  row.push_back(Card(12, 0));
+  row.push_back(Card(9, 0));
+  row.push_back(kOFCCardJoker1);
+  std::vector<COFCExactHandRank> candidates;
+  std::string error;
+  if (!Require(COFCExactEvaluator::EvaluateRowCandidates(
+        row, false, &candidates, &error),
+        "same-row Joker uniqueness probe failed: " + error)) return false;
+  return Require(!candidates.empty()
+      && candidates[0].category == kOFCExactFlush
+      && candidates[0].tie[0] == 14
+      && candidates[0].tie[1] == 13,
+      "Joker must not duplicate the physical Ace already present in its row");
 }
 
 bool TestPairwiseScoring() {
@@ -222,6 +245,7 @@ bool TestProductionPolicyComposition() {
 int main() {
   if (!TestRoyaltyFantasyAndFoul()
       || !TestJokerResolutionAndRefantasy()
+      || !TestProductionCardMappingAndSameRowJokerUniqueness()
       || !TestPairwiseScoring()
       || !TestR4TeacherParetoImprovement()
       || !TestR4TeacherFailsClosedWithoutTerminalOpponent()

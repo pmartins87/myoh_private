@@ -31,8 +31,11 @@ bool Fail(string *error, const string &message) {
 ExactCard ConvertCard(int value) {
   ExactCard card;
   card.joker = value == kOFCCardJoker1 || value == kOFCCardJoker2;
-  card.rank = card.joker ? 0 : value / 4 + 2;
-  card.suit = card.joker ? -1 : value & 0x03;
+  // OpenHoldem/StdDeck is suit-major: suit * 13 + zero-based rank.
+  // Keeping a rank-major test shim here previously made the standalone tests
+  // self-consistent while evaluating different cards than production.
+  card.rank = card.joker ? 0 : value % 13 + 2;
+  card.suit = card.joker ? -1 : value / 13;
   return card;
 }
 
@@ -200,6 +203,19 @@ vector<ExactCard> NominalDeck() {
   return deck;
 }
 
+bool SameNominalCard(const ExactCard &left, const ExactCard &right) {
+  return !left.joker && !right.joker
+    && left.rank == right.rank && left.suit == right.suit;
+}
+
+bool ContainsNominalCard(
+    const vector<ExactCard> &cards, const ExactCard &candidate) {
+  for (size_t i = 0; i < cards.size(); ++i) {
+    if (SameNominalCard(cards[i], candidate)) return true;
+  }
+  return false;
+}
+
 vector<COFCExactHandRank> CandidateRanks(
     const vector<int> &values, bool top) {
   vector<ExactCard> standard;
@@ -217,8 +233,12 @@ vector<COFCExactHandRank> CandidateRanks(
   } else {
     const vector<ExactCard> deck = NominalDeck();
     for (size_t first = 0; first < deck.size(); ++first) {
+      if (ContainsNominalCard(standard, deck[first])) continue;
       const size_t second_limit = jokers == 2 ? deck.size() : 1;
       for (size_t second = 0; second < second_limit; ++second) {
+        if (jokers == 2
+            && (ContainsNominalCard(standard, deck[second])
+                || SameNominalCard(deck[first], deck[second]))) continue;
         vector<ExactCard> nominal = standard;
         nominal.push_back(deck[first]);
         if (jokers == 2) nominal.push_back(deck[second]);
@@ -302,6 +322,15 @@ bool KnownPhysical(int value) {
     || value == kOFCCardJoker1 || value == kOFCCardJoker2;
 }
 
+bool UniquePhysicalValues(const vector<int> &values) {
+  set<int> physical;
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (!KnownPhysical(values[i]) || !physical.insert(values[i]).second)
+      return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 COFCExactHandRank::COFCExactHandRank()
@@ -331,6 +360,73 @@ int COFCExactEvaluator::CompareHands(
   return 0;
 }
 
+bool COFCExactEvaluator::EvaluateRowCandidates(
+    const vector<int> &physical_cards,
+    bool top,
+    vector<COFCExactHandRank> *candidates,
+    string *error) {
+  if (candidates == NULL) return false;
+  candidates->clear();
+  if (error != NULL) error->clear();
+  const size_t required = top ? kOFCTopCards : kOFCMiddleCards;
+  if (physical_cards.size() != required)
+    return Fail(error, "exact row has wrong physical-card count");
+  if (!UniquePhysicalValues(physical_cards))
+    return Fail(error, "exact row contains unknown or duplicate physical card");
+  *candidates = CandidateRanks(physical_cards, top);
+  if (candidates->empty())
+    return Fail(error, "exact row has no legal Joker assignment");
+  return true;
+}
+
+bool COFCExactEvaluator::ResolveBoardCandidates(
+    const vector<COFCExactHandRank> &top,
+    const vector<COFCExactHandRank> &middle,
+    const vector<COFCExactHandRank> &bottom,
+    COFCExactBoardResult *result,
+    string *error) {
+  if (result == NULL) return false;
+  *result = COFCExactBoardResult();
+  if (error != NULL) error->clear();
+  if (top.empty() || middle.empty() || bottom.empty())
+    return Fail(error, "exact board requires three evaluated rows");
+
+  result->complete = true;
+  if (!ResolveBoard(top, middle, bottom, result->rows)) {
+    result->foul = true;
+    result->rows[0] = top[0];
+    result->rows[1] = middle[0];
+    result->rows[2] = bottom[0];
+    return true;
+  }
+
+  result->foul = false;
+  result->royalties = TopRoyalty(result->rows[0])
+    + MiddleRoyalty(result->rows[1])
+    + BottomRoyalty(result->rows[2]);
+
+  const COFCExactHandRank &top_rank = result->rows[0];
+  if (top_rank.category == kOFCExactTrips) {
+    result->fantasy_cards = 17;
+  } else if (top_rank.category == kOFCExactPair) {
+    if (top_rank.tie[0] == 14) result->fantasy_cards = 16;
+    else if (top_rank.tie[0] == 13) result->fantasy_cards = 15;
+    else if (top_rank.tie[0] == 12) result->fantasy_cards = 14;
+  }
+  result->refantasy = top_rank.category == kOFCExactTrips
+    || result->rows[2].category >= kOFCExactQuads;
+  return true;
+}
+
+int COFCExactEvaluator::RoyaltyForRow(
+    const COFCExactHandRank &rank,
+    EOFCRow row) {
+  if (row == kOFCRowTop) return TopRoyalty(rank);
+  if (row == kOFCRowMiddle) return MiddleRoyalty(rank);
+  if (row == kOFCRowBottom) return BottomRoyalty(rank);
+  return 0;
+}
+
 bool COFCExactEvaluator::EvaluateBoard(
     const COFCPlayerBoard &board,
     COFCExactBoardResult *result,
@@ -352,38 +448,18 @@ bool COFCExactEvaluator::EvaluateBoard(
     }
   }
 
-  const vector<COFCExactHandRank> top =
-    CandidateRanks(RowValues(board.top, kOFCTopCards), true);
-  const vector<COFCExactHandRank> middle =
-    CandidateRanks(RowValues(board.middle, kOFCMiddleCards), false);
-  const vector<COFCExactHandRank> bottom =
-    CandidateRanks(RowValues(board.bottom, kOFCBottomCards), false);
-
-  result->complete = true;
-  if (!ResolveBoard(top, middle, bottom, result->rows)) {
-    result->foul = true;
-    if (!top.empty()) result->rows[0] = top[0];
-    if (!middle.empty()) result->rows[1] = middle[0];
-    if (!bottom.empty()) result->rows[2] = bottom[0];
-    return true;
-  }
-
-  result->foul = false;
-  result->royalties = TopRoyalty(result->rows[0])
-    + MiddleRoyalty(result->rows[1])
-    + BottomRoyalty(result->rows[2]);
-
-  const COFCExactHandRank &top_rank = result->rows[0];
-  if (top_rank.category == kOFCExactTrips) {
-    result->fantasy_cards = 17;
-  } else if (top_rank.category == kOFCExactPair) {
-    if (top_rank.tie[0] == 14) result->fantasy_cards = 16;
-    else if (top_rank.tie[0] == 13) result->fantasy_cards = 15;
-    else if (top_rank.tie[0] == 12) result->fantasy_cards = 14;
-  }
-  result->refantasy = top_rank.category == kOFCExactTrips
-    || result->rows[2].category >= kOFCExactQuads;
-  return true;
+  vector<COFCExactHandRank> top;
+  vector<COFCExactHandRank> middle;
+  vector<COFCExactHandRank> bottom;
+  string row_error;
+  if (!EvaluateRowCandidates(
+        RowValues(board.top, kOFCTopCards), true, &top, &row_error)
+      || !EvaluateRowCandidates(
+        RowValues(board.middle, kOFCMiddleCards), false, &middle, &row_error)
+      || !EvaluateRowCandidates(
+        RowValues(board.bottom, kOFCBottomCards), false, &bottom, &row_error))
+    return Fail(error, row_error);
+  return ResolveBoardCandidates(top, middle, bottom, result, error);
 }
 
 bool COFCExactEvaluator::ScoreMatch(

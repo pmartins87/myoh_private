@@ -1,4 +1,4 @@
-name: OpenOFC v5.6.0 exact-R4 intelligence authoritative PR gate
+name: OpenOFC v5.7.0 exact-Fantasy intelligence authoritative PR gate
 
 on:
   pull_request:
@@ -9,23 +9,23 @@ permissions:
   contents: read
 
 jobs:
-  v560-authoritative:
+  v570-authoritative:
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - name: Checkout PR merge
         uses: actions/checkout@v4
 
-      - name: Materialize v5.3 through v5.6.0
+      - name: Materialize v5.3 through v5.7.0
         shell: pwsh
         run: |
           # The v5.5 wrapper first materializes v5.4.10 and runs its historical
           # source-shape regressions BEFORE v5.5 intentionally replaces the
           # loose-hand identity route. Re-running v5.4.10's scraper-shape test
           # after that replacement would be a false failure, not a regression.
-          python tools/run_openofc_exact_r4_teacher_v560.py
-          if ($LASTEXITCODE -ne 0) { throw "v5.6.0 materialization failed: $LASTEXITCODE" }
-          Write-Host 'V560_MATERIALIZATION=PASS'
+          python tools/run_openofc_exact_fantasy_v570.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 materialization failed: $LASTEXITCODE" }
+          Write-Host 'V570_MATERIALIZATION=PASS'
 
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
@@ -41,17 +41,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "v5.5.2 live-recovery regression failed: $LASTEXITCODE" }
           Write-Host 'V552_FANTASY_LIVE_RECOVERY=PASS'
 
-      - name: Run v5.6.0 exact terminal and R4 teacher regressions
+      - name: Run v5.7.0 exact terminal, Fantasy and R4 regressions
         shell: pwsh
         run: |
           python tools/test_openofc_exact_r4_teacher_v560.py
           if ($LASTEXITCODE -ne 0) { throw "v5.6.0 exact-R4 source regression failed: $LASTEXITCODE" }
+          python tools/test_openofc_exact_fantasy_v570.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact-Fantasy source regression failed: $LASTEXITCODE" }
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
-          $cmd = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCExactEvaluator.cpp OpenHoldem\COFCR4ExactTeacher.cpp OpenHoldem\COFCDecisionPolicy.cpp OpenHoldem\COFCExactEvaluatorSelftest.cpp /Fe:COFCExactEvaluatorSelftest.exe && COFCExactEvaluatorSelftest.exe'
+          $cmd = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCExactEvaluator.cpp OpenHoldem\COFCFantasyExactSolver.cpp OpenHoldem\COFCR4ExactTeacher.cpp OpenHoldem\COFCDecisionPolicy.cpp OpenHoldem\COFCExactEvaluatorSelftest.cpp /Fe:COFCExactEvaluatorSelftest.exe && COFCExactEvaluatorSelftest.exe'
           cmd.exe /d /s /c $cmd
           if ($LASTEXITCODE -ne 0) { throw "v5.6.0 exact terminal/R4 C++ regression failed: $LASTEXITCODE" }
-          Write-Host 'V560_EXACT_TERMINAL_R4=PASS'
+          $fantasy = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCExactEvaluator.cpp OpenHoldem\COFCFantasyExactSolver.cpp OpenHoldem\COFCFantasyExactSolverSelftest.cpp /Fe:COFCFantasyExactSolverSelftest.exe && COFCFantasyExactSolverSelftest.exe'
+          cmd.exe /d /s /c $fantasy
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact Fantasy C++ regression failed: $LASTEXITCODE" }
+          $parity = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCExactEvaluator.cpp tools\openofc_solver\cpp_exact_parity_probe.cpp /Fe:cpp_exact_parity_probe.exe'
+          cmd.exe /d /s /c $parity
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact evaluator parity probe build failed: $LASTEXITCODE" }
+          python tools/openofc_solver/check_cpp_parity.py .\cpp_exact_parity_probe.exe --joker-report exact_joker_parity_v570.json --strict-jokers
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact evaluator Python/C++ parity failed: $LASTEXITCODE" }
+          Write-Host 'V570_EXACT_TERMINAL_FANTASY_R4=PASS'
 
       - name: Run Fantasy 14-17 canonical regression after v5.5.2
         shell: pwsh
@@ -112,12 +122,12 @@ jobs:
           msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
           if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
           if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
-          Write-Host 'OPENOFC_V560_RELEASE_WIN32=PASS'
+          Write-Host 'OPENOFC_V570_RELEASE_WIN32=PASS'
 
       - name: Assemble field-test artifact
         shell: pwsh
         run: |
-          $out = 'artifact/OpenOFC_v560_EXACT_R4_FIELD_TEST'
+          $out = 'artifact/OpenOFC_v570_EXACT_FANTASY_FIELD_TEST'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           Copy-Item 'Release/OpenHoldem.exe' $out
           Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
@@ -127,6 +137,8 @@ jobs:
           Copy-Item $tm $out
           Copy-Item 'docs/openofc/FANTASY_V552_LIVE_RECOVERY.md' "$out/READ_ME_FIRST_FANTASY_V552.md"
           Copy-Item 'docs/openofc/INTELLIGENCE_V560_EXACT_R4_TEACHER.md' "$out/READ_ME_INTELLIGENCE_V560.md"
+          Copy-Item 'docs/openofc/INTELLIGENCE_V570_EXACT_FANTASY_KERNEL.md' "$out/READ_ME_INTELLIGENCE_V570.md"
+          Copy-Item 'exact_joker_parity_v570.json' "$out/EXACT_JOKER_PARITY_V570.json"
           $tmHash = (Get-FileHash -Algorithm SHA256 $tm).Hash.ToLowerInvariant()
           @(
             "source_commit=$env:GITHUB_SHA",
@@ -134,9 +146,10 @@ jobs:
             'source_branch=openofc-v544-field-recovery',
             'configuration=Release',
             'platform=Win32',
-            'patch=OpenOFC_v5.6.0_exact_terminal_r4_teacher',
-            'policy_engine=HYBRID_EXACT_R4_V560',
-            'exact_scope=TERMINAL_RULES_AND_COMPLETE_OPPONENT_R4',
+            'patch=OpenOFC_v5.7.0_exact_fantasy_kernel',
+            'policy_engine=EXACT_FANTASY_R4_V570',
+            'exact_scope=TERMINAL_RULES_FANTASY_14_17_AND_COMPLETE_OPPONENT_R4',
+            'fantasy_authority=UNIVERSAL_DOMINANCE_UNTIL_EV_CALIBRATION',
             'fallback=SMART_BASELINE_V53',
             'tablemap=KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm',
             "tablemap_sha256=$tmHash",
@@ -150,12 +163,12 @@ jobs:
             "$hash  $rel"
           }
           $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
-          Write-Host "OPENOFC_V560_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
-          Write-Host "OPENOFC_V560_TM_SHA256=$tmHash"
+          Write-Host "OPENOFC_V570_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
+          Write-Host "OPENOFC_V570_TM_SHA256=$tmHash"
 
       - name: Upload field-test binary
         uses: actions/upload-artifact@v4
         with:
-          name: OpenOFC_v560_EXACT_R4_INTELLIGENCE_FIELD_TEST
-          path: artifact/OpenOFC_v560_EXACT_R4_FIELD_TEST
+          name: OpenOFC_v570_EXACT_FANTASY_INTELLIGENCE_FIELD_TEST
+          path: artifact/OpenOFC_v570_EXACT_FANTASY_FIELD_TEST
           if-no-files-found: error

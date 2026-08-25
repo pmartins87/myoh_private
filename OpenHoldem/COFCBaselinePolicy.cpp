@@ -5,8 +5,8 @@
 #ifndef DEEPOFC_POLICY_STANDALONE
 #include "StdAfx.h"
 #else
-#define StdDeck_RANK(card) ((card) >> 2)
-#define StdDeck_SUIT(card) ((card) & 0x03)
+#define StdDeck_RANK(card) ((card) % 13)
+#define StdDeck_SUIT(card) ((card) / 13)
 #endif
 #include "COFCBaselinePolicy.h"
 
@@ -222,6 +222,19 @@ HandRank RankFiveStandard(const vector<PolicyCard> &cards) {
   return HandRank(kHighCard, ranks);
 }
 
+bool SameNominalCard(const PolicyCard &left, const PolicyCard &right) {
+  return left.joker == 0 && right.joker == 0
+    && left.rank == right.rank && left.suit == right.suit;
+}
+
+bool ContainsNominalCard(
+    const vector<PolicyCard> &cards, const PolicyCard &candidate) {
+  for (size_t i = 0; i < cards.size(); ++i) {
+    if (SameNominalCard(cards[i], candidate)) return true;
+  }
+  return false;
+}
+
 vector<HandRank> CandidateRanks(const vector<PolicyCard> &cards, bool top) {
   int joker_count = 0;
   vector<PolicyCard> standard;
@@ -235,13 +248,22 @@ vector<HandRank> CandidateRanks(const vector<PolicyCard> &cards, bool top) {
   } else {
     const vector<PolicyCard> deck = NominalDeck();
     for (size_t first = 0; first < deck.size(); ++first) {
-      const size_t second_limit = joker_count == 2 ? deck.size() : 1;
-      for (size_t second = 0; second < second_limit; ++second) {
-        vector<PolicyCard> nominal = standard;
-        nominal.push_back(deck[first]);
-        if (joker_count == 2) nominal.push_back(deck[second]);
+      if (ContainsNominalCard(standard, deck[first])) continue;
+      vector<PolicyCard> nominal = standard;
+      nominal.push_back(deck[first]);
+      if (joker_count == 1) {
         if (!top && !ValidFiveNominal(nominal)) continue;
         unique.insert(top ? RankTopStandard(nominal) : RankFiveStandard(nominal));
+        continue;
+      }
+      const size_t second_limit = joker_count == 2 ? deck.size() : 1;
+      for (size_t second = 0; second < second_limit; ++second) {
+        if (ContainsNominalCard(standard, deck[second])
+            || SameNominalCard(deck[first], deck[second])) continue;
+        vector<PolicyCard> two = nominal;
+        two.push_back(deck[second]);
+        if (!top && !ValidFiveNominal(two)) continue;
+        unique.insert(top ? RankTopStandard(two) : RankFiveStandard(two));
       }
     }
   }

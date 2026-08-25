@@ -13,6 +13,7 @@
 #define INC_COFCEXACTEVALUATOR_H
 
 #include <string>
+#include <vector>
 
 #include "COFCState.h"
 
@@ -65,6 +66,29 @@ class COFCExactEvaluator {
   static int CompareHands(
       const COFCExactHandRank &left,
       const COFCExactHandRank &right);
+
+  // Exact row candidates are exposed for exhaustive placement solvers.  The
+  // vector is strongest-first and contains every distinct rank reachable by
+  // assigning the physical Jokers in that row.  This keeps Joker semantics in
+  // one rules module instead of duplicating them in each solver.
+  static bool EvaluateRowCandidates(
+      const std::vector<int> &physical_cards,
+      bool top,
+      std::vector<COFCExactHandRank> *candidates,
+      std::string *error);
+
+  // Resolves three pre-evaluated rows into the strongest legal 3/5/5 board,
+  // then applies royalties, Fantasy entry and re-Fantasy rules.
+  static bool ResolveBoardCandidates(
+      const std::vector<COFCExactHandRank> &top,
+      const std::vector<COFCExactHandRank> &middle,
+      const std::vector<COFCExactHandRank> &bottom,
+      COFCExactBoardResult *result,
+      std::string *error);
+
+  static int RoyaltyForRow(
+      const COFCExactHandRank &rank,
+      EOFCRow row);
 
   // Requires exactly 3/5/5 known, unique physical cards.  A complete but
   // mis-set board is a successful evaluation with result->foul=true.
