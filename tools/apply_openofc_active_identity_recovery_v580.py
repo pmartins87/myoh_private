@@ -496,8 +496,12 @@ def patch_project() -> None:
         """    <ClCompile Include="COFCFantasyExactSolver.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="COFCIdentityRecoveryCache.cpp" />
-    <ClCompile Include="COFCUnknownCardProbe.cpp" />
+    <ClCompile Include="COFCIdentityRecoveryCache.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="COFCUnknownCardProbe.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="COFCR4ExactTeacher.cpp">
 """,
         "compile active identity-recovery sources in Release",
