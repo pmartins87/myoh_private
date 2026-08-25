@@ -29,47 +29,69 @@ jobs:
         run: python tools/openofc_solver/test_table_scoring.py
       - name: Validate strategic information-state and MCCFR mechanics
         run: python tools/openofc_solver/test_strategic_cfr.py
-      - name: Run full-action strategic smoke and checkpoint
+      - name: Validate exact suit-isomorphism reduction
+        run: python tools/openofc_solver/test_strategic_suit_symmetry.py
+      - name: Validate deterministic resume and convergence auditor
+        run: python tools/openofc_solver/test_strategic_runner.py
+      - name: Run suit-canonical strategic smoke and checkpoint
         run: |
           mkdir -p artifact
-          python tools/openofc_solver/strategic_cfr.py \
+          python tools/openofc_solver/strategic_cfr_runner.py \
             --iterations 5 \
+            --checkpoint-every 2 \
             --seed 20260825 \
             --epsilon 0.6 \
+            --suit-canonical \
             --checkpoint artifact/strategic_cfr_smoke.json.gz \
             --summary artifact/strategic_cfr_smoke_summary.json
           python - <<'PY'
           import json
           p=json.load(open('artifact/strategic_cfr_smoke_summary.json', encoding='utf-8'))
-          s=p['stats']
-          assert p['authority'] == 'STRATEGIC_CURRENT_HAND_HU_MCCFR_NOT_YET_ZERO_EXPLOITABILITY'
-          assert s['iterations'] == 5 and s['episodes'] == 10
-          assert s['infosets'] > 0 and s['total_visits'] > 0
-          assert s['max_actions'] == 232
+          assert p['authority'] == 'STRATEGIC_APPROX_CURRENT_HAND_HU'
+          assert p['solver_kind'] == 'suit24-exact'
+          assert p['iterations'] == 5 and p['episodes'] == 10
+          assert p['infosets'] > 0 and p['total_visits'] > 0
+          assert p['max_actions'] == 232
           print('OPENOFC_M4_STRATEGIC_SMOKE=PASS')
           PY
-      - name: Prove checkpoint can resume
+      - name: Prove exact-random-stream resume
         run: |
-          python tools/openofc_solver/strategic_cfr.py \
+          cp artifact/strategic_cfr_smoke.json.gz artifact/strategic_cfr_n5.json.gz
+          python tools/openofc_solver/strategic_cfr_runner.py \
             --iterations 1 \
-            --epsilon 0.6 \
-            --resume artifact/strategic_cfr_smoke.json.gz \
+            --resume artifact/strategic_cfr_n5.json.gz \
             --checkpoint artifact/strategic_cfr_resumed.json.gz \
+            --checkpoint-every 1 \
+            --epsilon 0.6 \
             --summary artifact/strategic_cfr_resumed_summary.json
           python - <<'PY'
           import json
           p=json.load(open('artifact/strategic_cfr_resumed_summary.json', encoding='utf-8'))
-          assert p['stats']['iterations'] == 6
-          assert p['stats']['episodes'] == 12
+          assert p['solver_kind'] == 'suit24-exact'
+          assert p['iterations'] == 6 and p['episodes'] == 12
           print('OPENOFC_M4_STRATEGIC_RESUME=PASS')
+          PY
+      - name: Audit N to N+1 policy stability plumbing
+        run: |
+          python tools/openofc_solver/audit_strategic_convergence.py \
+            artifact/strategic_cfr_n5.json.gz \
+            artifact/strategic_cfr_resumed.json.gz \
+            --report artifact/strategic_cfr_n5_to_n6.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/strategic_cfr_n5_to_n6.json', encoding='utf-8'))
+          assert p['authority'] == 'STABILITY_ONLY_NOT_EXPLOITABILITY'
+          assert p['threshold_status'] == 'PASS'
+          print('OPENOFC_M4_STABILITY_AUDIT=PASS')
           PY
       - name: Upload strategic smoke evidence
         uses: actions/upload-artifact@v4
         with:
           name: OpenOFC_M4_Strategic_CFR_Smoke
           path: |
-            artifact/strategic_cfr_smoke.json.gz
+            artifact/strategic_cfr_n5.json.gz
             artifact/strategic_cfr_smoke_summary.json
             artifact/strategic_cfr_resumed.json.gz
             artifact/strategic_cfr_resumed_summary.json
+            artifact/strategic_cfr_n5_to_n6.json
           if-no-files-found: error

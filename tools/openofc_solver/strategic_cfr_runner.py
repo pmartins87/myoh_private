@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-"""Deterministic, resumable runner for the HU strategic MCCFR core.
+"""Deterministic, resumable runner for strategic HU MCCFR.
 
-`strategic_cfr.py` intentionally kept its first checkpoint format simple.  For
-Ryzen-scale work we need a stronger contract: resuming a run must continue the
-*exact* random stream rather than restart it.  This wrapper persists the Python
-PRNG state alongside every CFR node, hashes the canonical payload, writes via an
-atomic rename and can prove byte-equivalent training state for uninterrupted
-versus interrupted+resumed runs.
+The v2 runner persists the *exact* PRNG state alongside the regret table, hashes
+the canonical payload and writes checkpoints atomically.  It supports both the
+raw full-action solver and the exact 24-way suit-isomorphic solver.
 
 This is execution infrastructure, not an optimality certificate.  A completed
-checkpoint is still `STRATEGIC_APPROX` until a separate best-response/regret
+checkpoint remains `STRATEGIC_APPROX` until a separate regret/best-response
 certificate establishes an epsilon bound for the declared game model.
 """
 
@@ -21,12 +18,26 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Type
 
 from strategic_cfr import CHECKPOINT_SCHEMA, InfoSetNode, OutcomeSamplingMCCFR
 
 RUNNER_SCHEMA = "openofc-hu-outcome-sampling-mccfr-runner-v2"
 AUTHORITY = "STRATEGIC_APPROX_CURRENT_HAND_HU"
+RAW_SOLVER_KIND = "raw-full-action"
+
+
+def _solver_kind(solver: OutcomeSamplingMCCFR) -> str:
+    return str(getattr(solver, "solver_kind", RAW_SOLVER_KIND))
+
+
+def _solver_class(kind: str) -> Type[OutcomeSamplingMCCFR]:
+    if kind == RAW_SOLVER_KIND:
+        return OutcomeSamplingMCCFR
+    if kind == "suit24-exact":
+        from strategic_suit_symmetry import SuitCanonicalOutcomeSamplingMCCFR
+        return SuitCanonicalOutcomeSamplingMCCFR
+    raise ValueError(f"unsupported strategic solver kind: {kind!r}")
 
 
 def _canonical_json_bytes(payload: dict[str, Any]) -> bytes:
@@ -49,9 +60,10 @@ def solver_state_payload(solver: OutcomeSamplingMCCFR) -> dict[str, Any]:
     return {
         "schema": RUNNER_SCHEMA,
         "authority": AUTHORITY,
+        "solver_kind": _solver_kind(solver),
         "core": core,
-        # repr(random.getstate()) is Python-literal data only.  ast.literal_eval
-        # restores it without executing code and preserves nested tuples exactly.
+        # repr(random.getstate()) is Python-literal data only. ast.literal_eval
+        # restores nested tuples exactly without executing code.
         "rng_state_repr": repr(solver.rng.getstate()),
     }
 
@@ -64,8 +76,17 @@ def _write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     if path.suffix == ".gz":
-        with gzip.open(tmp, "wb", compresslevel=6, mtime=0) as handle:
-            handle.write(data)
+        # gzip.open() has no portable `mtime` keyword. GzipFile does; pinning it
+        # makes the compressed checkpoint reproducible as well as the payload.
+        with tmp.open("wb") as raw_handle:
+            with gzip.GzipFile(
+                filename="",
+                mode="wb",
+                compresslevel=6,
+                fileobj=raw_handle,
+                mtime=0,
+            ) as handle:
+                handle.write(data)
     else:
         tmp.write_bytes(data)
     os.replace(tmp, path)
@@ -107,7 +128,8 @@ def load_runner_checkpoint(path: Path) -> tuple[OutcomeSamplingMCCFR, str]:
     core = payload.get("core")
     if not isinstance(core, dict) or core.get("schema") != CHECKPOINT_SCHEMA:
         raise ValueError("runner checkpoint contains incompatible CFR core")
-    solver = OutcomeSamplingMCCFR(
+    cls = _solver_class(str(payload.get("solver_kind", RAW_SOLVER_KIND)))
+    solver = cls(
         epsilon=float(core["epsilon"]),
         seed=int(core["seed"]),
         cfr_plus=bool(core["cfr_plus"]),
@@ -162,6 +184,7 @@ def run_chunked(
     return {
         "schema": RUNNER_SCHEMA,
         "authority": AUTHORITY,
+        "solver_kind": _solver_kind(solver),
         "checkpoint": str(checkpoint),
         "checkpoint_sha256": last_digest,
         "checkpoint_writes": writes,
@@ -188,6 +211,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260825)
     parser.add_argument("--epsilon", type=float, default=0.6)
     parser.add_argument("--no-cfr-plus", action="store_true")
+    parser.add_argument("--suit-canonical", action="store_true",
+                        help="use exact 24-way suit-isomorphism reduction")
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args()
 
@@ -197,8 +222,15 @@ def main() -> None:
             raise SystemExit("resume epsilon does not match requested epsilon")
         if solver.cfr_plus == bool(args.no_cfr_plus):
             raise SystemExit("resume CFR+ mode does not match requested mode")
+        if args.suit_canonical and _solver_kind(solver) != "suit24-exact":
+            raise SystemExit("--suit-canonical conflicts with raw resume checkpoint")
     else:
-        solver = OutcomeSamplingMCCFR(
+        if args.suit_canonical:
+            from strategic_suit_symmetry import SuitCanonicalOutcomeSamplingMCCFR
+            cls = SuitCanonicalOutcomeSamplingMCCFR
+        else:
+            cls = OutcomeSamplingMCCFR
+        solver = cls(
             epsilon=args.epsilon,
             seed=args.seed,
             cfr_plus=not args.no_cfr_plus,
