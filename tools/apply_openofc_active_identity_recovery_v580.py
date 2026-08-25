@@ -943,7 +943,7 @@ void COFCRuntimeController::ResetForKnownNewHand(const COFCState &state) {
     replace_once(
         "OpenHoldem/COFCRuntimeController.cpp",
         "engine=EXACT_FANTASY_R4_V570",
-        "engine=EXACT_FANTASY_R4_IDREC_V580",
+        "engine=EXACT_FANTASY_R4_V570 identity_recovery=ACTIVE_V580",
         "publish v5.8.0 composed engine telemetry",
     )
 
