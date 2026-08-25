@@ -154,7 +154,7 @@ jobs:
             'configuration=Release',
             'platform=Win32',
             'patch=OpenOFC_v5.8.0_active_identity_recovery',
-            'policy_engine=EXACT_FANTASY_R4_IDREC_V580',
+            'policy_engine=EXACT_FANTASY_R4_V570_PLUS_ACTIVE_IDENTITY_RECOVERY_V580',
             'exact_scope=TERMINAL_RULES_FANTASY_14_17_AND_COMPLETE_OPPONENT_R4',
             'identity_recovery=NORMAL_UNIQUE_BOARD_DELTA_AND_FANTASY_REVERSIBLE_PROBE',
             'identity_ambiguity=MULTI_UNKNOWN_OR_DUPLICATE_FAIL_CLOSED',
