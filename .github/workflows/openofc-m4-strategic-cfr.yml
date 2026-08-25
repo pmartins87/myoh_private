@@ -25,7 +25,7 @@ jobs:
         run: python tools/openofc_solver/test_engine.py
       - name: Validate exact Fantasy state transitions
         run: python tools/openofc_solver/test_fantasy_transition.py
-      - name: Validate 2/3-player scoring order and table-fund caps
+      - name: Revalidate shared scoring primitives (HU strategic scope)
         run: python tools/openofc_solver/test_table_scoring.py
       - name: Validate strategic information-state and MCCFR mechanics
         run: python tools/openofc_solver/test_strategic_cfr.py
@@ -33,9 +33,34 @@ jobs:
         run: python tools/openofc_solver/test_strategic_suit_symmetry.py
       - name: Validate deterministic resume and convergence auditor
         run: python tools/openofc_solver/test_strategic_runner.py
-      - name: Run suit-canonical strategic smoke and checkpoint
+      - name: Validate HU-only resource-feasibility instrumentation
+        run: python tools/openofc_solver/test_strategic_feasibility.py
+      - name: Run bounded HU feasibility smoke
         run: |
           mkdir -p artifact
+          python tools/openofc_solver/strategic_feasibility.py \
+            --iterations 3 \
+            --seed 20260825 \
+            --epsilon 0.6 \
+            --checkpoint artifact/strategic_feasibility_n3.json.gz \
+            --report artifact/strategic_feasibility_n3.json \
+            --project-iterations 100,1000,10000 \
+            --max-wall-seconds 120 \
+            --max-rss-mb 2048 \
+            --max-checkpoint-mb 100
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/strategic_feasibility_n3.json', encoding='utf-8'))
+          assert p['authority'] == 'HU_FEASIBILITY_MEASUREMENT_ONLY'
+          assert p['scope'] == 'HU_ONLY' and p['player_count'] == 2
+          assert p['solver_kind'] == 'suit24-exact'
+          assert p['action_abstraction'] is False
+          assert p['max_actions'] == 232
+          assert p['budget_status'] == 'PASS'
+          print('OPENOFC_M4_HU_FEASIBILITY=PASS')
+          PY
+      - name: Run suit-canonical strategic smoke and checkpoint
+        run: |
           python tools/openofc_solver/strategic_cfr_runner.py \
             --iterations 5 \
             --checkpoint-every 2 \
@@ -89,6 +114,8 @@ jobs:
         with:
           name: OpenOFC_M4_Strategic_CFR_Smoke
           path: |
+            artifact/strategic_feasibility_n3.json.gz
+            artifact/strategic_feasibility_n3.json
             artifact/strategic_cfr_n5.json.gz
             artifact/strategic_cfr_smoke_summary.json
             artifact/strategic_cfr_resumed.json.gz
