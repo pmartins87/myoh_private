@@ -121,6 +121,10 @@ def patch_fresh_fantasy_bootstrap() -> None:
         print(f"{relative}: v5.8.2 empty-arrangement bootstrap already materialized")
         return
 
+    # v5.8.0 intentionally added diagnostic_row_occupied population after the
+    # strict fresh-arrangement scan. Patch that post-v580 shape, not the older
+    # v5.5 source shape, otherwise the v5.8.2 materializer would fail before
+    # reaching the field correction.
     old = r'''  } else {
     if (!COFCFantasyPixelRecognizer::RecognizeArrangementSlots(
           _entire_window_cur, arrangement_rects,
@@ -130,13 +134,19 @@ def patch_fresh_fantasy_bootstrap() -> None:
         recognition_error.c_str());
       return false;
     }
+    int occupancy_flat = 0;
+    for (int row = 0; row < 3; ++row) {
+      diagnostic_row_occupied[row] = 0;
+      for (int i = 0; i < row_counts[row]; ++i, ++occupancy_flat)
+        if (occupied[occupancy_flat]) ++diagnostic_row_occupied[row];
+    }
   }
 '''
     new = r'''  } else {
     // OPENOFC_V582_EMPTY_ARRANGEMENT_BOOTSTRAP
-    // Fresh Fantasy starts with an empty 3/5/5 board.  Requiring thirteen
-    // rank identities before reading the fan made harmless animation/background
-    // ink in an empty slot fatal.  Occupancy is the only fact needed here.
+    // Fresh Fantasy starts with an empty 3/5/5 board. Requiring thirteen rank
+    // identities before reading the fan made harmless animation/background ink
+    // in an empty slot fatal. Occupancy is the only fact needed at bootstrap.
     if (!COFCFantasyPixelRecognizer::RecognizeArrangementOccupancy(
           _entire_window_cur, arrangement_rects,
           &occupied, &recognition_error)) {
@@ -146,15 +156,23 @@ def patch_fresh_fantasy_bootstrap() -> None:
       return false;
     }
     int bootstrap_occupied = 0;
-    for (size_t i = 0; i < occupied.size(); ++i)
-      if (occupied[i]) ++bootstrap_occupied;
+    int occupancy_flat = 0;
+    for (int row = 0; row < 3; ++row) {
+      diagnostic_row_occupied[row] = 0;
+      for (int i = 0; i < row_counts[row]; ++i, ++occupancy_flat) {
+        if (occupied[occupancy_flat]) {
+          ++bootstrap_occupied;
+          ++diagnostic_row_occupied[row];
+        }
+      }
+    }
     if (bootstrap_occupied == 0) {
       arrangement_cards.assign(
         arrangement_rects.size(), COFCFantasyPixelCard());
       write_log(true,
         "[OpenOFC FANTASY V582] bootstrap arrangement=EMPTY identity_scan=SKIPPED\n");
     } else {
-      // A non-empty board without lineage remains strict/fail-closed.  We only
+      // A non-empty board without lineage remains strict/fail-closed. We only
       // relax the visually empty fresh-hand case proven by the field replay.
       if (!COFCFantasyPixelRecognizer::RecognizeArrangementSlots(
             _entire_window_cur, arrangement_rects,
@@ -168,7 +186,7 @@ def patch_fresh_fantasy_bootstrap() -> None:
   }
 '''
     if text.count(old) != 1:
-        raise RuntimeError("v5.5 fresh Fantasy arrangement bootstrap block not found")
+        raise RuntimeError("post-v580 fresh Fantasy arrangement bootstrap block not found")
     text = text.replace(old, new, 1)
     write_text(path, text, eol, bom)
     print(f"patched {relative}: occupancy-first fresh Fantasy bootstrap")
@@ -188,10 +206,10 @@ def patch_runtime_new_hand_release() -> None:
 '''
     new = r'''  // OPENOFC_V582_FANTASY_NEW_HAND_RELEASE
   // A reconstructed fresh Fantasy state can already contain the 13 pending
-  // target placements.  PendingCount==0 therefore made an old blocked/result
-  // transaction absorb the next Fantasy hand.  New-hand identity comes from
-  // an empty Hero board + a legal 14..17 Fantasy packet + changed incoming
-  // signature; pending work is deliberately not part of the gate.
+  // target placements. PendingCount==0 therefore made an old blocked/result
+  // transaction absorb the next Fantasy hand. New-hand identity comes from an
+  // empty Hero board + a legal 14..17 Fantasy packet; pending work is not part
+  // of the gate. IncomingSignature below still prevents same-hand re-reset.
   const int fantasy_count = state.hero_incoming_count;
   const bool initial_fantasy = state.players[state.hero_chair].fantasy
     && state.round_index == -1
