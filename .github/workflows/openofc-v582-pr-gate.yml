@@ -1,0 +1,116 @@
+name: OpenOFC v5.8.2 Fantasy-bootstrap liveness authoritative PR gate
+
+on:
+  pull_request:
+    branches:
+      - 'openofc-v543-field-resilience'
+
+permissions:
+  contents: read
+
+jobs:
+  v582-authoritative:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout PR merge
+        uses: actions/checkout@v4
+
+      - name: Materialize v5.3 through v5.8.2
+        shell: pwsh
+        run: |
+          python tools/run_openofc_field_corrections_v582.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.2 materialization failed: $LASTEXITCODE" }
+          Write-Host 'V582_MATERIALIZATION=PASS'
+
+      - name: Re-run v5.8.2 field regression
+        shell: pwsh
+        run: |
+          python tools/test_openofc_field_corrections_v582.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.2 field regression failed: $LASTEXITCODE" }
+          Write-Host 'V582_FANTASY_BOOTSTRAP_LIVENESS=PASS'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build dependencies
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
+          Write-Host 'OPENOFC_V582_RELEASE_WIN32=PASS'
+
+      - name: Assemble v5.8.2 field-test artifact
+        shell: pwsh
+        run: |
+          $out = 'artifact/OpenOFC_v582_FANTASY_BOOTSTRAP_LIVENESS_FIELD_TEST'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item 'Release/OpenHoldem.exe' $out
+          Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path 'Release/tessdata') { Copy-Item 'Release/tessdata' "$out/tessdata" -Recurse }
+          $tm = 'OpenOFC/TableMaps/KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm'
+          if (-not (Test-Path $tm)) { throw "Paired v5.5.2 TableMap missing: $tm" }
+          Copy-Item $tm $out
+          Copy-Item 'docs/openofc/FANTASY_V552_LIVE_RECOVERY.md' "$out/READ_ME_FIRST_FANTASY_V552.md"
+          Copy-Item 'docs/openofc/FIELD_FIX_V581_FANTASY_LINEAGE_R4_SAFETY.md' "$out/READ_ME_V581_LINEAGE_R4.md"
+          Copy-Item 'docs/openofc/FIELD_FIX_V582_FANTASY_BOOTSTRAP_LIVENESS.md' "$out/READ_ME_FIRST_V582_FIELD_FIX.md"
+          $tmHash = (Get-FileHash -Algorithm SHA256 $tm).Hash.ToLowerInvariant()
+          if ($tmHash -ne '28587f10d3f8436880e6ef98280b5f86d85e26b674f15cfe61f5a03bc5751ee6') {
+            throw "paired TableMap changed unexpectedly: $tmHash"
+          }
+          @(
+            "source_commit=$env:GITHUB_SHA",
+            'source_pr=13',
+            'source_branch=openofc-v544-field-recovery',
+            'configuration=Release',
+            'platform=Win32',
+            'patch=OpenOFC_v5.8.2_fantasy_bootstrap_liveness',
+            'policy_engine=V581_PRESERVED',
+            'fantasy_count_alignment=ORDER_PRESERVING_MISSING1_EXTRA2',
+            'fresh_fantasy_bootstrap=EMPTY_OCCUPANCY_FIRST',
+            'runtime_new_fantasy=F14_17_EMPTY_BOARD_CHANGED_SIGNATURE',
+            'nonempty_no_lineage=FAIL_CLOSED',
+            'tablemap=KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm',
+            "tablemap_sha256=$tmHash",
+            'paired_tablemap_in_artifact=1'
+          ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
+          $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
+          $lines = foreach ($file in $files) {
+            $rel = $file.FullName.Substring((Resolve-Path $out).Path.Length + 1).Replace('\','/')
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $rel"
+          }
+          $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
+          Write-Host "OPENOFC_V582_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
+
+      - name: Upload v5.8.2 field-test binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v582_FANTASY_BOOTSTRAP_LIVENESS_FIELD_TEST_BINARY
+          path: artifact/OpenOFC_v582_FANTASY_BOOTSTRAP_LIVENESS_FIELD_TEST
+          if-no-files-found: error
