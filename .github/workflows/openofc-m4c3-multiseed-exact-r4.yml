@@ -1,0 +1,72 @@
+name: OpenOFC M4C3 multiseed + exact R4 anchor gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4c3-multiseed-exact-r4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4c3-multiseed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Revalidate exact information and feature contracts
+        run: |
+          python tools/openofc_solver/test_strategic_cfr.py
+          python tools/openofc_solver/test_strategic_suit_symmetry.py
+          python tools/openofc_solver/test_strategic_feature_encoder.py
+
+      - name: Validate exact continuation-invariant R4 anchors
+        run: python tools/openofc_solver/test_strategic_teacher_anchors.py
+
+      - name: Validate bounded generalizer
+        run: python tools/openofc_solver/test_strategic_advantage_model.py
+
+      - name: Validate deterministic multiseed smoke
+        run: python tools/openofc_solver/test_strategic_multiseed_benchmark.py
+
+      - name: Produce auditable M4C3 smoke report
+        run: |
+          mkdir -p artifact/m4c3
+          python tools/openofc_solver/strategic_multiseed_benchmark.py \
+            --seeds 20260826,20260827,20260828 \
+            --cfr-iterations 12 \
+            --teacher-nodes 160 \
+            --r4-train 3 \
+            --r4-holdout 2 \
+            --replay-capacity 16000 \
+            --epochs 2 \
+            --buckets 4096 \
+            --output artifact/m4c3/m4c3_smoke.json
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          path = Path('artifact/m4c3/m4c3_smoke.json')
+          payload = json.loads(path.read_text(encoding='utf-8'))
+          assert payload['schema'] == 'openofc-hu-m4c3-multiseed-benchmark-v1'
+          assert payload['promotion_ready'] is False
+          assert len(payload['per_seed']) == 3
+          assert all(row['exact_r4_holdout_invariant'] >= 2 for row in payload['per_seed'])
+          print('OPENOFC_M4C3_REPORT_SHA256=' + hashlib.sha256(path.read_bytes()).hexdigest())
+          print('OPENOFC_M4C3_GATE=PASS promotion=DEFERRED_TO_RYZEN_BASELINE')
+          PY
+
+      - name: Upload M4C3 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4C3_MULTISEED_EXACT_R4_SMOKE
+          path: artifact/m4c3
+          if-no-files-found: error
