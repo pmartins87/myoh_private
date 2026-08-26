@@ -2,16 +2,9 @@ from __future__ import annotations
 
 """Deterministic sparse action-conditioned model for OpenOFC strategic learning.
 
-This module is deliberately dependency-free.  It provides the first bounded
-function-generalization layer on top of the lossless M4C visible feature
-contract.  The model is *not* an exact solver: it is an approximation whose
-promotion must be earned against exact teachers and held-out strategic states.
-
-The scalar model combines direct action features with deterministic hashed
-state x action interactions.  That matters because a purely linear model over a
-concatenated state/action vector cannot make the value of an action depend on
-the current board.  The cross terms do exactly that while keeping memory
-bounded.
+This dependency-free layer is a bounded function-generalization probe built on
+M4C's lossless visible feature contract.  It is deliberately approximate and
+must earn promotion against exact teachers and held-out strategic states.
 """
 
 from dataclasses import dataclass
@@ -70,12 +63,7 @@ def interaction_terms(
     *,
     buckets: int = DEFAULT_INTERACTION_BUCKETS,
 ) -> tuple[tuple[int, float], ...]:
-    """Return sparse direct-action + hashed state/action interaction terms.
-
-    Index 0 is a global bias.  Direct action features occupy the next action
-    feature range.  State/action crosses are signed-hashed into a bounded bucket
-    range.  Collisions are explicit and algebraically accumulated.
-    """
+    """Sparse direct-action + signed-hashed state/action interaction terms."""
     _require_power_of_two(buckets)
     _validate_state_action_features(state_features, action_features)
     action_size = FEATURE_DIMENSION - OFFSET_ACTION
@@ -138,7 +126,7 @@ class ReplayExample:
 
 
 class DeterministicReservoir:
-    """Bounded replay memory with resume-stable deterministic reservoir sampling."""
+    """Bounded replay with resume-stable counter-derived reservoir sampling."""
 
     def __init__(self, *, capacity: int, seed: int = 20260826) -> None:
         if capacity <= 0:
@@ -153,8 +141,6 @@ class DeterministicReservoir:
         if len(self.items) < self.capacity:
             self.items.append(example)
             return
-        # Standard reservoir rule j~Uniform[0, seen), but generated from a
-        # deterministic counter hash so resume does not require RNG serialization.
         j = _mix64(self.seed ^ self.seen) % self.seen
         if j < self.capacity:
             self.items[int(j)] = example
@@ -222,20 +208,18 @@ class SparseActionAdvantageModel:
 
     def terms(self, example: ReplayExample) -> tuple[tuple[int, float], ...]:
         return interaction_terms(
-            example.state_features,
-            example.action_features,
-            buckets=self.buckets,
+            example.state_features, example.action_features, buckets=self.buckets
         )
 
     def predict_features(
         self, state_features: Sequence[int], action_features: Sequence[int]
     ) -> float:
-        total = 0.0
-        for index, value in interaction_terms(
-            state_features, action_features, buckets=self.buckets
-        ):
-            total += self.weights.get(index, 0.0) * value
-        return total
+        return sum(
+            self.weights.get(index, 0.0) * value
+            for index, value in interaction_terms(
+                state_features, action_features, buckets=self.buckets
+            )
+        )
 
     def predict(self, example: ReplayExample) -> float:
         return self.predict_features(example.state_features, example.action_features)
@@ -260,9 +244,9 @@ class SparseActionAdvantageModel:
         self.updates += 1
         if abs(error) <= self.huber_delta:
             return 0.5 * error * error * example.weight
-        return (
-            self.huber_delta * (abs(error) - 0.5 * self.huber_delta) * example.weight
-        )
+        return self.huber_delta * (
+            abs(error) - 0.5 * self.huber_delta
+        ) * example.weight
 
     def fit(self, replay: DeterministicReservoir, *, epochs: int = 1) -> dict[str, float]:
         if epochs <= 0 or not replay.items:
@@ -355,8 +339,13 @@ def save_checkpoint(
     path.parent.mkdir(parents=True, exist_ok=True)
     raw = _canonical_bytes(checkpoint_payload(model, replay))
     if path.suffix == ".gz":
-        with gzip.open(path, "wb", compresslevel=6, mtime=0) as handle:
-            handle.write(raw)
+        # gzip.open() does not expose mtime. GzipFile does, so force mtime=0 to
+        # make compressed checkpoints byte-stable for equal logical payloads.
+        with path.open("wb") as raw_handle:
+            with gzip.GzipFile(
+                fileobj=raw_handle, mode="wb", compresslevel=6, mtime=0
+            ) as handle:
+                handle.write(raw)
     else:
         path.write_bytes(raw)
 
