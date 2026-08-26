@@ -27,6 +27,8 @@ jobs:
         run: python tools/openofc_solver/test_fantasy_transition.py
       - name: Validate exact HU cross-hand continuation states
         run: python tools/openofc_solver/test_hu_continuation.py
+      - name: Validate exact delayed Fantasy response kernel
+        run: python tools/openofc_solver/test_fantasy_delayed_response.py
       - name: Revalidate shared scoring primitives (HU strategic scope)
         run: python tools/openofc_solver/test_table_scoring.py
       - name: Validate strategic information-state and MCCFR mechanics
