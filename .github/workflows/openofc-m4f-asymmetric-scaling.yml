@@ -1,0 +1,43 @@
+name: OpenOFC M4F asymmetric exact-scaling gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4f-asymmetric-scaling.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4f-asymmetric-scaling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate asymmetric hand model and visible suit reduction
+        run: |
+          python tools/openofc_solver/test_normal_fantasy_kernel.py
+          python tools/openofc_solver/test_normal_fantasy_symmetry.py
+
+      - name: Validate exact Fantasy frontier factoring and cache
+        run: |
+          python tools/openofc_solver/test_fantasy_response_frontier.py
+          python tools/openofc_solver/test_fantasy_frontier_cache.py
+
+      - name: Gate summary
+        run: |
+          echo 'OPENOFC_M4F_GATE=PASS'
+          echo 'policy_symmetry=SUIT24_VISIBLE_ONLY'
+          echo 'terminal_cache=SUIT24_COMPLETE_WORLD_ORACLE_ONLY'
+          echo 'continuation_revalue=CONSTANT_TIME_AFTER_FRONTIER'
+          echo 'next=MEASURE_CACHE_MISS_THROUGHPUT_BEFORE_RYZEN_SCALE'
+          echo 'field_test=DEFERRED'
