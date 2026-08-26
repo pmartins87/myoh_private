@@ -1,0 +1,43 @@
+name: OpenOFC M4D exact Fantasy response frontier gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4d-fantasy-frontier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4d-frontier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Revalidate exact Fantasy transitions
+        run: |
+          python tools/openofc_solver/test_fantasy_transition.py
+          python tools/openofc_solver/test_hu_continuation.py
+
+      - name: Revalidate exact delayed Fantasy response
+        run: python tools/openofc_solver/test_fantasy_delayed_response.py
+
+      - name: Validate exact continuation-independent frontier
+        run: python tools/openofc_solver/test_fantasy_response_frontier.py
+
+      - name: Gate summary
+        run: |
+          echo 'OPENOFC_M4D_GATE=PASS'
+          echo 'frontier=EXACT_TWO_BRANCH_FACTORING'
+          echo 'continuation_revaluation=NO_COMBINATORIAL_RESEARCH'
+          echo 'timing_assumption=DELAY_UNTIL_NORMAL_COMPLETE_EXPLICIT'
+          echo 'field_test=DEFERRED'
