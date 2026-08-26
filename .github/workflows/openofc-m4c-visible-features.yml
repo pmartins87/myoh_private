@@ -1,0 +1,35 @@
+name: OpenOFC M4C strategic visible-feature generalization gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4c-visible-features.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4c-visible-features:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Revalidate suit-canonical information safety
+        run: |
+          python tools/openofc_solver/test_strategic_cfr.py
+          python tools/openofc_solver/test_strategic_suit_symmetry.py
+
+      - name: Validate lossless visible feature encoder
+        run: python tools/openofc_solver/test_strategic_feature_encoder.py
+
+      - name: Revalidate continuation-coupled objective
+        run: python tools/openofc_solver/test_strategic_continuation_cfr.py
