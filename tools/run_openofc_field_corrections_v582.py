@@ -19,6 +19,7 @@ def run(relative: str) -> None:
 
 def main() -> None:
     run("tools/run_openofc_field_corrections_v581.py")
+    run("tools/normalize_openofc_v582_runtime_gate.py")
     run("tools/apply_openofc_field_corrections_v582.py")
     run("tools/test_openofc_field_corrections_v582.py")
     print(
