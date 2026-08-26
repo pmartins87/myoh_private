@@ -39,29 +39,37 @@ jobs:
         run: python tools/openofc_solver/test_strategic_feasibility.py
       - name: Validate deterministic multi-seed orchestration
         run: python tools/openofc_solver/test_strategic_multiseed.py
-      - name: Run bounded HU feasibility smoke
+      - name: Run 300-iteration HU feasibility and exact-key reuse probe
         run: |
           mkdir -p artifact
           python tools/openofc_solver/strategic_feasibility.py \
-            --iterations 3 \
+            --iterations 300 \
             --seed 20260825 \
             --epsilon 0.6 \
-            --checkpoint artifact/strategic_feasibility_n3.json.gz \
-            --report artifact/strategic_feasibility_n3.json \
-            --project-iterations 100,1000,10000 \
+            --checkpoint artifact/strategic_feasibility_n300.json.gz \
+            --report artifact/strategic_feasibility_n300.json \
+            --project-iterations 1000,10000,100000,1000000 \
             --max-wall-seconds 120 \
             --max-rss-mb 2048 \
             --max-checkpoint-mb 100
           python - <<'PY'
           import json
-          p=json.load(open('artifact/strategic_feasibility_n3.json', encoding='utf-8'))
+          p=json.load(open('artifact/strategic_feasibility_n300.json', encoding='utf-8'))
           assert p['authority'] == 'HU_FEASIBILITY_MEASUREMENT_ONLY'
           assert p['scope'] == 'HU_ONLY' and p['player_count'] == 2
           assert p['solver_kind'] == 'suit24-exact'
           assert p['action_abstraction'] is False
+          assert p['iterations'] == 300 and p['episodes'] == 600
           assert p['max_actions'] == 232
           assert p['budget_status'] == 'PASS'
+          r=p['reuse']
+          assert r['node_touches'] == 6000
+          assert 0.0 <= r['infoset_reuse_fraction'] <= 1.0
+          assert 0.0 <= r['regret_reuse_fraction'] <= 1.0
+          assert set(r['by_round']) == {'0','1','2','3','4'}
           print('OPENOFC_M4_HU_FEASIBILITY=PASS')
+          print('OPENOFC_M4_INFOSET_REUSE=' + str(r['infoset_reuse_fraction']))
+          print('OPENOFC_M4_REGRET_REUSE=' + str(r['regret_reuse_fraction']))
           PY
       - name: Exercise two-worker independent HU training
         run: |
@@ -140,8 +148,8 @@ jobs:
         with:
           name: OpenOFC_M4_Strategic_CFR_Smoke
           path: |
-            artifact/strategic_feasibility_n3.json.gz
-            artifact/strategic_feasibility_n3.json
+            artifact/strategic_feasibility_n300.json.gz
+            artifact/strategic_feasibility_n300.json
             artifact/multiseed/*.json.gz
             artifact/multiseed_manifest.json
             artifact/strategic_cfr_n5.json.gz

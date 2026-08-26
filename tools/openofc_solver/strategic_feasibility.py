@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-"""Practical resource probe for the exact-action HU strategic solver.
+"""Practical resource/reuse probe for the exact-action HU strategic solver.
 
 This module does not change the game, prune actions or claim convergence. It
 measures whether the current exact/suit-canonical MCCFR implementation is
 practical on the machine that will actually train it. The report is deliberately
-separate from exploitability: throughput and low memory use are engineering
-facts, not poker-optimality certificates.
+separate from exploitability: throughput, memory and information-set reuse are
+engineering/statistical facts, not poker-optimality certificates.
 """
 
 import argparse
@@ -24,7 +24,9 @@ from strategic_suit_symmetry import SuitCanonicalOutcomeSamplingMCCFR
 AUTHORITY = "HU_FEASIBILITY_MEASUREMENT_ONLY"
 SCOPE = "HU_ONLY"
 SOLVER_KIND = "suit24-exact"
-SCHEMA = "openofc-hu-strategic-feasibility-v1"
+SCHEMA = "openofc-hu-strategic-feasibility-v2"
+DECISIONS_PER_EPISODE = 10  # 5 rounds x 2 players; no early terminal in normal OFC.
+DECISIONS_PER_ROUND_PER_EPISODE = 2
 
 
 def _current_rss_bytes() -> int | None:
@@ -121,6 +123,107 @@ def _first_order_projections(
     return rows
 
 
+def _clamp_fraction(value: float) -> float:
+    if value < 0.0 and value > -1e-12:
+        return 0.0
+    if value > 1.0 and value < 1.0 + 1e-12:
+        return 1.0
+    return value
+
+
+def _infoset_reuse_diagnostics(
+    solver: SuitCanonicalOutcomeSamplingMCCFR,
+) -> dict[str, Any]:
+    """Measure whether exact tabular information states are actually revisited.
+
+    Outcome-sampling walks all ten decision points in each HU normal-hand
+    episode. `_node` is called even when that player is not the current regret
+    updater, so episode_count * 10 is the exact information-state lookup count.
+    The fraction below therefore measures exact-key reuse after certified suit
+    canonicalization without adding any abstraction.
+    """
+    node_touches = int(solver.episodes) * DECISIONS_PER_EPISODE
+    infosets = len(solver.nodes)
+    if node_touches < infosets:
+        raise AssertionError("unique infosets cannot exceed information-state touches")
+    reuse_fraction = (
+        0.0 if node_touches == 0
+        else _clamp_fraction(1.0 - infosets / node_touches)
+    )
+
+    by_round: dict[int, dict[str, int]] = {
+        r: {"infosets": 0, "updated_infosets": 0, "regret_updates": 0}
+        for r in range(5)
+    }
+    updated_infosets = 0
+    revisited_updated_infosets = 0
+    max_regret_visits = 0
+
+    for key, node in solver.nodes.items():
+        try:
+            round_index = int(json.loads(key)["round"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise AssertionError("strategic infoset key lost round metadata") from exc
+        if round_index not in by_round:
+            raise AssertionError(f"unexpected normal-hand round in infoset: {round_index}")
+        row = by_round[round_index]
+        row["infosets"] += 1
+        if node.visits > 0:
+            updated_infosets += 1
+            row["updated_infosets"] += 1
+            row["regret_updates"] += int(node.visits)
+            if node.visits > 1:
+                revisited_updated_infosets += 1
+            max_regret_visits = max(max_regret_visits, int(node.visits))
+
+    regret_updates = sum(node.visits for node in solver.nodes.values())
+    if regret_updates <= 0:
+        regret_reuse_fraction = 0.0
+    else:
+        regret_reuse_fraction = _clamp_fraction(
+            1.0 - updated_infosets / regret_updates
+        )
+
+    expected_round_touches = int(solver.episodes) * DECISIONS_PER_ROUND_PER_EPISODE
+    round_report: dict[str, dict[str, Any]] = {}
+    for round_index, row in sorted(by_round.items()):
+        unique = row["infosets"]
+        if unique > expected_round_touches:
+            raise AssertionError("round infosets exceed exact round touch count")
+        round_report[str(round_index)] = {
+            **row,
+            "node_touches": expected_round_touches,
+            "infoset_reuse_fraction": (
+                0.0 if expected_round_touches == 0
+                else _clamp_fraction(1.0 - unique / expected_round_touches)
+            ),
+            "regret_reuse_fraction": (
+                0.0 if row["regret_updates"] == 0
+                else _clamp_fraction(
+                    1.0 - row["updated_infosets"] / row["regret_updates"]
+                )
+            ),
+        }
+
+    return {
+        "node_touches": node_touches,
+        "unique_infosets": infosets,
+        "infoset_reuse_fraction": reuse_fraction,
+        "regret_updates": int(regret_updates),
+        "updated_infosets": updated_infosets,
+        "revisited_updated_infosets": revisited_updated_infosets,
+        "regret_reuse_fraction": regret_reuse_fraction,
+        "max_regret_visits": max_regret_visits,
+        "by_round": round_report,
+        "interpretation": (
+            "Low reuse means the exact tabular representation is spending most "
+            "samples creating new information states instead of accumulating "
+            "regret at old ones. That is a practical scale signal, not an "
+            "optimality statement."
+        ),
+    }
+
+
 def run_probe(
     *,
     iterations: int,
@@ -148,6 +251,7 @@ def run_probe(
     if elapsed <= 0.0:
         elapsed = 1e-12
 
+    reuse = _infoset_reuse_diagnostics(solver)
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_sha256 = save_runner_checkpoint(solver, checkpoint)
     checkpoint_bytes = checkpoint.stat().st_size
@@ -219,6 +323,7 @@ def run_probe(
         "total_visits": stats.total_visits,
         "max_actions": stats.max_actions,
         "mean_actions": stats.mean_actions,
+        "reuse": reuse,
         "rss_before_bytes": rss_before,
         "rss_after_bytes": rss_after,
         "peak_rss_bytes": peak_rss,
@@ -240,8 +345,8 @@ def run_probe(
             "throughput are not assumed linear for certification."
         ),
         "optimality_warning": (
-            "Resource feasibility is not exploitability and does not promote "
-            "STRATEGIC_APPROX authority."
+            "Resource/reuse feasibility is not exploitability and does not "
+            "promote STRATEGIC_APPROX authority."
         ),
     }
     return report
@@ -249,7 +354,7 @@ def run_probe(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Measure practical cost of the exact-action HU suit-canonical MCCFR"
+        description="Measure practical cost/reuse of the exact-action HU suit-canonical MCCFR"
     )
     parser.add_argument("--iterations", type=int, default=100)
     parser.add_argument("--seed", type=int, default=20260825)
