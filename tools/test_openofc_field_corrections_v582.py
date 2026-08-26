@@ -22,6 +22,22 @@ T15 = [
     (341.5,672.0),(368.5,677.0),(392.5,684.0),
 ]
 
+# Exact anchor centers reproduced from the current C++ LocateDynamicAnchors
+# algorithm on the two 2026-08-25 field BMPs supplied with the v5.8.1 failure.
+# They deliberately preserve the detector's miss instead of hand-correcting it.
+FIELD_F15_FRAME000000_ANCHORS = [
+    (30.0,693.5),(53.5,684.5),(79.0,678.0),(103.5,672.0),
+    (130.0,667.5),(157.5,664.5),(183.5,662.0),(210.5,661.0),
+    (236.5,661.0),(263.0,662.0),(289.5,664.5),(314.5,667.5),
+    (341.0,672.0),(368.5,676.5),
+]
+FIELD_F15_FRAME000003_ANCHORS = [
+    (55.0,685.0),(79.5,677.5),(105.0,672.0),(129.5,667.5),
+    (157.5,664.5),(184.0,662.0),(210.5,661.0),(236.5,661.0),
+    (263.5,662.0),(288.5,664.5),(315.5,668.0),(341.0,672.5),
+    (368.5,677.0),(392.5,684.0),
+]
+
 
 def bounded_alignment(observed, expected):
     """Python mirror of the C++ v5.8.2 count correspondence contract."""
@@ -62,7 +78,7 @@ def bounded_alignment(observed, expected):
 
 
 def test_one_missing_f15_anchor_is_not_forced_to_f14() -> None:
-    # Cover every possible single missing F15 anchor.  Even the hardest central
+    # Cover every possible single missing F15 anchor. Even the hardest central
     # omission must remain below the unchanged score=8 gate and beat the F14
     # template by the unchanged >=3 separation gate.
     for missing in range(len(T15)):
@@ -71,6 +87,23 @@ def test_one_missing_f15_anchor_is_not_forced_to_f14() -> None:
         f14 = bounded_alignment(observed, T14)
         assert f15 <= 8.0, (missing, f15, f14)
         assert f14 - f15 >= 3.0, (missing, f15, f14)
+
+
+def test_exact_field_replay_anchors_choose_f15() -> None:
+    # These are the exact two field patterns that v5.8.1 logged as
+    # observed=14 with old F14 scores 15.5518 and 15.5230.  Under v5.8.2 the
+    # missing endpoint is a bounded detection miss and F15 wins decisively.
+    cases = (
+        (FIELD_F15_FRAME000000_ANCHORS, 3.3660254037844384, 15.551756905801442),
+        (FIELD_F15_FRAME000003_ANCHORS, 3.1614378277661475, 15.523024373951285),
+    )
+    for observed, expected_f15, expected_f14 in cases:
+        f15 = bounded_alignment(observed, T15)
+        f14 = bounded_alignment(observed, T14)
+        assert abs(f15 - expected_f15) < 1e-12, (f15, expected_f15)
+        assert abs(f14 - expected_f14) < 1e-12, (f14, expected_f14)
+        assert f15 <= 8.0
+        assert f14 - f15 >= 3.0
 
 
 def test_exact_f14_stays_f14() -> None:
@@ -109,12 +142,13 @@ def test_paired_tablemap_is_unchanged() -> None:
 
 def main() -> None:
     test_one_missing_f15_anchor_is_not_forced_to_f14()
+    test_exact_field_replay_anchors_choose_f15()
     test_exact_f14_stays_f14()
     test_materialized_source_contract()
     test_paired_tablemap_is_unchanged()
     print(
         "OPENOFC_V582_FIELD_REGRESSION=PASS "
-        "f15_missing_anchor=RECOVERED exact_f14=PRESERVED "
+        "field_f15_anchors=RECOVERED synthetic_f15=RECOVERED exact_f14=PRESERVED "
         "empty_bootstrap=OCCUPANCY_FIRST runtime=F14_17_RELEASE tablemap=UNCHANGED"
     )
 
