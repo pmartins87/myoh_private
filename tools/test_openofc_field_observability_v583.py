@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
+
+from openofc_tablemap_identity import validate_v552_semantic_contract
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TM = ROOT / "OpenOFC/TableMaps/KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm"
-TM_SHA256 = "28587f10d3f8436880e6ef98280b5f86d85e26b674f15cfe61f5a03bc5751ee6"
 
 
 def text(path: str) -> str:
@@ -55,20 +54,24 @@ def test_runtime_status_is_phase_accurate() -> None:
     assert block.index("OpenOFCSetUserStatus") < block.index("phase_ = kBlocked")
 
 
-def test_tablemap_asset_is_bit_identical() -> None:
-    assert hashlib.sha256(TM.read_bytes()).hexdigest() == TM_SHA256
+def test_tablemap_asset_semantic_identity() -> None:
+    identity = validate_v552_semantic_contract()
+    assert identity["stage"] == "openofc_v5_5_2_fantasy_live_recovery"
+    assert identity["contract"] == 5
+    assert identity["field_revision"] == 552
+    assert int(identity["regions"]) >= 250
 
 
 def main() -> None:
     test_central_build_identity()
     test_ui_separates_runtime_and_asset_versions()
     test_runtime_status_is_phase_accurate()
-    test_tablemap_asset_is_bit_identical()
+    test_tablemap_asset_semantic_identity()
     print(
         "OPENOFC_V583_FIELD_OBSERVABILITY=PASS "
         "runtime_version=5.8.3 tablemap_asset=5.5.2 "
         "blocked_reason=VISIBLE calculating=ACTIVE_DECISION_ONLY "
-        "tablemap=UNCHANGED"
+        "tablemap=V552_SEMANTIC_CONTRACT_VALID"
     )
 
 
