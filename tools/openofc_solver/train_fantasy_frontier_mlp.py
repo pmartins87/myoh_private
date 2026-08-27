@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
@@ -23,7 +22,7 @@ def main() -> None:
     parser.add_argument("--report-output", type=Path, required=True)
     args = parser.parse_args()
 
-    paths = sorted(args.input_dir.glob("*.jsonl"))
+    paths = sorted(args.input_dir.rglob("*.jsonl"))
     if not paths:
         raise SystemExit("no M4I exact frontier shards found")
     train = load_worlds(paths, holdout=False)
@@ -46,7 +45,7 @@ def main() -> None:
         "schema": REPORT_SCHEMA,
         "authority": "APPROXIMATION_PROBE_NOT_PRODUCTION",
         "promotion_blocked": True,
-        "source_shards": [path.name for path in paths],
+        "source_shards": [str(path.relative_to(args.input_dir)) for path in paths],
         "train_worlds": len(train),
         "holdout_worlds": len(holdout),
         "fit": fit,
