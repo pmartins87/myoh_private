@@ -1,0 +1,36 @@
+name: OpenOFC M5A Normal-Fantasy state-value adapter gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/normal_fantasy_policy_features.py'
+      - 'tools/openofc_solver/normal_fantasy_policy_distillation.py'
+      - 'tools/openofc_solver/m5a_normal_fantasy_oracle.py'
+      - 'tools/openofc_solver/test_m5a_normal_fantasy_oracle.py'
+      - 'tools/openofc_solver/M5A_NORMAL_FANTASY_ORACLE_CONTRACT.md'
+      - '.github/workflows/openofc-m5a-normal-fantasy-oracle.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m5a-normal-fantasy-adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install terminal-model dependency
+        run: python -m pip install numpy
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate visible-policy firewall and adapter boundary
+        run: |
+          cd tools/openofc_solver
+          python test_m5a_normal_fantasy_oracle.py
