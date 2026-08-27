@@ -1,0 +1,62 @@
+name: OpenOFC M3a-scale resumability and convergence gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m3a-scale.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  m3a-scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Materialize certified row-local Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+      - name: Test multi-seed shard identity and fail-closed resume
+        run: python tools/openofc_solver/test_r3_scaling.py
+      - name: Generate and independently audit a resumable R3 shard
+        run: |
+          python tools/openofc_solver/run_r3_dealer_shards.py \
+            --out-dir artifact/r3_scale \
+            --seed 20260825 \
+            --start-deal 700004 \
+            --attempts 1 \
+            --attempts-per-shard 1 \
+            --samples 1 \
+            --workers-per-shard 1
+          python tools/openofc_solver/audit_r3_shard_manifest.py \
+            artifact/r3_scale/manifest.json \
+            --report artifact/r3_scale/manifest_audit.json
+      - name: Prove deterministic resume without regeneration
+        run: |
+          python tools/openofc_solver/run_r3_dealer_shards.py \
+            --out-dir artifact/r3_scale \
+            --seed 20260825 \
+            --start-deal 700004 \
+            --attempts 1 \
+            --attempts-per-shard 1 \
+            --samples 1 \
+            --workers-per-shard 1 | tee artifact/r3_scale/resume.txt
+          grep '"resumed_shards": 1' artifact/r3_scale/resume.txt
+      - name: Compare the same state at N and 2N hidden worlds
+        run: |
+          python tools/openofc_solver/audit_r3_convergence.py \
+            artifact/r3_scale/manifest.json \
+            --multiplier 2 \
+            --report artifact/r3_scale/convergence_n_vs_2n.json
+          python -c "import json; r=json.load(open('artifact/r3_scale/convergence_n_vs_2n.json', encoding='utf-8')); assert r['status'] == 'PASS' and r['hoeffding_margin_ratio'] < 1; print('OPENOFC_M3A_SCALE_CONVERGENCE=PASS')"
+      - name: Upload shard, audit and convergence evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M3a_Scale_Resumability_Convergence
+          path: artifact/r3_scale
+          if-no-files-found: error

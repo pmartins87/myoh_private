@@ -1,0 +1,32 @@
+name: OpenOFC M4Q sealed Fantasy policy-bootstrap gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/fantasy_fantasy_policy_model.py'
+      - 'tools/openofc_solver/fantasy_fantasy_bootstrap.py'
+      - 'tools/openofc_solver/test_fantasy_fantasy_policy_model.py'
+      - 'tools/openofc_solver/M4Q_SEALED_POLICY_BOOTSTRAP_CONTRACT.md'
+      - '.github/workflows/openofc-m4q-sealed-policy-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4q-sealed-policy-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate exact bootstrap targets and deterministic sealed model
+        run: |
+          python tools/openofc_solver/test_fantasy_fantasy_policy_model.py
+          echo OPENOFC_M4Q_GATE=PASS

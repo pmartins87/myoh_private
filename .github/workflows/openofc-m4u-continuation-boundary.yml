@@ -1,0 +1,31 @@
+name: OpenOFC M4U continuation-safe certification gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/m4u_continuation_boundary.py'
+      - 'tools/openofc_solver/test_m4u_continuation_boundary.py'
+      - 'tools/openofc_solver/M4U_CONTINUATION_BOUNDARY_CONTRACT.md'
+      - '.github/workflows/openofc-m4u-continuation-boundary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4u-continuation-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate continuation SHA firewall and exact payoff transport
+        run: |
+          python tools/openofc_solver/test_m4u_continuation_boundary.py
+          echo OPENOFC_M4U_GATE=PASS

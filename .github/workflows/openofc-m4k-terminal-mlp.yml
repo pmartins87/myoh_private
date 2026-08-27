@@ -1,0 +1,83 @@
+name: OpenOFC M4K CPU terminal MLP probe
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4k-terminal-mlp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4k-terminal-mlp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install NumPy
+        run: python -m pip install --disable-pip-version-check 'numpy>=2.0,<3'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate deterministic CPU MLP mechanics
+        run: python tools/openofc_solver/test_fantasy_frontier_mlp.py
+
+      - name: Build exact F14 smoke corpus
+        run: |
+          mkdir -p artifact/m4k
+          python tools/openofc_solver/run_fantasy_frontier_shards.py \
+            --output-dir artifact/m4k/corpus \
+            --counts 14 \
+            --worlds-per-count 20 \
+            --shard-size 5 \
+            --workers 4 \
+            --base-seed 20260826
+          for f in artifact/m4k/corpus/*.jsonl; do
+            python tools/openofc_solver/audit_fantasy_frontier_corpus.py "$f"
+          done
+
+      - name: Train and report exact held-out MLP smoke metrics
+        run: |
+          python tools/openofc_solver/train_fantasy_frontier_mlp.py \
+            --input-dir artifact/m4k/corpus \
+            --epochs 40 \
+            --batch-size 16 \
+            --hidden1 64 \
+            --hidden2 32 \
+            --seed 20260826 \
+            --model-output artifact/m4k/model.npz \
+            --report-output artifact/m4k/report.json
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          report = json.loads(Path('artifact/m4k/report.json').read_text())
+          assert report['authority'] == 'APPROXIMATION_PROBE_NOT_PRODUCTION'
+          assert report['promotion_blocked'] is True
+          assert report['train_worlds'] == 16
+          assert report['holdout_worlds'] == 4
+          metrics = report['holdout_metrics']
+          for key in (
+              'reach_accuracy', 'reachable_point_mae', 'reachable_point_rmse',
+              'confident_coverage', 'utility_mean_abs_error', 'utility_max_abs_error'):
+              assert math.isfinite(float(metrics[key]))
+          assert report['model_bytes'] > 0
+          print('OPENOFC_M4K_GATE=PASS')
+          print('M4K_HELDOUT_REACH_ACCURACY=' + str(metrics['reach_accuracy']))
+          print('M4K_HELDOUT_POINT_MAE=' + str(metrics['reachable_point_mae']))
+          print('M4K_HELDOUT_CONFIDENT_COVERAGE=' + str(metrics['confident_coverage']))
+          print('M4K_HELDOUT_UTILITY_MAX_ABS_ERROR=' + str(metrics['utility_max_abs_error']))
+          PY
+
+      - name: Upload M4K smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4K_CPU_TERMINAL_MLP_SMOKE
+          path: artifact/m4k
+          if-no-files-found: error

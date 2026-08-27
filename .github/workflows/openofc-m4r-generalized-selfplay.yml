@@ -1,0 +1,31 @@
+name: OpenOFC M4R generalized sealed self-play gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/fantasy_fantasy_selfplay.py'
+      - 'tools/openofc_solver/test_fantasy_fantasy_selfplay.py'
+      - 'tools/openofc_solver/M4R_GENERALIZED_SEALED_SELFPLAY_CONTRACT.md'
+      - '.github/workflows/openofc-m4r-generalized-selfplay.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4r-generalized-selfplay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate sealed synchronous fitted self-play
+        run: |
+          python tools/openofc_solver/test_fantasy_fantasy_selfplay.py
+          echo OPENOFC_M4R_GATE=PASS

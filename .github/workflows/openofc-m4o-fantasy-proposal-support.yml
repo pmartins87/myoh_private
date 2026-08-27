@@ -1,0 +1,31 @@
+name: OpenOFC M4O bounded Fantasy proposal-support gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/fantasy_fantasy_proposals.py'
+      - 'tools/openofc_solver/test_fantasy_fantasy_proposals.py'
+      - 'tools/openofc_solver/M4O_FANTASY_PROPOSAL_SUPPORT_CONTRACT.md'
+      - '.github/workflows/openofc-m4o-fantasy-proposal-support.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4o-proposal-support:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate bounded own-information proposal support
+        run: |
+          python tools/openofc_solver/test_fantasy_fantasy_proposals.py
+          echo OPENOFC_M4O_GATE=PASS

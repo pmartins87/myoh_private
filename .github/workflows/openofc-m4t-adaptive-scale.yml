@@ -1,0 +1,28 @@
+name: OpenOFC M4T adaptive scale planner gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/plan_m4t_adaptive_scale.py'
+      - 'tools/openofc_solver/test_m4t_adaptive_scale.py'
+      - 'tools/openofc_solver/M4T_ADAPTIVE_SCALE_CONTRACT.md'
+      - '.github/workflows/openofc-m4t-adaptive-scale.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4t-adaptive-scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Validate evidence planner invariants
+        run: |
+          python tools/openofc_solver/test_m4t_adaptive_scale.py
+          echo OPENOFC_M4T_GATE=PASS

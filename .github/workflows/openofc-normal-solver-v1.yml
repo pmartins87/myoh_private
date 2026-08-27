@@ -1,0 +1,167 @@
+name: OpenOFC normal solver v1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - openofc-normal-solver-v1
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-normal-solver-v1.yml'
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-normal-solver-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Materialize M1b Joker rule semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+      - name: Run exact rules and R4 oracle tests
+        run: python tools/openofc_solver/test_engine.py
+      - name: Run targeted M1b Joker semantics tests
+        run: python tools/openofc_solver/test_m1b_joker_semantics.py
+      - name: Run M2a dealer-R4 corpus tests
+        run: python tools/openofc_solver/test_r4_dealer_corpus.py
+      - name: Run M2b non-dealer R4 information-set oracle tests
+        run: python tools/openofc_solver/test_r4_nondealer.py
+      - name: Generate deterministic M2a smoke corpus
+        run: |
+          mkdir -p artifact
+          python tools/openofc_solver/generate_r4_dealer_corpus.py --out artifact/r4_dealer_smoke.jsonl --seed 20260823 --start-deal 0 --attempts 128 --workers 2
+          test -s artifact/r4_dealer_smoke.jsonl
+      - name: Recompute and audit M2a smoke labels
+        run: python tools/openofc_solver/audit_r4_dealer_corpus.py artifact/r4_dealer_smoke.jsonl
+      - name: Generate filtered M2b non-dealer information-set smoke corpus
+        run: |
+          python tools/openofc_solver/generate_r4_nondealer_corpus.py \
+            --out artifact/r4_nondealer_smoke.jsonl \
+            --seed 20260823 \
+            --start-deal 500000 \
+            --attempts 16 \
+            --workers 4
+          test -s artifact/r4_nondealer_smoke.jsonl
+      - name: Independently recompute M2b smoke Q-vectors
+        run: |
+          python tools/openofc_solver/audit_r4_nondealer_corpus.py \
+            artifact/r4_nondealer_smoke.jsonl \
+            --report artifact/r4_nondealer_smoke_audit.json
+      - name: Upload R4 teacher smoke corpora
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_R4_Exact_Teacher_Smoke
+          path: |
+            artifact/r4_dealer_smoke.jsonl
+            artifact/r4_nondealer_smoke.jsonl
+            artifact/r4_nondealer_smoke_audit.json
+          if-no-files-found: error
+
+  m2a-medium-scale:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate and independently audit 4,096 dealer-R4 attempts in shards
+        run: |
+          python tools/openofc_solver/run_r4_dealer_shards.py \
+            --out-dir artifact/r4_dealer_medium \
+            --seed 20260823 \
+            --start-deal 100000 \
+            --attempts 4096 \
+            --attempts-per-shard 1024 \
+            --parallel-shards 2 \
+            --workers-per-shard 2
+      - name: Prove resumability without regenerating accepted shards
+        run: |
+          python tools/openofc_solver/run_r4_dealer_shards.py \
+            --out-dir artifact/r4_dealer_medium \
+            --seed 20260823 \
+            --start-deal 100000 \
+            --attempts 4096 \
+            --attempts-per-shard 1024 \
+            --parallel-shards 2 \
+            --workers-per-shard 2
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('artifact/r4_dealer_medium/manifest.json')
+          m = json.loads(p.read_text())
+          assert len(m['shards']) == 4
+          assert all(bool(s.get('resumed')) for s in m['shards']), m['shards']
+          print('OPENOFC_R4_SHARD_RESUME=PASS shards=4 regenerated=0')
+          PY
+      - name: Aggregate-audit shard ranges, hashes, records and action vectors
+        run: |
+          python tools/openofc_solver/audit_r4_shard_manifest.py \
+            artifact/r4_dealer_medium/manifest.json \
+            --report artifact/r4_dealer_medium/aggregate_audit.json
+      - name: Upload certified M2a medium corpus
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_R4_Dealer_Exact_Medium_4096
+          path: artifact/r4_dealer_medium
+          if-no-files-found: error
+
+  cpp-production-parity:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x86
+      - name: Materialize standalone evaluator with production card mapping
+        shell: pwsh
+        run: |
+          python tools/openofc_solver/materialize_cpp_parity.py
+          if ($LASTEXITCODE -ne 0) { throw "C++ parity materialization failed: $LASTEXITCODE" }
+      - name: Materialize M1b Joker rule semantics
+        shell: pwsh
+        run: |
+          python tools/openofc_solver/apply_m1b_joker_semantics.py
+          if ($LASTEXITCODE -ne 0) { throw "M1b Joker materialization failed: $LASTEXITCODE" }
+      - name: Compile and run existing production policy selftest
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCBaselinePolicySelftest.cpp /Fe:COFCBaselinePolicySelftest.exe && COFCBaselinePolicySelftest.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "Production policy selftest failed: $LASTEXITCODE" }
+      - name: Compile C++ parity probe
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $command = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /I OpenHoldem tools\openofc_solver\cpp_parity_probe.cpp /Fe:cpp_parity_probe.exe'
+          cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw "C++ parity probe build failed: $LASTEXITCODE" }
+      - name: Compare Python exact core against production C++ evaluator
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          python tools/openofc_solver/check_cpp_parity.py .\cpp_parity_probe.exe --joker-report artifact\joker_parity_report.json --strict-jokers
+          if ($LASTEXITCODE -ne 0) { throw "C++/Python M1 parity failed: $LASTEXITCODE" }
+      - name: Upload Joker parity diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_Joker_Parity_Diagnostic
+          path: artifact/joker_parity_report.json
+          if-no-files-found: warn

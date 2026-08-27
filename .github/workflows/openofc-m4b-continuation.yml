@@ -1,0 +1,90 @@
+name: OpenOFC M4B continuation-coupled normal strategic gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4b-continuation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4b-continuation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Revalidate exact terminal engine and continuation states
+        run: |
+          python tools/openofc_solver/test_engine.py
+          python tools/openofc_solver/test_hu_continuation.py
+
+      - name: Validate continuation-coupled MCCFR objective
+        run: python tools/openofc_solver/test_strategic_continuation_cfr.py
+
+      - name: Validate deterministic continuation-runner resume
+        run: python tools/openofc_solver/test_strategic_continuation_runner.py
+
+      - name: Run continuation-coupled suit24 smoke
+        run: |
+          mkdir -p artifact
+          python tools/openofc_solver/strategic_continuation_runner.py \
+            --iterations 5 \
+            --checkpoint-every 2 \
+            --seed 20260826 \
+            --epsilon 0.6 \
+            --button 1 \
+            --zero-continuation \
+            --write-zero-values artifact/continuation_zero.json \
+            --checkpoint artifact/m4b_n5.json.gz \
+            --summary artifact/m4b_n5_summary.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/m4b_n5_summary.json', encoding='utf-8'))
+          assert p['authority'] == 'STRATEGIC_APPROX_HU_NORMAL_NORMAL_WITH_CONTINUATION'
+          assert p['solver_kind'] == 'suit24-continuation-exact'
+          assert p['iterations'] == 5 and p['episodes'] == 10
+          assert p['infosets'] > 0 and p['max_actions'] == 232
+          assert len(p['objective_sha256']) == 64
+          print('OPENOFC_M4B_CONTINUATION_SMOKE=PASS')
+          PY
+
+      - name: Prove pinned-objective resume
+        run: |
+          python tools/openofc_solver/strategic_continuation_runner.py \
+            --iterations 1 \
+            --resume artifact/m4b_n5.json.gz \
+            --checkpoint-every 1 \
+            --epsilon 0.6 \
+            --checkpoint artifact/m4b_n6.json.gz \
+            --summary artifact/m4b_n6_summary.json
+          python - <<'PY'
+          import json
+          a=json.load(open('artifact/m4b_n5_summary.json', encoding='utf-8'))
+          b=json.load(open('artifact/m4b_n6_summary.json', encoding='utf-8'))
+          assert b['iterations'] == 6 and b['episodes'] == 12
+          assert a['objective_sha256'] == b['objective_sha256']
+          assert a['current_state'] == b['current_state']
+          print('OPENOFC_M4B_OBJECTIVE_RESUME=PASS')
+          PY
+
+      - name: Upload M4B evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4B_Continuation_Coupled_Normal
+          path: |
+            artifact/continuation_zero.json
+            artifact/m4b_n5.json.gz
+            artifact/m4b_n5_summary.json
+            artifact/m4b_n6.json.gz
+            artifact/m4b_n6_summary.json
+          if-no-files-found: error

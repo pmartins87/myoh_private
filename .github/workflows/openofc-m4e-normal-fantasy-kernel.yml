@@ -1,0 +1,42 @@
+name: OpenOFC M4E normal-vs-Fantasy exact hand-kernel gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4e-normal-fantasy-kernel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4e-normal-fantasy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Revalidate transition and exact delayed-response layers
+        run: |
+          python tools/openofc_solver/test_fantasy_transition.py
+          python tools/openofc_solver/test_hu_continuation.py
+          python tools/openofc_solver/test_fantasy_response_frontier.py
+
+      - name: Validate asymmetric normal-vs-Fantasy kernel
+        run: python tools/openofc_solver/test_normal_fantasy_kernel.py
+
+      - name: Gate summary
+        run: |
+          echo 'OPENOFC_M4E_GATE=PASS'
+          echo 'kernel=NORMAL_VS_HIDDEN_FANTASY_DELAYED'
+          echo 'normal_information=NO_HIDDEN_PACKET_LEAK'
+          echo 'terminal=EXACT_FRONTIER_GIVEN_V'
+          echo 'policy=NOT_YET_SOLVED'
+          echo 'field_test=DEFERRED'

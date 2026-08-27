@@ -1,0 +1,32 @@
+name: OpenOFC M4L normal-vs-Fantasy strategic gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4l-normal-fantasy-strategic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4l-normal-fantasy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install CPU model dependency
+        run: python -m pip install --disable-pip-version-check numpy
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate asymmetric strategic and terminal firewall
+        run: |
+          python tools/openofc_solver/test_normal_fantasy_cfr.py
+          echo OPENOFC_M4L_GATE=PASS

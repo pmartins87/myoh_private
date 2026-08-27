@@ -6,7 +6,7 @@
 namespace {
 
 int Card(int rank, int suit) {
-  return (rank - 2) * 4 + suit;
+  return suit * 13 + (rank - 2);
 }
 
 COFCState BaseState(bool fantasy, int round) {

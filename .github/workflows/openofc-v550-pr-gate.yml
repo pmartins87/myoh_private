@@ -1,0 +1,190 @@
+name: OpenOFC v5.8.1 Fantasy-lineage and R4-safety authoritative PR gate
+
+on:
+  pull_request:
+    branches:
+      - 'openofc-v543-field-resilience'
+
+permissions:
+  contents: read
+
+jobs:
+  v581-authoritative:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout PR merge
+        uses: actions/checkout@v4
+
+      - name: Materialize v5.3 through v5.8.1
+        shell: pwsh
+        run: |
+          # The v5.5 wrapper first materializes v5.4.10 and runs its historical
+          # source-shape regressions BEFORE v5.5 intentionally replaces the
+          # loose-hand identity route. Re-running v5.4.10's scraper-shape test
+          # after that replacement would be a false failure, not a regression.
+          python tools/run_openofc_field_corrections_v581.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.1 materialization failed: $LASTEXITCODE" }
+          Write-Host 'V581_MATERIALIZATION=PASS'
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Run v5.5.2 Fantasy live-recovery regressions
+        shell: pwsh
+        run: |
+          python tools/test_openofc_fantasy_counted_text_v550.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.5.0 counted-text regression failed: $LASTEXITCODE" }
+          python tools/test_openofc_fantasy_counted_text_optin_v550a.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.5.0 TableMap opt-in regression failed: $LASTEXITCODE" }
+          python tools/test_openofc_fantasy_live_recovery_v552.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.5.2 live-recovery regression failed: $LASTEXITCODE" }
+          python tools/test_openofc_field_corrections_v581.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.1 field-correction regression failed: $LASTEXITCODE" }
+          Write-Host 'V581_FANTASY_LINEAGE_AND_R4_SAFETY=PASS'
+
+      - name: Run v5.8.1 exact terminal, Fantasy and R4 regressions
+        shell: pwsh
+        run: |
+          # The v5.6 source-shape regression already ran inside the v5.8.1
+          # materialization, before v5.8.1 intentionally replaces the
+          # missing-opponent R4 contract with exact Hero non-foul safety.
+          python tools/test_openofc_exact_fantasy_v570.py
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact-Fantasy source regression failed: $LASTEXITCODE" }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $cmd = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCExactEvaluator.cpp OpenHoldem\COFCFantasyExactSolver.cpp OpenHoldem\COFCR4ExactTeacher.cpp OpenHoldem\COFCDecisionPolicy.cpp OpenHoldem\COFCExactEvaluatorSelftest.cpp /Fe:COFCExactEvaluatorSelftest.exe && COFCExactEvaluatorSelftest.exe'
+          cmd.exe /d /s /c $cmd
+          if ($LASTEXITCODE -ne 0) { throw "v5.6.0 exact terminal/R4 C++ regression failed: $LASTEXITCODE" }
+          $fantasy = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCExactEvaluator.cpp OpenHoldem\COFCFantasyExactSolver.cpp OpenHoldem\COFCFantasyExactSolverSelftest.cpp /Fe:COFCFantasyExactSolverSelftest.exe && COFCFantasyExactSolverSelftest.exe'
+          cmd.exe /d /s /c $fantasy
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact Fantasy C++ regression failed: $LASTEXITCODE" }
+          $parity = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCExactEvaluator.cpp tools\openofc_solver\cpp_exact_parity_probe.cpp /Fe:cpp_exact_parity_probe.exe'
+          cmd.exe /d /s /c $parity
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact evaluator parity probe build failed: $LASTEXITCODE" }
+          python tools/openofc_solver/check_cpp_parity.py .\cpp_exact_parity_probe.exe --joker-report exact_joker_parity_v570.json --strict-jokers
+          if ($LASTEXITCODE -ne 0) { throw "v5.7.0 exact evaluator Python/C++ parity failed: $LASTEXITCODE" }
+          Write-Host 'V570_EXACT_TERMINAL_FANTASY_R4=PASS'
+
+      - name: Run Fantasy 14-17 canonical regression after v5.5.2
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $cmd = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCGenericFantasySelftest.cpp /Fe:COFCGenericFantasySelftest.exe && COFCGenericFantasySelftest.exe'
+          cmd.exe /d /s /c $cmd
+          if ($LASTEXITCODE -ne 0) { throw "Fantasy 14-17 regression failed: $LASTEXITCODE" }
+          Write-Host 'GENERIC_FANTASY_14_17_POST_V552=PASS'
+
+      - name: Run UNKNOWN and continuity regressions after v5.5.2
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $devcmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $u = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCUnknownToleranceSelftest.cpp /Fe:COFCUnknownToleranceSelftest.exe && COFCUnknownToleranceSelftest.exe'
+          cmd.exe /d /s /c $u
+          if ($LASTEXITCODE -ne 0) { throw "UNKNOWN/full-replan regression failed: $LASTEXITCODE" }
+          $c1 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCRuntimeContinuitySelftest.cpp /Fe:COFCRuntimeContinuitySelftest.exe && COFCRuntimeContinuitySelftest.exe'
+          cmd.exe /d /s /c $c1
+          if ($LASTEXITCODE -ne 0) { throw "runtime continuity regression failed: $LASTEXITCODE" }
+          $c2 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /DDEEPOFC_POLICY_STANDALONE /DDEEPOFC_TURNPLAN_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCBaselinePolicy.cpp OpenHoldem\COFCTurnPlan.cpp OpenHoldem\COFCPartialReconnectSelftest.cpp /Fe:COFCPartialReconnectSelftest.exe && COFCPartialReconnectSelftest.exe'
+          cmd.exe /d /s /c $c2
+          if ($LASTEXITCODE -ne 0) { throw "partial reconnect regression failed: $LASTEXITCODE" }
+          $c3 = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_RECONSTRUCTOR_STANDALONE /I OpenHoldem OpenHoldem\COFCReconstructor.cpp OpenHoldem\COFCDealerRecoverySelftest.cpp /Fe:COFCDealerRecoverySelftest.exe && COFCDealerRecoverySelftest.exe'
+          cmd.exe /d /s /c $c3
+          if ($LASTEXITCODE -ne 0) { throw "dealer recovery regression failed: $LASTEXITCODE" }
+          $id = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /DDEEPOFC_IDENTITY_RECOVERY_STANDALONE /I OpenHoldem OpenHoldem\COFCIdentityRecoveryCache.cpp OpenHoldem\COFCUnknownCardProbe.cpp OpenHoldem\COFCUnknownCardProbeSelftest.cpp /Fe:COFCUnknownCardProbeSelftest.exe && COFCUnknownCardProbeSelftest.exe'
+          cmd.exe /d /s /c $id
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.0 active identity-recovery regression failed: $LASTEXITCODE" }
+          $live = '"' + $devcmd + '" -arch=x86 -host_arch=x64 && cl /nologo /EHsc /O2 /MD /std:c++14 /I OpenHoldem OpenHoldem\COFCRecoveryLivenessSelftest.cpp /Fe:COFCRecoveryLivenessSelftest.exe && COFCRecoveryLivenessSelftest.exe'
+          cmd.exe /d /s /c $live
+          if ($LASTEXITCODE -ne 0) { throw "v5.8.0 bounded recovery-liveness regression failed: $LASTEXITCODE" }
+          Write-Host 'V580_IDENTITY_AND_CONTINUITY=PASS'
+
+      - name: Build dependencies
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenHoldem Release Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
+          Write-Host 'OPENOFC_V581_RELEASE_WIN32=PASS'
+
+      - name: Assemble field-test artifact
+        shell: pwsh
+        run: |
+          $out = 'artifact/OpenOFC_v581_FANTASY_LINEAGE_R4_SAFETY_FIELD_TEST'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item 'Release/OpenHoldem.exe' $out
+          Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path 'Release/tessdata') { Copy-Item 'Release/tessdata' "$out/tessdata" -Recurse }
+          $tm = 'OpenOFC/TableMaps/KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm'
+          if (-not (Test-Path $tm)) { throw "Paired v5.5.2 TableMap missing: $tm" }
+          Copy-Item $tm $out
+          Copy-Item 'docs/openofc/FANTASY_V552_LIVE_RECOVERY.md' "$out/READ_ME_FIRST_FANTASY_V552.md"
+          Copy-Item 'docs/openofc/INTELLIGENCE_V560_EXACT_R4_TEACHER.md' "$out/READ_ME_INTELLIGENCE_V560.md"
+          Copy-Item 'docs/openofc/INTELLIGENCE_V570_EXACT_FANTASY_KERNEL.md' "$out/READ_ME_INTELLIGENCE_V570.md"
+          Copy-Item 'docs/openofc/PERCEPTION_V580_ACTIVE_IDENTITY_RECOVERY.md' "$out/READ_ME_FIRST_V580_IDENTITY_RECOVERY.md"
+          Copy-Item 'docs/openofc/FIELD_FIX_V581_FANTASY_LINEAGE_R4_SAFETY.md' "$out/READ_ME_FIRST_V581_FIELD_FIX.md"
+          Copy-Item 'exact_joker_parity_v570.json' "$out/EXACT_JOKER_PARITY_V570.json"
+          $tmHash = (Get-FileHash -Algorithm SHA256 $tm).Hash.ToLowerInvariant()
+          @(
+            "source_commit=$env:GITHUB_SHA",
+            'source_pr=13',
+            'source_branch=openofc-v544-field-recovery',
+            'configuration=Release',
+            'platform=Win32',
+            'patch=OpenOFC_v5.8.1_fantasy_lineage_r4_safety',
+            'policy_engine=EXACT_FANTASY_R4_V570_PLUS_ACTIVE_IDENTITY_RECOVERY_V580_PLUS_FIELD_FIX_V581',
+            'exact_scope=TERMINAL_RULES_FANTASY_14_17_COMPLETE_OPPONENT_R4_AND_HIDDEN_OPPONENT_NONFOUL_SAFETY',
+            'identity_recovery=NORMAL_UNIQUE_BOARD_DELTA_AND_FANTASY_REVERSIBLE_PROBE',
+            'identity_ambiguity=MULTI_UNKNOWN_OR_DUPLICATE_FAIL_CLOSED',
+            'fantasy_stage_lineage=SINGLE_VALID_LOOKING_DELTA_EXACT_SET_RECOVERY',
+            'tm_fault_capture=REPLAY_BMP_HTML',
+            'runtime_reacquire=BOUNDED_NONABSORBING',
+            'fantasy_authority=UNIVERSAL_DOMINANCE_UNTIL_EV_CALIBRATION',
+            'fallback=SMART_BASELINE_V53',
+            'tablemap=KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm',
+            "tablemap_sha256=$tmHash",
+            'paired_tablemap_in_artifact=1',
+            'fantasy17=FAIL_CLOSED_UNTIL_CALIBRATED'
+          ) | Set-Content -Encoding ascii "$out/SOURCE_PROVENANCE.txt"
+          $files = @(Get-ChildItem $out -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName)
+          $lines = foreach ($file in $files) {
+            $rel = $file.FullName.Substring((Resolve-Path $out).Path.Length + 1).Replace('\','/')
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $rel"
+          }
+          $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
+          Write-Host "OPENOFC_V581_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 "$out/OpenHoldem.exe").Hash.ToLowerInvariant())"
+          Write-Host "OPENOFC_V581_TM_SHA256=$tmHash"
+
+      - name: Upload field-test binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v581_FANTASY_LINEAGE_R4_SAFETY_FIELD_TEST
+          path: artifact/OpenOFC_v581_FANTASY_LINEAGE_R4_SAFETY_FIELD_TEST
+          if-no-files-found: error

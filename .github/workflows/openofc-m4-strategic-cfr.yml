@@ -1,0 +1,162 @@
+name: OpenOFC M4 strategic imperfect-information CFR gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4-strategic-cfr.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  m4-strategic-authoritative:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Materialize certified row-local Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+      - name: Revalidate exact engine
+        run: python tools/openofc_solver/test_engine.py
+      - name: Validate exact Fantasy state transitions
+        run: python tools/openofc_solver/test_fantasy_transition.py
+      - name: Validate exact HU cross-hand continuation states
+        run: python tools/openofc_solver/test_hu_continuation.py
+      - name: Validate exact delayed Fantasy response kernel
+        run: python tools/openofc_solver/test_fantasy_delayed_response.py
+      - name: Revalidate shared scoring primitives (HU strategic scope)
+        run: python tools/openofc_solver/test_table_scoring.py
+      - name: Validate strategic information-state and MCCFR mechanics
+        run: python tools/openofc_solver/test_strategic_cfr.py
+      - name: Validate exact suit-isomorphism reduction
+        run: python tools/openofc_solver/test_strategic_suit_symmetry.py
+      - name: Validate deterministic resume and convergence auditor
+        run: python tools/openofc_solver/test_strategic_runner.py
+      - name: Validate HU-only resource-feasibility instrumentation
+        run: python tools/openofc_solver/test_strategic_feasibility.py
+      - name: Validate deterministic multi-seed orchestration
+        run: python tools/openofc_solver/test_strategic_multiseed.py
+      - name: Run 300-iteration HU feasibility and exact-key reuse probe
+        run: |
+          mkdir -p artifact
+          python tools/openofc_solver/strategic_feasibility.py \
+            --iterations 300 \
+            --seed 20260825 \
+            --epsilon 0.6 \
+            --checkpoint artifact/strategic_feasibility_n300.json.gz \
+            --report artifact/strategic_feasibility_n300.json \
+            --project-iterations 1000,10000,100000,1000000 \
+            --max-wall-seconds 120 \
+            --max-rss-mb 2048 \
+            --max-checkpoint-mb 100
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/strategic_feasibility_n300.json', encoding='utf-8'))
+          assert p['authority'] == 'HU_FEASIBILITY_MEASUREMENT_ONLY'
+          assert p['scope'] == 'HU_ONLY' and p['player_count'] == 2
+          assert p['solver_kind'] == 'suit24-exact'
+          assert p['action_abstraction'] is False
+          assert p['iterations'] == 300 and p['episodes'] == 600
+          assert p['max_actions'] == 232
+          assert p['budget_status'] == 'PASS'
+          r=p['reuse']
+          assert r['node_touches'] == 6000
+          assert 0.0 <= r['infoset_reuse_fraction'] <= 1.0
+          assert 0.0 <= r['regret_reuse_fraction'] <= 1.0
+          assert set(r['by_round']) == {'0','1','2','3','4'}
+          print('OPENOFC_M4_HU_FEASIBILITY=PASS')
+          print('OPENOFC_M4_INFOSET_REUSE=' + str(r['infoset_reuse_fraction']))
+          print('OPENOFC_M4_REGRET_REUSE=' + str(r['regret_reuse_fraction']))
+          PY
+      - name: Exercise two-worker independent HU training
+        run: |
+          python tools/openofc_solver/strategic_multiseed.py \
+            --seeds 20260825,20260826 \
+            --iterations 1 \
+            --checkpoint-every 1 \
+            --epsilon 0.6 \
+            --workers 2 \
+            --output-dir artifact/multiseed \
+            --manifest artifact/multiseed_manifest.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/multiseed_manifest.json', encoding='utf-8'))
+          assert p['authority'] == 'STRATEGIC_APPROX_MULTI_SEED_HU'
+          assert p['scope'] == 'HU_ONLY' and p['player_count'] == 2
+          assert p['solver_kind'] == 'suit24-exact'
+          assert p['parallel_workers'] == 2 and p['member_count'] == 2
+          assert p['ensemble']['regrets_merged'] is False
+          assert p['ensemble']['selection_scope'] == 'SELECT_ONE_MEMBER_AT_HAND_START'
+          assert all(x['iterations'] == 1 and x['max_actions'] == 232 for x in p['members'])
+          print('OPENOFC_M4_MULTI_SEED_PARALLEL=PASS')
+          PY
+      - name: Run suit-canonical strategic smoke and checkpoint
+        run: |
+          python tools/openofc_solver/strategic_cfr_runner.py \
+            --iterations 5 \
+            --checkpoint-every 2 \
+            --seed 20260825 \
+            --epsilon 0.6 \
+            --suit-canonical \
+            --checkpoint artifact/strategic_cfr_smoke.json.gz \
+            --summary artifact/strategic_cfr_smoke_summary.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/strategic_cfr_smoke_summary.json', encoding='utf-8'))
+          assert p['authority'] == 'STRATEGIC_APPROX_CURRENT_HAND_HU'
+          assert p['solver_kind'] == 'suit24-exact'
+          assert p['iterations'] == 5 and p['episodes'] == 10
+          assert p['infosets'] > 0 and p['total_visits'] > 0
+          assert p['max_actions'] == 232
+          print('OPENOFC_M4_STRATEGIC_SMOKE=PASS')
+          PY
+      - name: Prove exact-random-stream resume
+        run: |
+          cp artifact/strategic_cfr_smoke.json.gz artifact/strategic_cfr_n5.json.gz
+          python tools/openofc_solver/strategic_cfr_runner.py \
+            --iterations 1 \
+            --resume artifact/strategic_cfr_n5.json.gz \
+            --checkpoint artifact/strategic_cfr_resumed.json.gz \
+            --checkpoint-every 1 \
+            --epsilon 0.6 \
+            --summary artifact/strategic_cfr_resumed_summary.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/strategic_cfr_resumed_summary.json', encoding='utf-8'))
+          assert p['solver_kind'] == 'suit24-exact'
+          assert p['iterations'] == 6 and p['episodes'] == 12
+          print('OPENOFC_M4_STRATEGIC_RESUME=PASS')
+          PY
+      - name: Audit N to N+1 policy stability plumbing
+        run: |
+          python tools/openofc_solver/audit_strategic_convergence.py \
+            artifact/strategic_cfr_n5.json.gz \
+            artifact/strategic_cfr_resumed.json.gz \
+            --report artifact/strategic_cfr_n5_to_n6.json
+          python - <<'PY'
+          import json
+          p=json.load(open('artifact/strategic_cfr_n5_to_n6.json', encoding='utf-8'))
+          assert p['authority'] == 'STABILITY_ONLY_NOT_EXPLOITABILITY'
+          assert p['threshold_status'] == 'PASS'
+          print('OPENOFC_M4_STABILITY_AUDIT=PASS')
+          PY
+      - name: Upload strategic smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4_Strategic_CFR_Smoke
+          path: |
+            artifact/strategic_feasibility_n300.json.gz
+            artifact/strategic_feasibility_n300.json
+            artifact/multiseed/*.json.gz
+            artifact/multiseed_manifest.json
+            artifact/strategic_cfr_n5.json.gz
+            artifact/strategic_cfr_smoke_summary.json
+            artifact/strategic_cfr_resumed.json.gz
+            artifact/strategic_cfr_resumed_summary.json
+            artifact/strategic_cfr_n5_to_n6.json
+          if-no-files-found: error

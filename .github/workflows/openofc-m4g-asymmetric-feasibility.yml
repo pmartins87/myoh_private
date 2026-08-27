@@ -1,0 +1,57 @@
+name: OpenOFC M4G asymmetric terminal feasibility gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4g-asymmetric-feasibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4g-feasibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate feasibility plumbing
+        run: python tools/openofc_solver/test_normal_fantasy_feasibility.py
+
+      - name: Measure one exact F14 frontier miss and hit
+        run: |
+          mkdir -p artifact/m4g
+          python tools/openofc_solver/normal_fantasy_feasibility.py \
+            --counts 14 \
+            --samples 1 \
+            --base-seed 20260826 \
+            --output artifact/m4g/m4g_f14_probe.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('artifact/m4g/m4g_f14_probe.json').read_text())
+          row = report['rows'][0]
+          assert row['fantasy_count'] == 14
+          assert row['mask_pairs_per_frontier'] == 504504
+          assert row['mean_exact_miss_seconds'] > 0
+          assert row['mean_cache_hit_seconds'] >= 0
+          print('OPENOFC_M4G_GATE=PASS')
+          print('F14_EXACT_FRONTIERS_PER_SECOND=' + str(row['mean_exact_frontiers_per_second']))
+          print('F14_EXACT_MISS_SECONDS=' + str(row['mean_exact_miss_seconds']))
+          print('F14_CACHE_HIT_SECONDS=' + str(row['mean_cache_hit_seconds']))
+          PY
+
+      - name: Upload feasibility evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4G_F14_EXACT_FRONTIER_FEASIBILITY
+          path: artifact/m4g
+          if-no-files-found: error

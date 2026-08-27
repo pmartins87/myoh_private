@@ -1,0 +1,67 @@
+name: OpenOFC M4H one-pass exact Fantasy frontier gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4h-onepass-frontier.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4h-onepass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Prove one-pass parity against the exact two-pass reference
+        run: python tools/openofc_solver/test_fantasy_response_frontier_onepass.py
+
+      - name: Measure exact one-pass F14-F17 throughput
+        run: |
+          mkdir -p artifact/m4h
+          python tools/openofc_solver/normal_fantasy_feasibility_onepass.py \
+            --counts 14,15,16,17 \
+            --samples 1 \
+            --base-seed 20260826 \
+            --output artifact/m4h/m4h_onepass_probe.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path('artifact/m4h/m4h_onepass_probe.json').read_text())
+          assert report['counts'] == [14, 15, 16, 17]
+          assert len(report['rows']) == 4
+          expected = {14:252252, 15:756756, 16:2018016, 17:4900896}
+          for row in report['rows']:
+              count = row['fantasy_count']
+              assert row['mask_pairs_single_bottom_middle_traversal'] == expected[count]
+              assert row['mean_exact_miss_seconds'] > 0
+              assert row['mean_cache_hit_seconds'] >= 0
+              print(
+                  'M4H_COUNT=' + str(count)
+                  + ' MISS_SECONDS=' + str(row['mean_exact_miss_seconds'])
+                  + ' FRONTIERS_PER_SECOND=' + str(row['mean_exact_frontiers_per_second'])
+                  + ' HIT_SECONDS=' + str(row['mean_cache_hit_seconds'])
+              )
+          f14 = next(row for row in report['rows'] if row['fantasy_count'] == 14)
+          baseline = 2.3254930909999985
+          print('M4G_F14_TWO_PASS_BASELINE_SECONDS=' + str(baseline))
+          print('M4H_F14_SPEEDUP_VS_M4G=' + str(baseline / f14['mean_exact_miss_seconds']))
+          print('OPENOFC_M4H_GATE=PASS')
+          PY
+
+      - name: Upload M4H evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4H_ONEPASS_EXACT_FRONTIER_FEASIBILITY
+          path: artifact/m4h
+          if-no-files-found: error

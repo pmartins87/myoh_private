@@ -1,0 +1,45 @@
+name: OpenOFC M4C4 continuation-aware exact R4 teacher gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4c4-continuation-r4.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4c4-continuation-r4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Revalidate HU continuation transition
+        run: python tools/openofc_solver/test_hu_continuation.py
+
+      - name: Revalidate exact R4 oracle
+        run: |
+          python tools/openofc_solver/test_engine.py
+          python tools/openofc_solver/test_r4_nondealer.py
+
+      - name: Validate exact continuation-aware dealer R4 teacher
+        run: python tools/openofc_solver/test_strategic_continuation_r4_teacher.py
+
+      - name: Revalidate continuation-coupled normal objective
+        run: python tools/openofc_solver/test_strategic_continuation_cfr.py
+
+      - name: Gate summary
+        run: |
+          echo 'OPENOFC_M4C4_GATE=PASS'
+          echo 'authority=EXACT_DEALER_R4_GIVEN_SUPPLIED_CONTINUATION'
+          echo 'outer_continuation_vector=NOT_YET_CERTIFIED'
+          echo 'field_test=DEFERRED'
