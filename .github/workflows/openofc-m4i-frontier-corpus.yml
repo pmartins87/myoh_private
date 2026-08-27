@@ -1,0 +1,61 @@
+name: OpenOFC M4I exact Fantasy frontier corpus gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4i-frontier-corpus.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4i-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Revalidate one-pass exact frontier
+        run: python tools/openofc_solver/test_fantasy_response_frontier_onepass.py
+
+      - name: Validate exact corpus, resume, SHA and lossless oracle features
+        run: python tools/openofc_solver/test_fantasy_frontier_corpus.py
+
+      - name: Generate two independent parallel F14 shards
+        run: |
+          mkdir -p artifact/m4i
+          python tools/openofc_solver/run_fantasy_frontier_shards.py \
+            --output-dir artifact/m4i/corpus \
+            --counts 14 \
+            --worlds-per-count 2 \
+            --shard-size 1 \
+            --workers 2 \
+            --base-seed 20260826
+          for f in artifact/m4i/corpus/*.jsonl; do
+            python tools/openofc_solver/audit_fantasy_frontier_corpus.py "$f" --recompute-rows 1
+          done
+          python tools/openofc_solver/run_fantasy_frontier_shards.py \
+            --output-dir artifact/m4i/corpus \
+            --counts 14 \
+            --worlds-per-count 2 \
+            --shard-size 1 \
+            --workers 2 \
+            --base-seed 20260826 \
+            > artifact/m4i/resume_run.txt
+          grep -q 'resumed=true' artifact/m4i/resume_run.txt
+          echo 'OPENOFC_M4I_GATE=PASS'
+
+      - name: Upload exact corpus evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4I_EXACT_FRONTIER_CORPUS
+          path: artifact/m4i
+          if-no-files-found: error
