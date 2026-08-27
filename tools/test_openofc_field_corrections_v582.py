@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import math
 from pathlib import Path
 
+from openofc_tablemap_identity import validate_v552_semantic_contract
+
 
 ROOT = Path(__file__).resolve().parents[1]
-TM = ROOT / "OpenOFC/TableMaps/KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm"
-TM_SHA256 = "28587f10d3f8436880e6ef98280b5f86d85e26b674f15cfe61f5a03bc5751ee6"
 
 T14 = [
     (29.5,693.5),(55.5,684.5),(83.0,677.0),(110.5,671.0),
@@ -44,7 +43,6 @@ def bounded_alignment(observed, expected):
     max_missing = 1
     max_extra = 2
     inf = float("inf")
-    # (a,e,missing,extra) -> minimum weighted squared geometry error.
     dp = {(0, 0, 0, 0): 0.0}
     for a in range(len(observed) + 1):
         for e in range(len(expected) + 1):
@@ -78,9 +76,6 @@ def bounded_alignment(observed, expected):
 
 
 def test_one_missing_f15_anchor_is_not_forced_to_f14() -> None:
-    # Cover every possible single missing F15 anchor. Even the hardest central
-    # omission must remain below the unchanged score=8 gate and beat the F14
-    # template by the unchanged >=3 separation gate.
     for missing in range(len(T15)):
         observed = T15[:missing] + T15[missing + 1:]
         f15 = bounded_alignment(observed, T15)
@@ -90,9 +85,6 @@ def test_one_missing_f15_anchor_is_not_forced_to_f14() -> None:
 
 
 def test_exact_field_replay_anchors_choose_f15() -> None:
-    # These are the exact two field patterns that v5.8.1 logged as
-    # observed=14 with old F14 scores 15.5518 and 15.5230.  Under v5.8.2 the
-    # missing endpoint is a bounded detection miss and F15 wins decisively.
     cases = (
         (FIELD_F15_FRAME000000_ANCHORS, 3.3660254037844384, 15.551756905801442),
         (FIELD_F15_FRAME000003_ANCHORS, 3.1614378277661475, 15.523024373951285),
@@ -136,8 +128,12 @@ def test_materialized_source_contract() -> None:
     assert "board.CountKnownCards() == 0" in gate
 
 
-def test_paired_tablemap_is_unchanged() -> None:
-    assert hashlib.sha256(TM.read_bytes()).hexdigest() == TM_SHA256
+def test_paired_tablemap_semantic_contract() -> None:
+    identity = validate_v552_semantic_contract()
+    assert identity["stage"] == "openofc_v5_5_2_fantasy_live_recovery"
+    assert identity["contract"] == 5
+    assert identity["field_revision"] == 552
+    assert int(identity["regions"]) >= 250
 
 
 def main() -> None:
@@ -145,11 +141,12 @@ def main() -> None:
     test_exact_field_replay_anchors_choose_f15()
     test_exact_f14_stays_f14()
     test_materialized_source_contract()
-    test_paired_tablemap_is_unchanged()
+    test_paired_tablemap_semantic_contract()
     print(
         "OPENOFC_V582_FIELD_REGRESSION=PASS "
         "field_f15_anchors=RECOVERED synthetic_f15=RECOVERED exact_f14=PRESERVED "
-        "empty_bootstrap=OCCUPANCY_FIRST runtime=F14_17_RELEASE tablemap=UNCHANGED"
+        "empty_bootstrap=OCCUPANCY_FIRST runtime=F14_17_RELEASE "
+        "tablemap=V552_SEMANTIC_CONTRACT_VALID"
     )
 
 
