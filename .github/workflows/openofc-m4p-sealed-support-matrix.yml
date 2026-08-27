@@ -1,0 +1,32 @@
+name: OpenOFC M4P sealed Fantasy support-matrix gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/fantasy_fantasy_policy_features.py'
+      - 'tools/openofc_solver/fantasy_fantasy_payoff.py'
+      - 'tools/openofc_solver/test_fantasy_fantasy_payoff.py'
+      - 'tools/openofc_solver/M4P_SEALED_SUPPORT_MATRIX_CONTRACT.md'
+      - '.github/workflows/openofc-m4p-sealed-support-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4p-sealed-support-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate sealed features and exact bounded payoff matrix
+        run: |
+          python tools/openofc_solver/test_fantasy_fantasy_payoff.py
+          echo OPENOFC_M4P_GATE=PASS
