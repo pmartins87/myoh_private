@@ -1,0 +1,25 @@
+name: OpenOFC M4T 50-state Bellman image gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4t-bellman-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate strict 50-state Bellman/RVI algebra
+        run: |
+          python tools/openofc_solver/test_hu_bellman_iteration.py
+          echo OPENOFC_M4T_GATE=PASS
