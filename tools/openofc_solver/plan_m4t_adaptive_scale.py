@@ -155,11 +155,11 @@ def next_coverage(decisions):
     passed = {s for s, d in decisions.items() if d["status"] == "STATE_BUDGETS_PASS"}
     tiers = coverage_tiers()
     for i, tier in enumerate(tiers):
-        present = [s for s in tier if s in decisions]
-        if present and not all(s in passed for s in present): return ()
-        if i+1 < len(tiers) and present:
+        if not all(s in decisions for s in tier): return ()
+        if not all(s in passed for s in tier): return ()
+        if i+1 < len(tiers):
             nxt = tuple(s for s in tiers[i+1] if s not in decisions)
-            if nxt and all(s in passed for s in present): return nxt
+            if nxt: return nxt
     return ()
 
 

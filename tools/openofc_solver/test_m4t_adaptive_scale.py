@@ -38,6 +38,7 @@ def main():
     p=build_plan([fake(i,dev=.5,mae=.4,qmax=.6) for i in (1,2,3)],req(),targets()); kinds=[a["kind"] for a in p["recommended_actions"]]; assert "TRAIN_SELFPLAY_LONGER" in kinds and "EXPAND_FUNCTION_APPROXIMATOR" in kinds; assert p["recommended_next_config_without_seed"]["model_buckets"]==131072
     p=build_plan([fake(i) for i in (1,2,3)],req(),Targets()); assert p["recommended_actions"][0]["kind"]=="CALIBRATE_AND_SUPPLY_NUMERIC_TARGETS"
     p=build_plan([fake(i) for i in (1,2,3)],req(),targets()); assert p["recommended_actions"][0]["kind"]=="EXPAND_FANTASY_COUNT_COVERAGE"; assert set(p["recommended_actions"][0]["states"])==set(coverage_tiers()[1])
+    p=build_plan([fake(i,states=("b0:p0f14:p1f14",)) for i in (1,2,3)],req(),targets()); assert p["recommended_actions"][0]["kind"]=="FILL_CURRENT_COVERAGE_TIER"
     p=build_plan([fake(i,states=all_states()) for i in (1,2,3)],req(),targets()); assert p["recommended_actions"][0]["kind"]=="OUTER_CONTINUATION_INTEGRATION_CANDIDATE" and p["outer_continuation_ready_candidate"] and p["promotion_blocked"]
     print("OPENOFC_M4T_ADAPTIVE_SCALE=PASS")
 
