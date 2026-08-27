@@ -1,0 +1,39 @@
+name: OpenOFC M5D dynamic certified Bellman gate
+
+on:
+  push:
+    branches:
+      - 'openofc-m4v-continuation-transport'
+    paths:
+      - 'tools/openofc_solver/m5d_dynamic_certified_bellman.py'
+      - 'tools/openofc_solver/test_m5d_dynamic_certified_bellman.py'
+      - 'tools/openofc_solver/M5D_DYNAMIC_CERTIFIED_BELLMAN_CONTRACT.md'
+      - '.github/workflows/openofc-m5d-dynamic-certified-bellman.yml'
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/m5d_dynamic_certified_bellman.py'
+      - 'tools/openofc_solver/test_m5d_dynamic_certified_bellman.py'
+      - 'tools/openofc_solver/M5D_DYNAMIC_CERTIFIED_BELLMAN_CONTRACT.md'
+      - '.github/workflows/openofc-m5d-dynamic-certified-bellman.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m5d-dynamic-certified-bellman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate per-iterate registry rebinding
+        run: |
+          cd tools/openofc_solver
+          python test_m5d_dynamic_certified_bellman.py
