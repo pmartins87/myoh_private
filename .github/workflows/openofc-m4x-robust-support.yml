@@ -1,0 +1,31 @@
+name: OpenOFC M4X robust continuation-region support gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/m4x_robust_support.py'
+      - 'tools/openofc_solver/test_m4x_robust_support.py'
+      - 'tools/openofc_solver/M4X_ROBUST_SUPPORT_CONTRACT.md'
+      - '.github/workflows/openofc-m4x-robust-support.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4x-robust-support:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate robust support and continuation-region theorem
+        run: |
+          python tools/openofc_solver/test_m4x_robust_support.py
+          echo OPENOFC_M4X_GATE=PASS
