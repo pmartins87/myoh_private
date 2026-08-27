@@ -1,6 +1,19 @@
 name: OpenOFC M5A three-kernel component adapters gate
 
 on:
+  push:
+    branches:
+      - 'openofc-m4v-continuation-transport'
+    paths:
+      - 'tools/openofc_solver/m5a_normal_normal_oracle.py'
+      - 'tools/openofc_solver/m5a_normal_fantasy_oracle.py'
+      - 'tools/openofc_solver/m5a_fantasy_fantasy_oracle.py'
+      - 'tools/openofc_solver/normal_fantasy_policy_features.py'
+      - 'tools/openofc_solver/normal_fantasy_policy_distillation.py'
+      - 'tools/openofc_solver/test_m5a_normal_fantasy_oracle.py'
+      - 'tools/openofc_solver/test_m5a_component_adapters.py'
+      - 'tools/openofc_solver/M5A_NORMAL_FANTASY_ORACLE_CONTRACT.md'
+      - '.github/workflows/openofc-m5a-component-adapters.yml'
   pull_request:
     paths:
       - 'tools/openofc_solver/m5a_normal_normal_oracle.py'
