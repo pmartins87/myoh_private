@@ -1,0 +1,31 @@
+name: OpenOFC M4Y Bellman-trace evidence gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/m4y_bellman_trace.py'
+      - 'tools/openofc_solver/test_m4y_bellman_trace.py'
+      - 'tools/openofc_solver/M4Y_BELLMAN_TRACE_CONTRACT.md'
+      - '.github/workflows/openofc-m4y-bellman-trace.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4y-bellman-trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate trace normalization, train-only region and held-out M4W transport
+        run: |
+          python tools/openofc_solver/test_m4y_bellman_trace.py
+          echo OPENOFC_M4Y_GATE=PASS
