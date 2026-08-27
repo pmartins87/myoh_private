@@ -1,0 +1,77 @@
+name: OpenOFC M4J terminal frontier approximation probe
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/**'
+      - '.github/workflows/openofc-m4j-terminal-model.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4j-terminal-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate bounded terminal model mechanics
+        run: python tools/openofc_solver/test_fantasy_frontier_model.py
+
+      - name: Build exact smoke teacher corpus
+        run: |
+          mkdir -p artifact/m4j
+          python tools/openofc_solver/run_fantasy_frontier_shards.py \
+            --output-dir artifact/m4j/corpus \
+            --counts 14 \
+            --worlds-per-count 10 \
+            --shard-size 2 \
+            --workers 2 \
+            --base-seed 20260826
+          for f in artifact/m4j/corpus/*.jsonl; do
+            python tools/openofc_solver/audit_fantasy_frontier_corpus.py "$f"
+          done
+
+      - name: Train and report exact held-out smoke metrics
+        run: |
+          python tools/openofc_solver/train_fantasy_frontier_model.py \
+            --input-dir artifact/m4j/corpus \
+            --epochs 15 \
+            --pair-buckets 4096 \
+            --seed 20260826 \
+            --model-output artifact/m4j/model.json \
+            --report-output artifact/m4j/report.json
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          report = json.loads(Path('artifact/m4j/report.json').read_text())
+          assert report['authority'] == 'APPROXIMATION_PROBE_NOT_PRODUCTION'
+          assert report['promotion_blocked'] is True
+          assert report['train_branch_examples'] > 0
+          assert report['holdout_branch_examples'] > 0
+          metrics = report['holdout_metrics']
+          for key in (
+              'reach_accuracy', 'reachable_point_mae', 'reachable_point_rmse',
+              'confident_coverage', 'utility_mean_abs_error', 'utility_max_abs_error'):
+              assert math.isfinite(float(metrics[key]))
+          print('OPENOFC_M4J_GATE=PASS')
+          print('M4J_HELDOUT_REACH_ACCURACY=' + str(metrics['reach_accuracy']))
+          print('M4J_HELDOUT_POINT_MAE=' + str(metrics['reachable_point_mae']))
+          print('M4J_HELDOUT_CONFIDENT_COVERAGE=' + str(metrics['confident_coverage']))
+          print('M4J_HELDOUT_UTILITY_MAX_ABS_ERROR=' + str(metrics['utility_max_abs_error']))
+          PY
+
+      - name: Upload M4J smoke evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_M4J_TERMINAL_FRONTIER_MODEL_SMOKE
+          path: artifact/m4j
+          if-no-files-found: error
