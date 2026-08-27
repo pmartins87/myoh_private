@@ -1,0 +1,31 @@
+name: OpenOFC M4Z outer Bellman orchestration gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/m4z_outer_bellman.py'
+      - 'tools/openofc_solver/test_m4z_outer_bellman.py'
+      - 'tools/openofc_solver/M4Z_OUTER_BELLMAN_CONTRACT.md'
+      - '.github/workflows/openofc-m4z-outer-bellman.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4z-outer-bellman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate fail-closed 50-state orchestration and fixture RVI
+        run: |
+          python tools/openofc_solver/test_m4z_outer_bellman.py
+          echo OPENOFC_M4Z_GATE=PASS
