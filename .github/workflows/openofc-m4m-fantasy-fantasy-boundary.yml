@@ -1,0 +1,31 @@
+name: OpenOFC M4M Fantasy-vs-Fantasy sealed boundary gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/fantasy_fantasy_kernel.py'
+      - 'tools/openofc_solver/test_fantasy_fantasy_kernel.py'
+      - 'tools/openofc_solver/M4M_FANTASY_FANTASY_BOUNDARY_CONTRACT.md'
+      - '.github/workflows/openofc-m4m-fantasy-fantasy-boundary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4m-fantasy-fantasy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate sealed information and exact terminal boundary
+        run: |
+          python tools/openofc_solver/test_fantasy_fantasy_kernel.py
+          echo OPENOFC_M4M_GATE=PASS
