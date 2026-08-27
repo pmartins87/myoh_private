@@ -1,0 +1,32 @@
+name: OpenOFC M4S resumable multiseed runner gate
+
+on:
+  pull_request:
+    paths:
+      - 'tools/openofc_solver/run_m4s_multiseed.py'
+      - 'tools/openofc_solver/run_m4s_ryzen_pilot.ps1'
+      - 'tools/openofc_solver/test_m4s_multiseed.py'
+      - 'tools/openofc_solver/M4S_MULTISEED_MEASUREMENT_CONTRACT.md'
+      - '.github/workflows/openofc-m4s-multiseed.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  m4s-multiseed-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Materialize certified Joker semantics
+        run: python tools/openofc_solver/apply_m1b_joker_semantics.py
+
+      - name: Validate resumable cache and held-out budget plumbing
+        run: |
+          python tools/openofc_solver/test_m4s_multiseed.py
+          echo OPENOFC_M4S_GATE=PASS
