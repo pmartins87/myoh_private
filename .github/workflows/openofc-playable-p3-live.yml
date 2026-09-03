@@ -1,0 +1,109 @@
+name: OpenOFC PLAYABLE P3 hybrid
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/openofc-playable-p3-live.yml'
+      - 'OpenHoldem/COFCP3Policy.*'
+      - 'OpenHoldem/COFCBuildInfo.h'
+      - 'OpenHoldem/COFCRuntimeController.*'
+      - 'OpenHoldem/OpenHoldem.vcxproj'
+      - 'OpenOFC/Policies/**'
+      - 'docs/openofc/PLAYABLE_P3_HYBRID.md'
+      - 'tools/OpenOFCP3PolicySelftest.vcxproj'
+      - 'tools/openofc_p3_policy_selftest.cpp'
+      - 'tools/test_openofc_playable_p3_live.py'
+
+permissions:
+  contents: read
+
+jobs:
+  p3-hybrid:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Verify P3 runtime contract
+        shell: pwsh
+        run: python tools/test_openofc_playable_p3_live.py
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build and run native policy parity
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild tools/OpenOFCP3PolicySelftest.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "P3 standalone build failed: $LASTEXITCODE" }
+          & artifact/p3_selftest/openofc_p3_policy_selftest.exe OpenOFC/Policies OpenOFC/Policies/playable_p3_synthetic_replay_v1.txt
+          if ($LASTEXITCODE -ne 0) { throw "P3 native parity failed: $LASTEXITCODE" }
+
+      - name: Build OpenHoldem dependencies
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          $common = @('/m','/t:Build','/p:Configuration=Release','/p:Platform=Win32',"/p:SolutionDir=$root",'/v:minimal')
+          $projects = @(
+            'DLLs/Files_DLL/Files.vcxproj',
+            'DLLs/WindowFunctions_DLL/window_functions.vcxproj',
+            'DLLs/StringFunctions_DLL/string_functions.vcxproj',
+            'DLLs/Debug_DLL/Debug.vcxproj',
+            'DLLs/Preferences_DLL/Preferences.vcxproj',
+            'DLLs/Globals_DLL/globals.vcxproj',
+            'DLLs/GamestateValidation_DLL/GamestateValidation.vcxproj',
+            'DLLs/User_DLL/user.vcxproj',
+            'PokerTracker_Query_Definitions/pokertracker_query_definitions.vcxproj',
+            'Reference Mouse DLL/Reference Mouse DLL.vcxproj',
+            'Reference Keyboard DLL/Reference Keyboard DLL.vcxproj'
+          )
+          foreach ($project in $projects) {
+            & msbuild $project @common
+            if ($LASTEXITCODE -ne 0) { throw "Build failed: $project" }
+          }
+
+      - name: Build OpenOFC v5.9.0 Win32
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path '.').Path + '\'
+          msbuild OpenHoldem/OpenHoldem.vcxproj /m /t:Build /p:Configuration=Release /p:Platform=Win32 "/p:SolutionDir=$root" /p:BuildProjectReferences=true /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "OpenHoldem P3 build failed: $LASTEXITCODE" }
+          if (-not (Test-Path 'Release/OpenHoldem.exe')) { throw 'Release/OpenHoldem.exe missing' }
+
+      - name: Assemble playable package
+        shell: pwsh
+        run: |
+          $out = 'artifact/OpenOFC_v5.9.0_P3_HYBRID'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item 'Release/OpenHoldem.exe' $out
+          Get-ChildItem 'Release' -Filter '*.dll' | Copy-Item -Destination $out
+          if (Test-Path 'Release/tessdata') { Copy-Item 'Release/tessdata' "$out/tessdata" -Recurse }
+          Copy-Item 'OpenOFC/TableMaps/KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm' $out
+          Copy-Item 'OpenOFC/Policies/playable_p3_native_manifest.json' $out
+          Copy-Item 'OpenOFC/Policies/playable_p3_b0_weights.f64le' $out
+          Copy-Item 'OpenOFC/Policies/playable_p3_b1_weights.f64le' $out
+          Copy-Item 'docs/openofc/PLAYABLE_P3_HYBRID.md' "$out/READ_ME_FIRST.md"
+          @(
+            "source_commit=$env:GITHUB_SHA",
+            'product=OpenOFC v5.9.0 P3 HYBRID',
+            'normal_normal_strategy=P3 B0/B1',
+            'fallback=operational baseline',
+            'tablemap=KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm'
+          ) | Set-Content -Encoding ascii "$out/BUILD_INFO.txt"
+          $files = @(Get-ChildItem $out -Recurse -File | Sort-Object FullName)
+          $lines = foreach ($file in $files) {
+            $rel = $file.FullName.Substring((Resolve-Path $out).Path.Length + 1).Replace('\','/')
+            $hash = (Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+            "$hash  $rel"
+          }
+          $lines | Set-Content -Encoding ascii "$out/SHA256SUMS.txt"
+
+      - name: Upload playable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenOFC_v5.9.0_P3_HYBRID
+          path: artifact/OpenOFC_v5.9.0_P3_HYBRID
+          if-no-files-found: error

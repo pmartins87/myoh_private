@@ -1,0 +1,3 @@
+OpenOFC/Policies/*.json text eol=lf
+OpenOFC/Policies/*.txt text eol=lf
+OpenOFC/Policies/*.f64le binary

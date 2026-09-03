@@ -412,6 +412,9 @@
     <ClCompile Include="COFCBaselinePolicy.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="COFCP3Policy.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="COFCDecisionPolicy.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -762,6 +765,20 @@
     <ClInclude Include="CFunctionCollection.h" />
     <ClInclude Include="COHScriptList.h" />
     <ClInclude Include="COHScriptObject.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\OpenOFC\Policies\playable_p3_native_manifest.json">
+      <Link>playable_p3_native_manifest.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\OpenOFC\Policies\playable_p3_b0_weights.f64le">
+      <Link>playable_p3_b0_weights.f64le</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\OpenOFC\Policies\playable_p3_b1_weights.f64le">
+      <Link>playable_p3_b1_weights.f64le</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup Condition="'$(Configuration)'=='Release - Optimized'">
     <Content Include="..\lib\archive.dll">

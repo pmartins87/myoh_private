@@ -8,14 +8,15 @@
 #include <string>
 
 #include "COFCConfirmVerifier.h"
+#include "COFCP3Policy.h"
 #include "COFCTurnOrchestrator.h"
 
 class COFCRuntimeController {
  public:
   COFCRuntimeController();
 
-  // One heartbeat. Sends at most one physical input and never retries an
-  // unverified drag or Confirm click.
+  // One heartbeat. Normal/Normal uses P3 when its full public history is
+  // available; other states retain the operational baseline fallback.
   void Tick(
       const COFCState &state,
       const COFCVisualObservation &observation);
@@ -54,6 +55,8 @@ class COFCRuntimeController {
   int drag_wait_cycles_;
   int drag_retry_count_;
   std::string hand_signature_;
+  COFCP3PublicHistory p3_history_;
+  COFCP3Policy p3_policy_;
 };
 
 #endif  // INC_COFCRUNTIMECONTROLLER_H
