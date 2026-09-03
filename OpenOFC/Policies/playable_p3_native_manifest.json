@@ -1,0 +1,69 @@
+{
+  "adapter_schema": "openofc-playable-p3-normal-runtime-adapter-v1",
+  "authority": "SHADOW_ONLY_NO_PHYSICAL_EXECUTION_AUTHORITY",
+  "binary_header": {
+    "byte_order": "little-endian",
+    "format": "openofc-p3-dense-float64-le-v1",
+    "layout": "magic[8],version:u32,button:u32,buckets:u32,dimension:u32,p2_manifest[32],model[32],snapshot[32],route[32],weights:f64[]",
+    "magic_ascii": "DOFCP3W1",
+    "size_bytes": 152,
+    "version": 1
+  },
+  "feature_contract": {
+    "action_size": 216,
+    "feature_dimension": 2276,
+    "hash": "splitmix64-finalizer-v1",
+    "interaction_buckets": 65536,
+    "offset_action": 2060,
+    "policy": "normalize-positive-advantage-or-uniform",
+    "prediction_dimension": 65753,
+    "schema": "openofc-hu-visible-feature-v1"
+  },
+  "limitations": {
+    "formal_certification": false,
+    "normal_normal_only": true,
+    "recorded_shadow_required": true,
+    "runtime_binding_complete": false
+  },
+  "p2_manifest_sha256": "f10c079a61ba08832cfc334afb9c055e023dfc9c23a24140d02b2f7bd8413898",
+  "p2_source_commit": "3d04fe96fa41e2eb2709b01dc7f8c02e709eb163",
+  "physical_execution_authorized": false,
+  "routes": [
+    {
+      "button": 0,
+      "model_sha256": "9cc5d4f09387bee64ea18e91677653e164e878c2153c2f12b232f777ca202f71",
+      "nonzero_weights": 63437,
+      "policy_snapshot_sha256": "c6f3f212189e03232345f7ae5dcf30ed0a89e00aa1928a6451d6aab23dcfc92d",
+      "route_sha256": "5f8600bc035197f00de68969c8e0f025a10f1094888999f134f83586f8aa98e1",
+      "source_route_file_sha256": "8ecf7a2dd6455e3022fab3e4c26100f5cbbd48508acd1fdebf694a8b30db714a",
+      "state": "B0:P0F0:P1F0",
+      "weights_count": 65753,
+      "weights_file": "playable_p3_b0_weights.f64le",
+      "weights_file_sha256": "52be780cda5b0e36da645e6ea36fc07dd445fcc6785281a769a91d8fce0d699c",
+      "weights_format": "openofc-p3-dense-float64-le-v1"
+    },
+    {
+      "button": 1,
+      "model_sha256": "5b65fc728c90c65cf17b4462140ea843d80085166e738cb0204460200d337779",
+      "nonzero_weights": 63430,
+      "policy_snapshot_sha256": "31f745f80b9141f7e0dc41905ca57746a259e420ccee2314eb255a1b54fc7302",
+      "route_sha256": "4d8d53adf077c0fe4759a7ed876261542adb60983f278bb3cd4de535eed27f0d",
+      "source_route_file_sha256": "d47f45f09d266f295a8d62ca137ace58e1e26c2383c3484c978143b3d8cf9eac",
+      "state": "B1:P0F0:P1F0",
+      "weights_count": 65753,
+      "weights_file": "playable_p3_b1_weights.f64le",
+      "weights_file_sha256": "08e3b9d2523f092aee45fddc1170e9ffb7486595ea2f36f8c6db7296df27a0d3",
+      "weights_format": "openofc-p3-dense-float64-le-v1"
+    }
+  ],
+  "schema": "openofc-playable-p3-native-policy-export-v1",
+  "selection_rule": "maximum_probability_then_lexicographically_smallest_action_key",
+  "sha256": "ff880a76bce9885f19b7297952a9d182d0ba2c54e10681baa74937f66b4691bc",
+  "source_files": {
+    "playable_p3_native_export.py": "db3a3a463b565ca63c01fd7adca911bb9478318ffe83d7a79f5ef005de6e39e9",
+    "playable_p3_runtime_adapter.py": "da98f58cf9a3059235cc96fadfa30ed688585df26d52a71277e4f829c0e22c10",
+    "strategic_advantage_model.py": "48cd1b74b1c46a96ce915b0d31ef757b4ee0f38b0a7ee155c3b0253610a763c8",
+    "strategic_feature_encoder.py": "6299b8aeefb56387403b6d2c37d7df93f917f3c7bac6fbc0e2da05248431ff2e",
+    "strategic_suit_symmetry.py": "41be0493f990ca0d1eaad429f8e78c188780abc5060e1ecd5264123310bb8a1e"
+  }
+}

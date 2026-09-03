@@ -1,0 +1,4 @@
+OpenOFC/Policies/*.json text eol=lf
+OpenOFC/Policies/*.txt text eol=lf
+OpenOFC/Policies/*.f64le binary
+OpenOFC/TableMaps/KKPoker_Chines_v5_5_2_FANTASY_LIVE_RECOVERY.tm text eol=lf

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "COFCBaselinePolicy.h"
+#include "COFCP3Policy.h"
 #include "CardFunctions.h"
 #include "CCasinoInterface.h"
 #include "CTableState.h"
@@ -70,6 +71,29 @@ void LogStrategyAction(const COFCStrategyAction &action) {
   write_log(true,
     "[DeepOFC POLICY] valid=%d placements=%s unused=%s\n",
     action.valid ? 1 : 0, placements.str().c_str(), unused.str().c_str());
+}
+
+string ExecutableDirectory() {
+  char path[MAX_PATH + 1] = {0};
+  const DWORD length = GetModuleFileNameA(NULL, path, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) return string();
+  string result(path, path + length);
+  const string::size_type separator = result.find_last_of("/\\");
+  return separator == string::npos ? string() : result.substr(0, separator);
+}
+
+void LogP3Receipt(const COFCP3PolicyReceipt &receipt) {
+  write_log(true,
+    "[OpenOFC P3 POLICY] authority=%s policy_receipt_execution_authorized=0 "
+    "runtime_execution_authorized=1 "
+    "native_manifest=%s p2_manifest=%s p2_source=%s button=%d actor_role=%d "
+    "route=%s model=%s key_sha256=%s probability=%.17g action=%s\n",
+    receipt.authority.c_str(), receipt.native_manifest_sha256.c_str(),
+    receipt.p2_manifest_sha256.c_str(), receipt.p2_source_commit.c_str(),
+    receipt.button_identity, receipt.actor_role, receipt.route_sha256.c_str(),
+    receipt.model_sha256.c_str(),
+    receipt.canonical_information_key_sha256.c_str(),
+    receipt.selected_probability, receipt.canonical_action_key.c_str());
 }
 
 }  // namespace
@@ -137,6 +161,15 @@ void COFCRuntimeController::ResetForKnownNewHand(const COFCState &state) {
   drag_retry_count_ = 0;
   hand_signature_ = IncomingSignature(state);
   phase_ = kIdle;
+  p3_history_.Invalidate();
+  if (!state.players[state.hero_chair].fantasy) {
+    string history_error;
+    if (!p3_history_.ResetForKnownNewHand(state, &history_error)) {
+      write_log(true,
+        "[OpenOFC P3 FALLBACK] mode=BASELINE reason=\"%s\"\n",
+        history_error.c_str());
+    }
+  }
   write_log(true, "[DeepOFC FP0] known new hand; runtime reset\n");
 }
 
@@ -180,12 +213,52 @@ bool COFCRuntimeController::StartDecision(
     const COFCState &state,
     const COFCVisualObservation &observation) {
   COFCStrategyAction action;
+  COFCP3PolicyReceipt receipt;
   string error;
-  if (!COFCBaselinePolicy::Choose(state, &action, &error)) {
-    write_log(k_always_log_errors,
-      "[DeepOFC POLICY] result=REJECTED reason=\"%s\"\n", error.c_str());
-    Block("policy refused state: " + error);
-    return false;
+  bool used_p3 = false;
+  const bool normal = !state.players[state.hero_chair].fantasy;
+  if (normal && p3_history_.valid()) {
+    if (!p3_policy_.loaded()) {
+      const string directory = ExecutableDirectory();
+      string load_error;
+      if (!directory.empty()
+          && p3_policy_.LoadDirectory(directory, &load_error)) {
+        write_log(true,
+          "[OpenOFC P3 POLICY] load=PASS native_manifest=%s "
+          "p2_manifest=%s p2_source=%s\n",
+          COFCP3Policy::NativeManifestSha256(),
+          COFCP3Policy::P2ManifestSha256(), COFCP3Policy::P2SourceCommit());
+      } else {
+        write_log(k_always_log_errors,
+          "[OpenOFC P3 FALLBACK] mode=BASELINE reason=\"policy load: %s\"\n",
+          load_error.c_str());
+      }
+    }
+    if (p3_policy_.loaded()) {
+      if (p3_policy_.Choose(
+            state, p3_history_, &action, &receipt, &error)) {
+        used_p3 = true;
+        LogP3Receipt(receipt);
+      } else {
+        write_log(k_always_log_errors,
+          "[OpenOFC P3 FALLBACK] mode=BASELINE reason=\"policy choose: %s\"\n",
+          error.c_str());
+        p3_history_.Invalidate();
+      }
+    }
+  }
+  if (!used_p3) {
+    error.clear();
+    if (!COFCBaselinePolicy::Choose(state, &action, &error)) {
+      write_log(k_always_log_errors,
+        "[DeepOFC POLICY] result=REJECTED reason=\"%s\"\n", error.c_str());
+      Block("policy refused state: " + error);
+      return false;
+    }
+    write_log(true,
+      "[OpenOFC POLICY] source=BASELINE fantasy=%d p3_available=%d\n",
+      state.players[state.hero_chair].fantasy ? 1 : 0,
+      p3_history_.valid() ? 1 : 0);
   }
   LogStrategyAction(action);
   if (!COFCTurnPlanBuilder::Build(state, action, &plan_, &error)) {
@@ -193,7 +266,9 @@ bool COFCRuntimeController::StartDecision(
     return false;
   }
   write_log(true,
-    "[DeepOFC PLAN] target=%d already_correct=%d to_add=%d unused=%d\n",
+    "[DeepOFC PLAN] source=%s target=%d already_correct=%d to_add=%d "
+    "unused=%d runtime_execution_authorized=1\n",
+    used_p3 ? "P3" : "BASELINE",
     plan_.target_count, plan_.already_correct_count,
     plan_.to_add_count, plan_.unused_count);
   bool complete = false;
@@ -209,9 +284,6 @@ bool COFCRuntimeController::StartDecision(
     Block("turn start failed: " + error);
     return false;
   }
-  // OHReplay is intentionally immutable. It is a perception/input diagnostic,
-  // not a transactional simulator. Dispatch exactly one slow physical drag so
-  // cursor motion can be observed, then stop without waiting for bitmap change.
   if (p_casino_interface != NULL
       && p_casino_interface->ConnectedToOHReplay()
       && orchestrator_.awaiting_drag_verification()) {
@@ -247,10 +319,6 @@ bool COFCRuntimeController::AdvanceArrangement(
       pending_signature_before_drag_.c_str(), drag_wait_cycles_,
       kOpenOFCDragObservationWaitCycles, drag_retry_count_);
     if (drag_wait_cycles_ < kOpenOFCDragObservationWaitCycles) return true;
-
-    // OPENOFC_DRAG_RETRY: API success is not proof that the simulator accepted
-    // the gesture. Retry the exact fixed strategic action once, then fail with
-    // a bounded durable reason instead of hanging indefinitely.
     if (drag_retry_count_ < 1) {
       ++drag_retry_count_;
       drag_wait_cycles_ = 0;
@@ -284,15 +352,12 @@ bool COFCRuntimeController::AdvanceArrangement(
 }
 
 bool COFCRuntimeController::HandlePostConfirm(const COFCState &state) {
-  // Never resend Confirm. A still-identical actionable state is simply a wait.
   if (state.round_index == confirm_before_.round_index
       && state.acting_chair == state.hero_chair
       && state.hero_can_confirm) return true;
 
   if (confirm_before_.players[confirm_before_.hero_chair].fantasy
       || confirm_before_.round_index == 4) {
-    // The supplied post-Fantasy/final-round teardown geometry is not part of
-    // the actionable scraper contract. The next known hand performs reset.
     return true;
   }
 
@@ -328,14 +393,22 @@ void COFCRuntimeController::Tick(
     write_log(true, "[DeepOFC TICK] action=NONE reason=INVALID_PERCEPTION\n");
     return;
   }
-  if (IsKnownNewHand(state)) ResetForKnownNewHand(state);
+  const bool known_new_hand = IsKnownNewHand(state);
+  if (known_new_hand) ResetForKnownNewHand(state);
   if (phase_ == kBlocked) {
     write_log(true, "[DeepOFC TICK] action=NONE reason=RUNTIME_BLOCKED\n");
     return;
   }
+  if (!known_new_hand && p3_history_.valid()) {
+    string history_error;
+    if (!p3_history_.Observe(state, &history_error)) {
+      write_log(k_always_log_errors,
+        "[OpenOFC P3 FALLBACK] mode=BASELINE reason=\"history: %s\"\n",
+        history_error.c_str());
+      p3_history_.Invalidate();
+    }
+  }
   if (phase_ == kReplayProbeComplete) {
-    // A static OHReplay can never verify a drag. One visible probe per attached
-    // replay state is sufficient; do not retry and do not call it a runtime error.
     return;
   }
   if (phase_ == kConfirmSent) {
