@@ -153,16 +153,32 @@ bool BuildRuntimeQuery(
     return false;
   }
 
+  // On KKPoker Pot Fold, foldbits2 is not guaranteed to retain every prior
+  // folder after the player's cardback disappears. playersplayingbits is the
+  // primary live-state signal: for a dealt PRIOR actor in this one-decision
+  // game, cards still present = STAY; cards gone = FOLD. foldbits2 remains a
+  // consistency check when it is present. A seat cannot be both playing and
+  // folded. Missing foldbits are logged but do not turn a valid state into MISS.
   std::uint32_t stay_mask = 0;
+  std::uint32_t inferred_fold_mask = 0;
   for (int i = 0; i < actor; ++i) {
     const unsigned int bit = 1u << order[i];
     const bool is_folded = (folded & bit) != 0;
     const bool is_playing = (playing & bit) != 0;
-    if (is_folded == is_playing) {
-      if (error) *error = "ambiguous prior FOLD/STAY scrape";
+    if (is_folded && is_playing) {
+      if (error) *error = "prior actor simultaneously playing and folded";
       return false;
     }
-    if (is_playing) stay_mask |= (1u << i);
+    if (is_playing) {
+      stay_mask |= (1u << i);
+    } else if (!is_folded) {
+      inferred_fold_mask |= (1u << i);
+    }
+  }
+  if (inferred_fold_mask != 0) {
+    WriteLog(
+        "[DeepPot] INFO prior FOLD inferred from playersplayingbits actor_mask=0x%X; foldbits2 incomplete\n",
+        inferred_fold_mask);
   }
 
   if (!ReadCard("$$pr0", "$$ps0", &(*hole)[0]) ||
