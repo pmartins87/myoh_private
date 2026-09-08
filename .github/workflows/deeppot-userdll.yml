@@ -1,0 +1,31 @@
+name: DeepPot user.dll
+
+on:
+  push:
+    branches: [deeppot_runtime_v1]
+  workflow_dispatch:
+
+jobs:
+  build-userdll:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build DeepPot user.dll Release Win32
+        shell: powershell
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE "deeppot_build\"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          msbuild "DLLs\User_DLL\user.vcxproj" /m /p:Configuration=Release /p:Platform=Win32 "/p:OutDir=$out"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path (Join-Path $out "user.dll"))) { throw "user.dll not produced" }
+          Get-FileHash (Join-Path $out "user.dll") -Algorithm SHA256
+
+      - name: Upload DeepPot user.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: deeppot-userdll-win32
+          path: deeppot_build/user.dll
