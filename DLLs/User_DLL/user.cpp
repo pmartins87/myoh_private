@@ -70,11 +70,21 @@ bool EnsureStrategyLoaded(std::string* error) {
 bool ReadCard(const char* rank_symbol, const char* suit_symbol, deeppot_runtime::Card* out) {
   const int rank = IntSymbol(rank_symbol);
   const int oh_suit = IntSymbol(suit_symbol);
-  // OpenHoldem: clubs=1, diamonds=2, hearts=3, spades=4.
-  // DeepPot:    clubs=0, diamonds=1, hearts=2, spades=3.
-  if (rank < 2 || rank > 14 || oh_suit < 1 || oh_suit > 4) return false;
+
+  // OpenHoldem exposes PokerEval/StdDeck zero-based suit values:
+  //   Hearts=0, Diamonds=1, Clubs=2, Spades=3.
+  // DeepPot uses:
+  //   Clubs=0, Diamonds=1, Hearts=2, Spades=3.
+  if (rank < 2 || rank > 14 || oh_suit < 0 || oh_suit > 3) return false;
+
+  static const int kOpenHoldemSuitToDeepPot[4] = {
+      2,  // OH Hearts   -> DeepPot Hearts
+      1,  // OH Diamonds -> DeepPot Diamonds
+      0,  // OH Clubs    -> DeepPot Clubs
+      3,  // OH Spades   -> DeepPot Spades
+  };
   out->rank = rank;
-  out->suit = oh_suit - 1;
+  out->suit = kOpenHoldemSuitToDeepPot[oh_suit];
   return true;
 }
 
@@ -119,8 +129,7 @@ bool BuildRuntimeQuery(
     return false;
   }
 
-  // Candidate live mapping to validate in shadow mode:
-  // fixed Pot Fold postflop order = dealt seats clockwise after BTN, BTN last.
+  // Fixed Pot Fold postflop order = dealt seats clockwise after BTN, BTN last.
   std::vector<int> order;
   order.reserve(n);
   for (int step = 1; step <= nchairs; ++step) {
