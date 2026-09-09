@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 path = Path("DLLs/User_DLL/deeppot_userdll_failsoft.cpp")
 text = path.read_text(encoding="utf-8")
@@ -10,40 +11,7 @@ if old_version in text:
 elif new_version not in text:
     raise SystemExit("adapter version marker not found")
 
-old = r'''void ApplyHandAnchor(
-    deeppot_runtime::LiveScrapeSnapshot* current,
-    std::vector<std::string>* reasons) {
-  if (!g_hand.have_anchor) return;
-
-  const deeppot_runtime::LiveScrapeSnapshot& a = g_hand.anchor;
-  if (current->nchairs != a.nchairs) {
-    current->nchairs = a.nchairs;
-    if (reasons) reasons->push_back("nchairs_from_hand_anchor");
-  }
-  if (current->userchair != a.userchair) {
-    current->userchair = a.userchair;
-    if (reasons) reasons->push_back("userchair_from_hand_anchor");
-  }
-  if (current->dealerchair != a.dealerchair) {
-    current->dealerchair = a.dealerchair;
-    if (reasons) reasons->push_back("dealer_from_hand_anchor");
-  }
-  const std::uint32_t anchored_dealt = a.playersdealtbits & SeatMask(a.nchairs);
-  if ((current->playersdealtbits & SeatMask(a.nchairs)) != anchored_dealt) {
-    current->playersdealtbits = anchored_dealt;
-    if (reasons) reasons->push_back("dealt_from_hand_anchor");
-  } else {
-    current->playersdealtbits = anchored_dealt;
-  }
-  const int anchored_n = BitCount(anchored_dealt);
-  if (current->nplayersdealt != anchored_n) {
-    current->nplayersdealt = anchored_n;
-    if (reasons) reasons->push_back("nplayersdealt_from_hand_anchor");
-  }
-}
-'''
-
-new = r'''void ApplyHandAnchor(
+new_function = r'''void ApplyHandAnchor(
     deeppot_runtime::LiveScrapeSnapshot* current,
     std::vector<std::string>* reasons) {
   if (!g_hand.have_anchor) return;
@@ -87,10 +55,15 @@ new = r'''void ApplyHandAnchor(
 }
 '''
 
-if old in text:
-    text = text.replace(old, new, 1)
-elif "anchor_rejected_by_live_action_evidence" not in text:
-    raise SystemExit("ApplyHandAnchor block not found")
+if "anchor_rejected_by_live_action_evidence" not in text:
+    pattern = re.compile(
+        r"void ApplyHandAnchor\(.*?\n\}\n\nvoid ObserveLifecycle\(\)",
+        flags=re.S,
+    )
+    match = pattern.search(text)
+    if not match:
+        raise SystemExit("ApplyHandAnchor block not found")
+    text = text[: match.start()] + new_function + "\nvoid ObserveLifecycle()" + text[match.end() :]
 
 path.write_text(text, encoding="utf-8")
 print("DeepPot v4 anchor evidence patch applied")
