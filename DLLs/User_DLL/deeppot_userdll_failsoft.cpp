@@ -1,5 +1,5 @@
 //******************************************************************************
-// DeepPot OpenHoldem user.dll adapter — fail-soft recovery v3
+// DeepPot OpenHoldem user.dll adapter — fail-soft recovery v5
 // Dedicated branch: deeppot_failsoft_recovery_v1
 //******************************************************************************
 
@@ -26,7 +26,7 @@ namespace {
 const int kEmergencyStayCode = 495;
 const std::size_t kMaxHandSnapshots = 32;
 const int kHandresetGraceObservations = 4;
-const char* kAdapterVersion = "failsoft-v4-anchor-evidence-20260909";
+const char* kAdapterVersion = "failsoft-v5-live-decision-geometry-20260909";
 
 HMODULE g_module = NULL;
 deeppot_runtime::Strategy g_strategy;
@@ -259,13 +259,44 @@ void RememberSnapshot(const deeppot_runtime::LiveScrapeSnapshot& s) {
   }
 }
 
+bool StrongLiveDecisionGeometry(const deeppot_runtime::LiveScrapeSnapshot& s) {
+  if (!CoherentAnchorSnapshot(s)) return false;
+  const std::uint32_t seat_mask = SeatMask(s.nchairs);
+  const std::uint32_t dealt = s.playersdealtbits & seat_mask;
+  const std::uint32_t playing = s.playersplayingbits & seat_mask;
+  const std::uint32_t folded = s.foldbits2 & seat_mask;
+  const std::uint32_t hero_bit = static_cast<std::uint32_t>(1) << s.userchair;
+  if ((playing & ~dealt) != 0 || (folded & ~dealt) != 0) return false;
+  if ((playing & folded) != 0) return false;
+  if ((playing | folded) != dealt) return false;
+  if ((playing & hero_bit) == 0 || (folded & hero_bit) != 0) return false;
+  return true;
+}
+
 void ApplyHandAnchor(
     deeppot_runtime::LiveScrapeSnapshot* current,
-    std::vector<std::string>* reasons) {
+    std::vector<std::string>* reasons,
+    bool prefer_current_geometry) {
   if (!g_hand.have_anchor) return;
 
   const deeppot_runtime::LiveScrapeSnapshot& a = g_hand.anchor;
   const std::uint32_t anchored_dealt = a.playersdealtbits & SeatMask(a.nchairs);
+
+  // v5: a complete decision-time public snapshot paired with live exact cards
+  // outranks an older anchor. The anchor remains recovery evidence only.
+  if (prefer_current_geometry && StrongLiveDecisionGeometry(*current)) {
+    const std::uint32_t current_dealt = current->playersdealtbits & SeatMask(current->nchairs);
+    const bool differs_from_anchor =
+        current->nchairs != a.nchairs ||
+        current->userchair != a.userchair ||
+        current->dealerchair != a.dealerchair ||
+        current_dealt != anchored_dealt ||
+        current->nplayersdealt != BitCount(anchored_dealt);
+    if (differs_from_anchor && reasons) {
+      reasons->push_back("live_decision_geometry_preferred_over_anchor");
+    }
+    return;
+  }
 
   // v4 live-safety rule: if current playing/fold evidence contains a seat that
   // the old frozen anchor says was never dealt, the anchor is incomplete/stale
@@ -342,7 +373,7 @@ void CaptureLiveObservation() {
   }
   SetHandAnchorIfMissing(raw);
   deeppot_runtime::LiveScrapeSnapshot historical = raw;
-  ApplyHandAnchor(&historical, NULL);
+  ApplyHandAnchor(&historical, NULL, false);
   RememberSnapshot(historical);
   if (g_hand.pending_handreset_observations > 0) {
     --g_hand.pending_handreset_observations;
@@ -373,7 +404,7 @@ bool GetDecisionCards(
       g_hand.have_cards = true;
       SetHandAnchorIfMissing(raw);
       deeppot_runtime::LiveScrapeSnapshot historical = raw;
-      ApplyHandAnchor(&historical, NULL);
+      ApplyHandAnchor(&historical, NULL, false);
       RememberSnapshot(historical);
       *flop = live_flop;
       *hole = live_hole;
@@ -392,8 +423,9 @@ bool GetDecisionCards(
 
 bool NormalizeSnapshotForRecovery(
     deeppot_runtime::LiveScrapeSnapshot* current,
-    std::vector<std::string>* reasons) {
-  ApplyHandAnchor(current, reasons);
+    std::vector<std::string>* reasons,
+    bool prefer_current_geometry) {
+  ApplyHandAnchor(current, reasons, prefer_current_geometry);
   if (current->nchairs < 2 || current->nchairs > 10) {
     bool restored = false;
     for (std::vector<deeppot_runtime::LiveScrapeSnapshot>::const_reverse_iterator it =
@@ -549,7 +581,7 @@ int DeepPotAction() {
   }
   deeppot_runtime::LiveScrapeSnapshot current = ReadRawSnapshot();
   std::vector<std::string> normalization_reasons;
-  const bool normalized = NormalizeSnapshotForRecovery(&current, &normalization_reasons);
+  const bool normalized = NormalizeSnapshotForRecovery(&current, &normalization_reasons, !cards_from_cache);
 
   if (normalized) {
     int n = 0;
