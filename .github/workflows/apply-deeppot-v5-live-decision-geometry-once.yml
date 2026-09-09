@@ -1,0 +1,58 @@
+name: Apply DeepPot v5 live decision geometry once
+
+on:
+  push:
+    branches:
+      - deeppot_failsoft_recovery_v1
+    paths:
+      - tools/apply_deeppot_v5_live_decision_geometry_once.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: deeppot_failsoft_recovery_v1
+          fetch-depth: 0
+      - name: Apply v5 adapter patch
+        run: python tools/apply_deeppot_v5_live_decision_geometry_once.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add DLLs/User_DLL/deeppot_userdll_failsoft.cpp
+          git commit -m "Prefer coherent live DeepPot geometry over stale anchor in v5"
+          git push origin HEAD:deeppot_failsoft_recovery_v1
+
+  build-userdll:
+    needs: patch
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: deeppot_failsoft_recovery_v1
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+      - name: Build DeepPot user.dll Release Win32
+        shell: powershell
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE "deeppot_build\"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          msbuild "DLLs\User_DLL\user.vcxproj" /m /p:Configuration=Release /p:Platform=Win32 "/p:OutDir=$out"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path (Join-Path $out "user.dll"))) { throw "user.dll not produced" }
+          Get-FileHash (Join-Path $out "user.dll") -Algorithm SHA256
+      - name: Upload DeepPot v5 user.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: deeppot-userdll-win32-v5
+          path: deeppot_build/user.dll
