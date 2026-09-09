@@ -151,7 +151,7 @@
     <ClCompile Include="deeppot_runtime_core.cpp" />
     <ClCompile Include="deeppot_live_recovery.cpp" />
     <ClCompile Include="OpenHoldemFunctions.cpp" />
-    <ClCompile Include="user.cpp">
+    <ClCompile Include="deeppot_userdll_failsoft.cpp">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
