@@ -1,0 +1,34 @@
+name: Apply DeepPot v4 anchor fix once
+
+on:
+  push:
+    branches:
+      - deeppot_failsoft_recovery_v1
+    paths:
+      - tools/apply_deeppot_v4_anchor_fix_once.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: deeppot_failsoft_recovery_v1
+          fetch-depth: 0
+      - name: Apply focused adapter patch
+        run: python tools/apply_deeppot_v4_anchor_fix_once.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add DLLs/User_DLL/deeppot_userdll_failsoft.cpp
+          git commit -m "Fix stale DeepPot hand anchor poisoning in v4"
+          git push origin HEAD:deeppot_failsoft_recovery_v1
