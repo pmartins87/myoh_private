@@ -149,6 +149,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="deeppot_runtime_core.cpp" />
+    <ClCompile Include="deeppot_live_recovery.cpp" />
     <ClCompile Include="OpenHoldemFunctions.cpp" />
     <ClCompile Include="user.cpp">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -157,6 +158,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="deeppot_runtime_core.h" />
+    <ClInclude Include="deeppot_live_recovery.h" />
     <ClInclude Include="OpenHoldemFunctions.h" />
     <ClInclude Include="user.h" />
   </ItemGroup>
