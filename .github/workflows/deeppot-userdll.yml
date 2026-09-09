@@ -2,6 +2,8 @@ name: DeepPot user.dll
 
 on:
   push:
+    branches: [deeppot_runtime_v1, deeppot_failsoft_recovery_v1]
+  pull_request:
     branches: [deeppot_runtime_v1]
   workflow_dispatch:
 
