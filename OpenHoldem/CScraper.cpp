@@ -106,6 +106,13 @@ bool CScraper::ProcessRegion(RMapCI r_iter) {
 
   old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.cur_bmp);
 
+  static bool live_card_capture_logged = false;
+  if (live_hero_card_region && !live_card_capture_logged) {
+    write_log(k_always_log_errors,
+      "[AOF-CARD-CAPTURE] live desktop hero-card capture enabled.\n");
+    live_card_capture_logged = true;
+  }
+
   if (live_hero_card_region) {
     HDC hdcDesktop = GetDC(NULL);
     POINT pt = { r_iter->second.left, r_iter->second.top };
