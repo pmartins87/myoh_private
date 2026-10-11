@@ -156,6 +156,50 @@ bool CScraper::ProcessRegion(RMapCI r_iter) {
   return false;
 }
 
+bool CScraper::EvaluateRegion(CString name, CString *result) {
+  __HDC_HEADER
+  write_log(Preferences()->debug_scraper(),
+    "[CScraper] EvaluateRegion %s\n", name);
+  CTransform trans;
+  RMapCI r_iter = p_tablemap->r$()->find(name.GetString());
+  if (r_iter != p_tablemap->r$()->end()) {
+    // Potential for optimization here
+    ++total_region_counter;
+    if (ProcessRegion(r_iter)) {
+      ++identical_region_counter;
+      write_log(Preferences()->debug_scraper(),
+        "[CScraper] Region %s identical\n", name);
+    } else {
+      write_log(Preferences()->debug_scraper(),
+        "[CScraper] Region %s NOT identical\n", name);
+    }
+    old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.cur_bmp);
+    if (r_iter->second.transform[0] == 'A') {
+      int w = r_iter->second.right - r_iter->second.left + 1;
+      int h = r_iter->second.bottom - r_iter->second.top + 1;
+      Mat input(h, w, CV_8UC4);
+      BITMAPINFOHEADER bi = { sizeof(bi), w, -h, 1, 32, BI_RGB };
+      GetDIBits(hdc, r_iter->second.cur_bmp, 0, h, input.data, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+      *result = p_auto_ocr->get_ocr_result(input, r_iter).GetString();
+    }
+    else {
+      trans.DoTransform(r_iter, hdcCompatible, result);
+    }
+    SelectObject(hdcCompatible, old_bitmap);
+    write_log(Preferences()->debug_scraper(), "[CScraper] EvaluateRegion(), [%s] -> [%s]\n",
+      name, *result);
+    __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
+    return true;
+  }
+  // Region does not exist
+  *result = "";
+  __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
+  return false;
+}
+
+// Result will be changed to true, if "true" or something similar is found
+// Result will be changed to falsee, if "false" or something similar is found
+// Otherwise unchanged (keep default / allow multiple evaluations)
 void CScraper::EvaluateTrueFalseRegion(bool *result, const CString name) {
   CString text_result;
 	if (EvaluateRegion(name, &text_result))	{
