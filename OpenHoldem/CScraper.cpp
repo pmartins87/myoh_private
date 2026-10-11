@@ -87,109 +87,68 @@ bool CScraper::ProcessRegion(RMapCI r_iter) {
     "[CScraper] ProcessRegion %s (%i, %i, %i, %i)\n",
     r_iter->first, r_iter->second.left, r_iter->second.top,
     r_iter->second.right, r_iter->second.bottom);
-  
-  // Mantemos o Header original para compatibilidade das variaveis
+
   __HDC_HEADER
 
-  // --- INICIO DA CORRECAO ---
-  // Em vez de copiar do 'hdc' (que esta conectado na janela congelada),
-  // vamos copiar do '_entire_window_cur' (que contem a imagem atualizada pelo PrintWindow).
-  
-  // 1. Criar um DC temporario para ler nossa imagem da memoria
-  HDC hdcSource = CreateCompatibleDC(hdcScreen);
-  
-  // 2. Selecionar a imagem 'Master' (Panoramica) que ja foi atualizada pelo IsIdenticalScrape
-  HBITMAP old_source_bmp = (HBITMAP) SelectObject(hdcSource, _entire_window_cur);
+  const int region_width = r_iter->second.right - r_iter->second.left + 1;
+  const int region_height = r_iter->second.bottom - r_iter->second.top + 1;
+  const CString region_name = r_iter->first;
 
-  // 3. Selecionar o bitmap de destino (o pedacinho que queremos criar)
+  // KKPoker/AOF low-latency card capture:
+  // PrintWindow can return success while still exposing stale GPU-composited
+  // hero-card pixels for several seconds.  Only the fixed hero seat (p1)
+  // card regions are therefore read from the actually visible desktop.
+  // All other regions keep the existing PrintWindow-backed capture path.
+  const bool live_hero_card_region =
+      (region_name.Left(2).CompareNoCase("p1") == 0)
+      && ((region_name.Find("cardface") >= 0)
+          || (region_name.Find("cardback") >= 0));
+
   old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.cur_bmp);
 
-  // 4. Copiar da FONTE DE MEMORIA (hdcSource) em vez da JANELA (hdc)
-  BitBlt(hdcCompatible, 0, 0, r_iter->second.right - r_iter->second.left + 1, 
-                r_iter->second.bottom - r_iter->second.top + 1, 
-                hdcSource, // <--- MUDANCA AQUI: Usamos hdcSource em vez de hdc
-                r_iter->second.left, r_iter->second.top, SRCCOPY);
+  if (live_hero_card_region) {
+    HDC hdcDesktop = GetDC(NULL);
+    POINT pt = { r_iter->second.left, r_iter->second.top };
+    ClientToScreen(p_autoconnector->attached_hwnd(), &pt);
+    BitBlt(hdcCompatible, 0, 0, region_width, region_height,
+      hdcDesktop, pt.x, pt.y, SRCCOPY | CAPTUREBLT);
+    ReleaseDC(NULL, hdcDesktop);
+  }
+  else {
+    HDC hdcSource = CreateCompatibleDC(hdcScreen);
+    HBITMAP old_source_bmp =
+      (HBITMAP) SelectObject(hdcSource, _entire_window_cur);
+    BitBlt(hdcCompatible, 0, 0, region_width, region_height,
+      hdcSource, r_iter->second.left, r_iter->second.top, SRCCOPY);
+    SelectObject(hdcSource, old_source_bmp);
+    DeleteDC(hdcSource);
+  }
 
-  // Limpeza da fonte
-  SelectObject(hdcSource, old_source_bmp);
-  DeleteDC(hdcSource); // Importante deletar para nao vazar memoria
-  
-  // Restaurar objeto antigo do destino
   SelectObject(hdcCompatible, old_bitmap);
-  // --- FIM DA CORRECAO ---
 
-  // Se os bitmaps forem diferentes, entao continua (Logica original mantida, mas ajustada)
   if (!BitmapsAreEqual(r_iter->second.last_bmp, r_iter->second.cur_bmp)) {
-    
-    // Atualizar o "last" bitmap tambem usando a fonte de memoria
-    HDC hdcSourceLast = CreateCompatibleDC(hdcScreen);
-    HBITMAP old_source_bmp_last = (HBITMAP) SelectObject(hdcSourceLast, _entire_window_cur);
+    // Copy exactly the just-scraped pixels to last_bmp.
+    // Do not recapture the target a second time inside the same region pass.
+    HDC hdcCur = CreateCompatibleDC(hdcScreen);
+    HBITMAP old_cur_bmp =
+      (HBITMAP) SelectObject(hdcCur, r_iter->second.cur_bmp);
 
     old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.last_bmp);
-    
-    BitBlt(hdcCompatible, 0, 0, r_iter->second.right - r_iter->second.left + 1,
-      r_iter->second.bottom - r_iter->second.top + 1,
-      hdcSourceLast, // <--- Usando a memoria aqui tambem
-      r_iter->second.left, r_iter->second.top, SRCCOPY);
-    
-    SelectObject(hdcSourceLast, old_source_bmp_last);
-    DeleteDC(hdcSourceLast);
+    BitBlt(hdcCompatible, 0, 0, region_width, region_height,
+      hdcCur, 0, 0, SRCCOPY);
+    SelectObject(hdcCompatible, old_bitmap);
 
-    SelectObject(hdcCompatible, old_bitmap);  
-    
+    SelectObject(hdcCur, old_cur_bmp);
+    DeleteDC(hdcCur);
+
     __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
     return true;
   }
-  
+
   __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
   return false;
 }
 
-bool CScraper::EvaluateRegion(CString name, CString *result) {
-  __HDC_HEADER
-  write_log(Preferences()->debug_scraper(),
-    "[CScraper] EvaluateRegion %s\n", name);
-	CTransform	trans;
-	RMapCI		r_iter = p_tablemap->r$()->find(name.GetString());
-	if (r_iter != p_tablemap->r$()->end()) {
-    // Potential for optimization here
-    ++total_region_counter;
-		if (ProcessRegion(r_iter)) {
-      ++identical_region_counter;
-      write_log(Preferences()->debug_scraper(),
-        "[CScraper] Region %s identical\n", name);
-    } else {
-      write_log(Preferences()->debug_scraper(),
-        "[CScraper] Region %s NOT identical\n", name);
-    }
-		old_bitmap = (HBITMAP) SelectObject(hdcCompatible, r_iter->second.cur_bmp);
-		if (r_iter->second.transform[0] == 'A') {
-			int w = r_iter->second.right - r_iter->second.left + 1;
-			int h = r_iter->second.bottom - r_iter->second.top + 1;
-			Mat input(h, w, CV_8UC4);
-			BITMAPINFOHEADER bi = { sizeof(bi), w, -h, 1, 32, BI_RGB };
-			GetDIBits(hdc, r_iter->second.cur_bmp, 0, h, input.data, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
-			//imshow("Output", input);
-			//waitKey();
-			*result = p_auto_ocr->get_ocr_result(input, r_iter).GetString();
-		}
-		else
-			trans.DoTransform(r_iter, hdcCompatible, result);
-		SelectObject(hdcCompatible, old_bitmap);
-		write_log(Preferences()->debug_scraper(), "[CScraper] EvaluateRegion(), [%s] -> [%s]\n", 
-			name, *result);
-    __HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
-		return true;
-	}
-	// Region does not exist
-  *result = "";
-	__HDC_FOOTER_ATTENTION_HAS_TO_BE_CALLED_ON_EVERY_FUNCTION_EXIT_OTHERWISE_MEMORY_LEAK
-	return false;
-}
-
-// Result will be changed to true, if "true" or something similar is found
-// Result will be changed to falsee, if "false" or something similar is found
-// Otherwise unchanged (keep default / allow multiple evaluations)
 void CScraper::EvaluateTrueFalseRegion(bool *result, const CString name) {
   CString text_result;
 	if (EvaluateRegion(name, &text_result))	{
